@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local runtimes
+.venv/
+.uv/
+ENV/
+.env
+.env.*
+
+# Node / Electron
+app/node_modules/
+app/dist/
+app/dist-electron/
+app/release/
+node_modules/
+dist/
+
+# Local app data
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+scene_scout_config.json
+exports/
+proxies/
+models/
+.cache/
+temp/
+.tmp*/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.lnk
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.claude/
+
+# Keep source-tree JSON files that are part of the build.
+!app/package.json
+!app/package-lock.json
+!app/tsconfig.json
+!app/tsconfig.electron.json
+!app/tsconfig.node.json

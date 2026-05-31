@@ -1,0 +1,79 @@
+{
+  "name": "amv-tools",
+  "private": true,
+  "version": "0.1.0-alpha",
+  "description": "Local desktop app for anime scene search, trimming, and alpha export workflows.",
+  "author": "AMV Tools contributors",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "node scripts/dev-electron.cjs",
+    "dev:electron:static": "npm run build && electron .",
+    "build:main": "tsc -p tsconfig.electron.json && node scripts/write-electron-package.cjs",
+    "build": "tsc --noEmit && vite build && npm run build:main",
+    "build:electron": "electron-builder",
+    "build:electron:unsigned": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "0.487.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.12",
+    "@types/node": "22.10.5",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.7.0",
+    "cross-env": "7.0.3",
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8",
+    "tailwindcss": "4.1.12",
+    "tw-animate-css": "1.3.8",
+    "typescript": "5.7.3",
+    "vite": "6.3.5"
+  },
+  "build": {
+    "appId": "com.amvtools.app",
+    "productName": "AMV Tools",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "../.uv/uv.exe",
+        "to": ".uv/uv.exe"
+      },
+      {
+        "from": "../pyproject.toml",
+        "to": "pyproject.toml"
+      },
+      {
+        "from": "../uv.lock",
+        "to": "uv.lock"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "../assets/logo/amv-tools-logo.ico"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
