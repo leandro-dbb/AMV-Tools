@@ -1,22 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, Database, Zap, Square } from 'lucide-react';
 import SearchTab from './components/SearchTab';
 import TagsTab from './components/TagsTab';
+import DerushTab from './components/DerushTab';
+import LibraryTab from './components/LibraryTab';
 import SettingsTab from './components/SettingsTab';
 import MiniEditor from './components/MiniEditor';
 import OnboardingScreen from './components/OnboardingScreen';
 import BootstrapScreen from './components/BootstrapScreen';
 import TutorialOverlay from './components/TutorialOverlay';
 import { api } from './api/client';
+import { useT } from './i18n';
+import type { TFunc } from './i18n';
 import type { AppSettings, ProgressEvent, SceneResult, SystemStatus } from './api/types';
 
-type Tab = 'search' | 'tags' | 'settings';
+type Tab = 'library' | 'search' | 'tags' | 'derush' | 'settings';
 
 interface BootstrapLine { line: string; stream: 'stdout' | 'stderr' }
 
 const TUTORIAL_KEY = 'amv-tutorial-shown';
 
 export default function App() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<Tab>('search');
   const [editor, setEditor] = useState<{ scenes: SceneResult[]; index: number } | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -31,6 +36,7 @@ export default function App() {
   });
   const [bootstrapLines, setBootstrapLines] = useState<BootstrapLine[]>([]);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const checkedEmptyRef = useRef(false);
 
   // Wire the IPC bridge that streams sidecar stdout/stderr until the backend
   // port is open, then flip into the regular status-polling flow.
@@ -118,12 +124,17 @@ export default function App() {
     }
   }, [status?.ready]);
 
-  // Indexed count tracker
+  // Indexed count tracker. On the very first check, an empty library sends
+  // newcomers straight to the Library tab where the import flow lives.
   useEffect(() => {
     if (!status?.ready) return;
     api.listVideos().then((r) => {
       const total = r.videos.reduce((acc, v) => acc + (v.scene_count || 0), 0);
       setIndexedCount(total);
+      if (!checkedEmptyRef.current) {
+        checkedEmptyRef.current = true;
+        if (r.videos.length === 0) setActiveTab('library');
+      }
     }).catch(() => {});
   }, [status?.ready, progress?.type, progress?.percent]);
 
@@ -135,8 +146,8 @@ export default function App() {
     return (
       <div className="w-screen h-screen bg-[#0F0F11] flex items-center justify-center text-[#FAFAFA]">
         <div className="max-w-md text-center">
-          <div className="text-2xl font-semibold mb-3">Backend unreachable</div>
-          <div className="text-[#A1A1AA] text-sm">The Python sidecar didn't respond. If you launched the app outside Electron, start the backend manually:</div>
+          <div className="text-2xl font-semibold mb-3">{t('app.unreachable.title')}</div>
+          <div className="text-[#A1A1AA] text-sm">{t('app.unreachable.body')}</div>
           <pre className="mt-4 bg-[#18181B] border border-[#27272A] p-3 rounded-lg text-xs text-left text-[#A1A1AA]">uv run --extra cu130 backend/server.py --port 8731</pre>
         </div>
       </div>
@@ -161,21 +172,23 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-xl font-bold bg-gradient-to-r from-[#FAFAFA] to-[#A1A1AA] bg-clip-text text-transparent">AMV Tools</h1>
-            <div className="text-[#71717A] text-xs uppercase tracking-wider">Semantic Scene Browser</div>
+            <div className="text-[#71717A] text-xs uppercase tracking-wider">{t('app.header.subtitle')}</div>
           </div>
         </div>
-        <button onClick={() => setActiveTab('settings')} className="flex items-center gap-2 bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] hover:border-[#8B5CF6]/50 px-4 py-2 rounded-xl text-sm transition-all">
+        <button onClick={() => setActiveTab('library')} className="flex items-center gap-2 bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] hover:border-[#8B5CF6]/50 px-4 py-2 rounded-xl text-sm transition-all">
           <Database size={14} className="text-[#8B5CF6]" />
-          <span className="font-medium truncate max-w-[280px]">{currentDbName(settings)}</span>
+          <span className="font-medium truncate max-w-[280px]">{currentDbName(settings, t)}</span>
           <ChevronDown size={16} className="text-[#71717A]" />
         </button>
       </div>
 
       <div className="bg-[#18181B]/50 backdrop-blur-sm border-b-2 border-[#27272A] flex gap-1 px-3 py-2">
         {([
-          { id: 'search', label: 'Search', color: 'from-[#8B5CF6] to-[#EC4899]' },
-          { id: 'tags', label: 'Tags', color: 'from-[#EC4899] to-[#8B5CF6]' },
-          { id: 'settings', label: 'Settings', color: 'from-[#8B5CF6] to-[#6366F1]' },
+          { id: 'library', label: t('app.tab.library'), color: 'from-[#F59E0B] to-[#EC4899]' },
+          { id: 'search', label: t('app.tab.search'), color: 'from-[#8B5CF6] to-[#EC4899]' },
+          { id: 'tags', label: t('app.tab.tags'), color: 'from-[#EC4899] to-[#8B5CF6]' },
+          { id: 'derush', label: t('app.tab.derush'), color: 'from-[#EC4899] to-[#F59E0B]' },
+          { id: 'settings', label: t('app.tab.settings'), color: 'from-[#8B5CF6] to-[#6366F1]' },
         ] as { id: Tab; label: string; color: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`relative px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === tab.id ? 'text-[#FAFAFA]' : 'text-[#71717A] hover:text-[#A1A1AA] hover:bg-[#27272A]'}`}>
             {activeTab === tab.id && (
@@ -190,13 +203,17 @@ export default function App() {
       </div>
 
       <div className="flex-1 overflow-hidden relative">
+        {activeTab === 'library' && <LibraryTab />}
         {activeTab === 'search' && (
           <SearchTab hoverDelayMs={hoverDelay} onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
         )}
         {activeTab === 'tags' && (
           <TagsTab hoverDelayMs={hoverDelay} onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
         )}
-        {activeTab === 'settings' && <SettingsTab runtimeDevice={status?.device} />}
+        {activeTab === 'derush' && (
+          <DerushTab onOpenScene={(list, idx) => setEditor({ scenes: list, index: idx })} />
+        )}
+        {activeTab === 'settings' && <SettingsTab runtimeDevice={status?.device} gpuName={status?.gpu_name} vramGb={status?.vram_gb ?? null} />}
       </div>
 
       <StatusBar
@@ -221,10 +238,10 @@ export default function App() {
   );
 }
 
-function currentDbName(settings: AppSettings | null): string {
-  if (!settings) return 'No library';
+function currentDbName(settings: AppSettings | null, t: TFunc): string {
+  if (!settings) return t('app.header.noLibrary');
   const p = settings.databases.primary;
-  if (!p) return 'No library';
+  if (!p) return t('app.header.noLibrary');
   const seg = p.split(/[\\/]/).pop() || p;
   return seg.replace(/\.(db|sqlite|sqlite3)$/i, '');
 }
@@ -242,6 +259,7 @@ function StatusBar({
   taggerProvider: string | null;
   warnings: string[];
 }) {
+  const t = useT();
   const isIndexing = progress?.type === 'indexing';
   const isProxy = progress?.type === 'proxy';
   const percent = progress?.percent ?? (progress?.current && progress?.total ? Math.round((progress.current / progress.total) * 100) : 0);
@@ -255,38 +273,38 @@ function StatusBar({
                 <div className="w-3 h-3 bg-[#8B5CF6] rounded-full animate-pulse shadow-lg shadow-[#8B5CF6]/50"></div>
                 <div className="absolute inset-0 w-3 h-3 bg-[#8B5CF6] rounded-full animate-ping opacity-75"></div>
               </div>
-              <span className="text-[#A1A1AA]">Indexing</span>
+              <span className="text-[#A1A1AA]">{t('app.statusbar.indexing')}</span>
               <span className="text-[#FAFAFA] font-semibold truncate max-w-[280px]">{progress?.video ?? '...'}</span>
               <div className="w-32 h-1.5 bg-[#27272A] rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] rounded-full transition-all" style={{ width: `${percent}%` }}></div>
               </div>
               <span className="text-[#8B5CF6] font-mono font-bold text-xs">{percent}%</span>
-              <button onClick={() => api.stopIndexing()} title="Stop indexing" className="ml-2 p-1 rounded-md text-[#71717A] hover:text-red-400 hover:bg-[#27272A]">
+              <button onClick={() => api.stopIndexing()} title={t('app.statusbar.stopIndexing')} className="ml-2 p-1 rounded-md text-[#71717A] hover:text-red-400 hover:bg-[#27272A]">
                 <Square size={12} fill="currentColor" />
               </button>
             </>
           ) : isProxy ? (
             <>
               <div className="w-3 h-3 bg-[#EC4899] rounded-full animate-pulse"></div>
-              <span className="text-[#A1A1AA]">Generating proxies</span>
+              <span className="text-[#A1A1AA]">{t('app.statusbar.generatingProxies')}</span>
               <span className="text-[#EC4899] font-mono font-bold text-xs">{percent}%</span>
             </>
           ) : (
             <>
               <div className="w-3 h-3 bg-[#27272A] rounded-full"></div>
-              <span className="text-[#71717A]">Idle</span>
+              <span className="text-[#71717A]">{t('app.statusbar.idle')}</span>
             </>
           )}
         </div>
         <div className="flex items-center gap-6 text-[#71717A]">
           <div className="flex items-center gap-2">
             <Zap size={14} className="text-[#EC4899]" />
-            <span className="text-[#A1A1AA]">Device:</span>
+            <span className="text-[#A1A1AA]">{t('app.statusbar.device')}</span>
             <span className="text-[#FAFAFA] font-mono font-medium text-xs truncate max-w-[200px]">{device}</span>
           </div>
           {taggerProvider && (
             <div className="flex items-center gap-2">
-              <span className="text-[#A1A1AA]">Tagger:</span>
+              <span className="text-[#A1A1AA]">{t('app.statusbar.tagger')}</span>
               <span className="text-[#FAFAFA] font-mono font-medium text-xs truncate max-w-[180px]">{taggerProvider.replace('ExecutionProvider', '')}</span>
             </div>
           )}
@@ -298,7 +316,7 @@ function StatusBar({
           )}
           <div className="w-px h-4 bg-[#27272A]"></div>
           <div className="flex items-center gap-2">
-            <span className="text-[#A1A1AA]">Indexed scenes:</span>
+            <span className="text-[#A1A1AA]">{t('app.statusbar.indexedScenes')}</span>
             <span className="text-[#FAFAFA] font-mono font-bold">{indexedCount.toLocaleString()}</span>
           </div>
         </div>

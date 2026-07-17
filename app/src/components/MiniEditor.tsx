@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, ChevronDown, Play, Pause, Download, Plus, X,
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { AppSettings, SceneResult, TagSummary, VideoSummary } from '../api/types';
+import { useT } from '../i18n';
 import MaskMode from './MaskMode';
 
 interface MiniEditorProps {
@@ -16,6 +17,7 @@ interface MiniEditorProps {
 const PADDING_MS = 3000;
 
 export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onClose, queryLabel }: MiniEditorProps) {
+  const t = useT();
   const scene = scenes[index];
   const [trimStart, setTrimStart] = useState(scene.start_ms);
   const [trimEnd, setTrimEnd] = useState(scene.end_ms);
@@ -108,7 +110,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
           .then(() => setPlaying(true))
           .catch((err) => {
             console.error('Playback failed:', err);
-            setPlaybackError(`Lecture impossible: ${err?.message || err}`);
+            setPlaybackError(t('editor.playbackFailed', { message: String(err?.message || err) }));
             setPlaying(false);
           });
       } else {
@@ -118,7 +120,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
       v.pause();
       setPlaying(false);
     }
-  }, []);
+  }, [t]);
 
   // Keyboard scrubbing J / K / L + arrows
   useEffect(() => {
@@ -282,7 +284,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
           <div className="flex items-center gap-3 min-w-0">
             {queryLabel && (
               <>
-                <span className="text-[#71717A] text-sm uppercase tracking-wider whitespace-nowrap">Query</span>
+                <span className="text-[#71717A] text-sm uppercase tracking-wider whitespace-nowrap">{t('editor.query')}</span>
                 <ChevronRight size={14} className="text-[#8B5CF6]" />
                 <span className="text-[#A1A1AA] text-sm font-mono bg-[#27272A] px-3 py-1.5 rounded-lg truncate max-w-[200px]">{queryLabel}</span>
                 <ChevronRight size={14} className="text-[#71717A]" />
@@ -301,7 +303,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                 <div className="relative">
                   <select value={activeTag} onChange={(e) => { setActiveTag(e.target.value); jumpTo(scene.video_id, e.target.value); }}
                           className="bg-[#0F0F11] border-2 border-[#EC4899]/30 hover:border-[#EC4899] rounded-lg pl-4 pr-9 py-2 text-[#FAFAFA] text-sm appearance-none cursor-pointer">
-                    {tagsInVideo.length === 0 && <option value="">(no tags)</option>}
+                    {tagsInVideo.length === 0 && <option value="">{t('editor.noTags')}</option>}
                     {tagsInVideo.map((t) => <option key={t.tag} value={t.tag}>{t.tag} ({t.count})</option>)}
                   </select>
                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-[#EC4899] pointer-events-none" size={14} />
@@ -312,17 +314,17 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
               <>
                 <div className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-4 py-2 text-[#FAFAFA] text-sm max-w-[300px] truncate">{scene.video_display}</div>
                 <ChevronRight size={14} className="text-[#EC4899]" />
-                <div className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-4 py-2 text-[#FAFAFA] text-sm">{scene.tags.slice(0, 2).join(', ') || 'untagged'}</div>
+                <div className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-4 py-2 text-[#FAFAFA] text-sm">{scene.tags.slice(0, 2).join(', ') || t('editor.untagged')}</div>
               </>
             )}
             <ChevronRight size={14} className="text-[#71717A]" />
             <span className="text-[#A1A1AA] text-sm font-mono bg-[#27272A] px-3 py-1.5 rounded-lg whitespace-nowrap">{index + 1} / {scenes.length}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button disabled={index === 0} onClick={() => onIndexChange(index - 1)} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group disabled:opacity-30" title="Prev occurrence (←)">
+            <button disabled={index === 0} onClick={() => onIndexChange(index - 1)} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group disabled:opacity-30" title={t('editor.prevOccurrence')}>
               <ChevronLeft size={20} className="text-[#A1A1AA] group-hover:text-[#8B5CF6]" />
             </button>
-            <button disabled={index >= scenes.length - 1} onClick={() => onIndexChange(index + 1)} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group disabled:opacity-30" title="Next occurrence (→)">
+            <button disabled={index >= scenes.length - 1} onClick={() => onIndexChange(index + 1)} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group disabled:opacity-30" title={t('editor.nextOccurrence')}>
               <ChevronRight size={20} className="text-[#A1A1AA] group-hover:text-[#8B5CF6]" />
             </button>
             {/* Mask toggle — only visible if the feature is enabled in Settings.
@@ -336,10 +338,10 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                     ? 'ml-3 px-5 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white shadow-lg shadow-[#A855F7]/50'
                     : 'ml-3 px-5 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] border-2 border-[#A855F7]/40 hover:border-[#A855F7]'
                 }
-                title={maskOpen ? 'Close mask mode' : 'Open mask mode (click→mask, alpha export)'}
+                title={maskOpen ? t('editor.maskCloseTitle') : t('editor.maskOpenTitle')}
               >
                 <Sparkles size={16} />
-                Mask
+                {t('editor.mask')}
               </button>
             )}
             {/* Export button lives in the header so it stays visible regardless
@@ -348,10 +350,10 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
               disabled={exporting}
               onClick={doExport}
               className="ml-3 bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-5 py-2.5 rounded-xl text-sm font-semibold hover:shadow-xl hover:shadow-[#8B5CF6]/50 transition-all flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
-              title={`Export ${((trimEnd - trimStart) / 1000).toFixed(2)}s clip via ffmpeg`}
+              title={t('editor.exportTitle', { seconds: ((trimEnd - trimStart) / 1000).toFixed(2) })}
             >
               {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-              {exporting ? 'Exporting…' : `Export ${((trimEnd - trimStart) / 1000).toFixed(1)}s`}
+              {exporting ? t('editor.exporting') : t('editor.exportBtn', { seconds: ((trimEnd - trimStart) / 1000).toFixed(1) })}
             </button>
             <button onClick={onClose} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group ml-2">
               <X size={20} className="text-[#A1A1AA] group-hover:text-[#EC4899]" />
@@ -381,8 +383,8 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                 onError={(e) => {
                   const err = e.currentTarget.error;
                   const msg = err
-                    ? `Code ${err.code}: ${err.message || 'codec unsupported or source unreachable'}`
-                    : 'unknown video error';
+                    ? t('editor.videoErrorCode', { code: err.code, message: err.message || t('editor.codecUnsupported') })
+                    : t('editor.unknownVideoError');
                   setPlaybackError(msg);
                 }}
                 className="w-full h-full cursor-pointer"
@@ -391,10 +393,10 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
               {playbackError && (
                 <div className="absolute inset-0 bg-black/70 flex items-center justify-center pointer-events-none">
                   <div className="text-center text-[#A1A1AA] text-sm max-w-md px-6">
-                    <div className="text-red-400 font-semibold mb-2">Playback error</div>
+                    <div className="text-red-400 font-semibold mb-2">{t('editor.playbackError')}</div>
                     <div className="font-mono text-xs">{playbackError}</div>
                     <div className="text-[#71717A] mt-3">
-                      Tip: Settings → Indexing → Generate proxies = ON for unsupported codecs.
+                      {t('editor.playbackTip')}
                     </div>
                   </div>
                 </div>
@@ -430,13 +432,13 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                  style={{
                    left: `${((proxyStart - windowStart) / windowDuration) * 100}%`,
                    width: `${((proxyEnd - proxyStart) / windowDuration) * 100}%`,
-                 }} title="Detected scene bounds" />
+                 }} title={t('editor.detectedBounds')} />
 
             {/* Trim region (user-editable) */}
             <div className="absolute inset-y-0 bg-gradient-to-r from-[#8B5CF6]/20 via-[#8B5CF6]/40 to-[#8B5CF6]/20 border-l-4 border-r-4 border-[#8B5CF6]"
                  style={{ left: `${trimPct.left}%`, width: `${trimPct.width}%` }}>
-              <div onMouseDown={dragHandle('start')} className="absolute -left-1.5 top-0 bottom-0 w-3 bg-white rounded-full cursor-ew-resize shadow-lg shadow-[#8B5CF6]/50 z-20" title="Drag to adjust scene start"></div>
-              <div onMouseDown={dragHandle('end')} className="absolute -right-1.5 top-0 bottom-0 w-3 bg-white rounded-full cursor-ew-resize shadow-lg shadow-[#8B5CF6]/50 z-20" title="Drag to adjust scene end"></div>
+              <div onMouseDown={dragHandle('start')} className="absolute -left-1.5 top-0 bottom-0 w-3 bg-white rounded-full cursor-ew-resize shadow-lg shadow-[#8B5CF6]/50 z-20" title={t('editor.dragStart')}></div>
+              <div onMouseDown={dragHandle('end')} className="absolute -right-1.5 top-0 bottom-0 w-3 bg-white rounded-full cursor-ew-resize shadow-lg shadow-[#8B5CF6]/50 z-20" title={t('editor.dragEnd')}></div>
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span className="text-white text-xs font-mono font-bold bg-black/60 px-2 py-1 rounded">{((trimEnd - trimStart) / 1000).toFixed(2)}s</span>
               </div>
@@ -457,35 +459,35 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
             <button
               onClick={togglePlay}
               className="w-14 h-14 bg-gradient-to-br from-[#8B5CF6] to-[#7C3AED] rounded-full flex items-center justify-center hover:scale-105 hover:shadow-2xl hover:shadow-[#8B5CF6]/70 transition-all shadow-lg shadow-[#8B5CF6]/50 active:scale-95 flex-shrink-0"
-              title={playing ? 'Pause (Space / K)' : 'Play (Space / K)'}
+              title={playing ? t('editor.pauseTitle') : t('editor.playTitle')}
             >
               {playing ? <Pause size={24} className="text-white" fill="white" /> : <Play size={24} className="text-white ml-1" fill="white" />}
             </button>
             <div className="font-mono text-3xl font-bold bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] bg-clip-text text-transparent">{fmtFull(currentMs)}</div>
             <div className="hidden lg:flex gap-2 text-[#71717A] text-sm self-center">
               <kbd className="px-2 py-1 bg-[#27272A] text-[#A1A1AA] text-xs rounded font-mono border border-[#3f3f46]">␣</kbd>
-              <span className="self-center mr-1">play ·</span>
+              <span className="self-center mr-1">{t('editor.kbdPlay')}</span>
               <kbd className="px-2 py-1 bg-[#27272A] text-[#A1A1AA] text-xs rounded font-mono border border-[#3f3f46]">J</kbd>
               <kbd className="px-2 py-1 bg-[#27272A] text-[#A1A1AA] text-xs rounded font-mono border border-[#3f3f46]">K</kbd>
               <kbd className="px-2 py-1 bg-[#27272A] text-[#A1A1AA] text-xs rounded font-mono border border-[#3f3f46]">L</kbd>
-              <span className="self-center ml-1">scrub ·</span>
+              <span className="self-center ml-1">{t('editor.kbdScrub')}</span>
               <kbd className="px-2 py-1 bg-[#27272A] text-[#A1A1AA] text-xs rounded font-mono border border-[#3f3f46]">I</kbd>
               <kbd className="px-2 py-1 bg-[#27272A] text-[#A1A1AA] text-xs rounded font-mono border border-[#3f3f46]">O</kbd>
-              <span className="self-center ml-1">trim</span>
+              <span className="self-center ml-1">{t('editor.kbdTrim')}</span>
             </div>
             {exportResult && !exportResult.startsWith('Error') && (
               <span className="ml-auto text-xs font-mono truncate max-w-[280px] text-[#8B5CF6]">
-                ✓ Exported: {exportResult.split(/[\\/]/).pop()}
+                {t('editor.exportedSuccess', { file: exportResult.split(/[\\/]/).pop() ?? '' })}
               </span>
             )}
           </div>
           {exportResult && exportResult.startsWith('Error') && (
             <div className="mt-3 bg-red-500/10 border-2 border-red-500/40 text-red-200 rounded-xl p-3 flex items-start gap-3">
               <div className="flex-1">
-                <div className="font-semibold text-red-300 text-sm mb-1">Export failed</div>
+                <div className="font-semibold text-red-300 text-sm mb-1">{t('editor.exportFailed')}</div>
                 <div className="font-mono text-xs whitespace-pre-wrap break-all">{exportResult.replace(/^Error:\s*/, '')}</div>
                 <div className="text-[#A1A1AA] text-xs mt-2">
-                  Tip: check Settings → Export → Codec. <span className="font-mono">libx264</span> is the most compatible.
+                  {t('editor.exportTipPrefix')}<span className="font-mono">libx264</span>{t('editor.exportTipSuffix')}
                 </div>
               </div>
               <button onClick={() => setExportResult(null)} className="text-red-300 hover:text-red-200 p-1 -mt-1">

@@ -1,15 +1,34 @@
-"""Scene-level endpoints: thumbnail + proxy + source streaming."""
+"""Scene-level endpoints: thumbnail + proxy + source streaming + merge."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 
 from ..db import queries, schema
 from ..state import get_state
 
 router = APIRouter()
+
+
+class MergeRequest(BaseModel):
+    scene_ids: list[int]
+
+
+@router.post("/api/scenes/merge")
+def merge_scenes(body: MergeRequest):
+    """Merge adjacent top-level scenes into one (Derush strip selection)."""
+    state = get_state()
+    with schema.get_conn(state.primary_db) as conn:
+        try:
+            result = queries.merge_scenes(conn, body.scene_ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+    # Merged/deleted scene rows change the embedding set the search index maps to.
+    state.invalidate_search_cache()
+    return {"ok": True, **result}
 
 
 _VIDEO_MIME = {

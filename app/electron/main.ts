@@ -78,7 +78,30 @@ function resolvePythonRoot(): { uvExe: string; projectRoot: string } {
   return { uvExe, projectRoot: resources };
 }
 
+type SidecarExitError = Error & { moduleNotFound?: boolean; usedNoSync?: boolean };
+
 async function startSidecar(): Promise<number> {
+  try {
+    return await launchSidecar(false);
+  } catch (err) {
+    // uv creates the .venv directory as soon as the very first sync *starts*,
+    // so an interrupted first install (network drop, app closed mid-download)
+    // leaves a venv that exists but is missing base deps like uvicorn. Later
+    // launches then pass --no-sync and die on ModuleNotFoundError forever.
+    // Repair once with a full sync instead of staying broken.
+    const e = err as SidecarExitError;
+    if (e.usedNoSync && e.moduleNotFound) {
+      const msg = '[main] venv is incomplete (ModuleNotFoundError) — repairing with a full dependency sync';
+      console.warn(msg);
+      emitBootstrap({ kind: 'line', line: msg, stream: 'stderr' });
+      await killSidecarTree();
+      return launchSidecar(true);
+    }
+    throw err;
+  }
+}
+
+async function launchSidecar(forceSync: boolean): Promise<number> {
   apiPort = await findFreePort();
   const { uvExe, projectRoot } = resolvePythonRoot();
   const serverPath = path.join(projectRoot, 'backend', 'server.py');
@@ -96,8 +119,9 @@ async function startSidecar(): Promise<number> {
   // fallback)" on the next start. Once the venv exists (the in-app installer or
   // a dev `uv sync --extra <backend>` built it), launch with --no-sync so the
   // chosen backend sticks. Only the very first run (no venv yet) syncs, to
-  // bootstrap the base deps that serve the setup UI.
-  const noSync = useUv && fs.existsSync(venvPath()) ? ['--no-sync'] : [];
+  // bootstrap the base deps that serve the setup UI — and startSidecar forces
+  // one repair sync when a --no-sync launch dies on a missing base module.
+  const noSync = useUv && !forceSync && fs.existsSync(venvPath()) ? ['--no-sync'] : [];
   const args = useUv
     ? ['run', ...noSync, '--project', projectRoot, 'python', serverPath, '--port', String(apiPort)]
     : [serverPath, '--port', String(apiPort)];
@@ -123,6 +147,7 @@ async function startSidecar(): Promise<number> {
   });
 
   let lastActivity = Date.now();
+  let sawModuleNotFound = false;
   const bump = () => { lastActivity = Date.now(); };
   const emitLines = (chunk: Buffer, stream: BootstrapStream) => {
     bump();
@@ -130,6 +155,7 @@ async function startSidecar(): Promise<number> {
     for (const raw of text.split(/\r?\n/)) {
       const line = raw.trimEnd();
       if (!line) continue;
+      if (line.includes('ModuleNotFoundError')) sawModuleNotFound = true;
       if (stream === 'stdout') console.log(`[py] ${line}`);
       else console.error(`[py-err] ${line}`);
       if (line.includes('progress:')) {
@@ -144,17 +170,33 @@ async function startSidecar(): Promise<number> {
 
   pyProc.stdout?.on('data', (b: Buffer) => emitLines(b, 'stdout'));
   pyProc.stderr?.on('data', (b: Buffer) => emitLines(b, 'stderr'));
+
+  // Reject promptly if the process dies before the port opens (a crash used to
+  // sit out the 60s idle timeout before surfacing). Once the race is settled,
+  // later exits (normal quit) reject into an already-settled race: no-ops.
+  let rejectOnExit: ((err: Error) => void) | null = null;
+  const exited = new Promise<never>((_, reject) => { rejectOnExit = reject; });
   pyProc.on('exit', (code) => {
     console.log(`[main] sidecar exited with code ${code}`);
-    if (bootstrapPhase === 'starting') {
-      emitBootstrap({ kind: 'error', message: `Sidecar exited with code ${code} before opening port ${apiPort}` });
-    }
+    const err: SidecarExitError = new Error(`Sidecar exited with code ${code} before opening port ${apiPort}`);
+    err.moduleNotFound = sawModuleNotFound;
+    err.usedNoSync = noSync.length > 0;
+    rejectOnExit?.(err);
   });
 
-  // First-run install can take many minutes (PyTorch wheels etc). Be patient as
-  // long as uv keeps logging; bail only if the sidecar goes silent for too long
-  // or if a hard ceiling is reached.
-  await waitUntilReady(apiPort, () => Date.now() - lastActivity, 60_000, 15 * 60_000);
+  // uv is completely silent while it downloads a single big wheel (piped
+  // stdio: no progress bars), so on a slow connection minutes-long gaps
+  // between log lines are normal during an install. Crashes are surfaced
+  // instantly by the exit race above, so the timeouts only need to catch a
+  // genuinely hung process — be generous when a sync is running, stricter on
+  // a regular --no-sync boot where the port should open within seconds.
+  const syncing = useUv && noSync.length === 0;
+  const idleMs = syncing ? 10 * 60_000 : 2 * 60_000;
+  const hardMs = syncing ? 60 * 60_000 : 5 * 60_000;
+  await Promise.race([
+    exited,
+    waitUntilReady(apiPort, () => Date.now() - lastActivity, idleMs, hardMs),
+  ]);
   return apiPort;
 }
 

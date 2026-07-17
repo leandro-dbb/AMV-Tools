@@ -19,6 +19,9 @@ router = APIRouter()
 class QueueEntry(BaseModel):
     path: str
     recursive: bool = True
+    # User-chosen import group ("Pokemon S23"…) stamped on every video found
+    # under this path; shows up as a collapsible folder in the Derush playlist.
+    group: str | None = None
 
 
 class EnqueueBody(BaseModel):
@@ -46,7 +49,8 @@ def add_queue(body: EnqueueBody):
             is_dir = p.is_dir()
             if not is_dir and p.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
-            if queries.add_to_queue(conn, str(p), is_dir, e.recursive):
+            group = (e.group or "").strip() or None
+            if queries.add_to_queue(conn, str(p), is_dir, e.recursive, group_name=group):
                 added += 1
     return {"added": added}
 

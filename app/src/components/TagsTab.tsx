@@ -1,6 +1,7 @@
 import { ChevronDown, MoreVertical, Film, Tag, ArrowUpDown, Loader2, Check, Layers, Download, Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { useT } from '../i18n';
 import type { SceneResult, TagSummary, VideoSummary } from '../api/types';
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
+  const t = useT();
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [tags, setTags] = useState<TagSummary[]>([]);
   const [scenes, setScenes] = useState<SceneResult[]>([]);
@@ -25,7 +27,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
   const [loadingScenes, setLoadingScenes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [exportSummary, setExportSummary] = useState<string | null>(null);
+  const [exportSummary, setExportSummary] = useState<{ text: string; isError: boolean } | null>(null);
 
   useEffect(() => {
     api.listVideos().then((r) => {
@@ -94,10 +96,10 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
     }
   }, [tagPickerOpen]);
   const videoLabel = useMemo(() => {
-    if (videoIds.length === 0) return 'No videos';
+    if (videoIds.length === 0) return t('tags.noVideos');
     if (videoIds.length === 1) return videos.find((v) => v.id === videoIds[0])?.display_name ?? '...';
-    return `${videoIds.length} videos selected`;
-  }, [videoIds, videos]);
+    return t('tags.videosSelected', { count: videoIds.length });
+  }, [videoIds, videos, t]);
 
   function toggleSelect(id: number) {
     setSelected((prev) => {
@@ -118,10 +120,15 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
     setExportSummary(null);
     try {
       const r = await api.exportBatch(Array.from(selected));
-      setExportSummary(`Exported ${r.exported.length}${r.failed.length ? `, ${r.failed.length} failed` : ''}`);
+      setExportSummary({
+        text: r.failed.length
+          ? t('tags.exportedFailed', { count: r.exported.length, failed: r.failed.length })
+          : t('tags.exported', { count: r.exported.length }),
+        isError: false,
+      });
       setSelected(new Set());
     } catch (err) {
-      setExportSummary(`Error: ${(err as Error).message}`);
+      setExportSummary({ text: t('common.error', { message: (err as Error).message }), isError: true });
     } finally {
       setExporting(false);
     }
@@ -142,7 +149,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
           </button>
           {videoPickerOpen && (
             <div className="absolute top-full mt-2 left-0 right-0 z-40 bg-[#18181B] border border-[#27272A] rounded-xl max-h-80 overflow-auto shadow-2xl">
-              {videos.length === 0 && <div className="px-4 py-3 text-[#71717A] text-sm">No videos indexed yet.</div>}
+              {videos.length === 0 && <div className="px-4 py-3 text-[#71717A] text-sm">{t('tags.noVideosIndexed')}</div>}
               {videos.map((v) => {
                 const checked = videoIds.includes(v.id);
                 return (
@@ -151,7 +158,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
                       {checked && <Check size={12} className="text-white" />}
                     </div>
                     <span className="flex-1 text-sm text-[#FAFAFA] truncate">{v.display_name}</span>
-                    <span className="text-xs text-[#71717A] font-mono">{v.scene_count} scenes</span>
+                    <span className="text-xs text-[#71717A] font-mono">{t('tags.sceneCount', { count: v.scene_count })}</span>
                   </button>
                 );
               })}
@@ -169,7 +176,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
           >
             <Tag size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#EC4899]" />
             <span className="truncate text-left flex-1">
-              {tagName ? tagName : <span className="text-[#A1A1AA]">All scenes (no tag filter)</span>}
+              {tagName ? tagName : <span className="text-[#A1A1AA]">{t('tags.allScenes')} {t('tags.noTagFilter')}</span>}
             </span>
             {selectedTagSummary && (
               <span className="ml-2 bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-white px-2 py-0.5 rounded-full text-xs font-bold">{selectedTagSummary.count}</span>
@@ -193,7 +200,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
                       setTagPickerOpen(false);
                     }
                   }}
-                  placeholder="Filter tags…"
+                  placeholder={t('tags.filterTags')}
                   className="w-full bg-transparent pl-10 pr-4 py-3 text-[#FAFAFA] placeholder-[#71717A] text-sm focus:outline-none"
                 />
               </div>
@@ -206,13 +213,13 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
                   <div className={`w-4 h-4 rounded-full border ${!tagName ? 'border-[#EC4899] bg-[#EC4899]' : 'border-[#3f3f46]'} flex items-center justify-center`}>
                     {!tagName && <Check size={12} className="text-white" />}
                   </div>
-                  <span className="flex-1 text-sm text-[#FAFAFA]">All scenes <span className="text-[#71717A]">(no tag filter)</span></span>
+                  <span className="flex-1 text-sm text-[#FAFAFA]">{t('tags.allScenes')} <span className="text-[#71717A]">{t('tags.noTagFilter')}</span></span>
                 </button>
                 {filteredTags.length === 0 && tags.length > 0 && (
-                  <div className="px-4 py-3 text-[#71717A] text-sm">No tag matches &laquo;{tagSearch}&raquo;.</div>
+                  <div className="px-4 py-3 text-[#71717A] text-sm">{t('tags.noTagMatches', { query: tagSearch })}</div>
                 )}
                 {tags.length === 0 && (
-                  <div className="px-4 py-3 text-[#71717A] text-sm">No tags found in this selection.</div>
+                  <div className="px-4 py-3 text-[#71717A] text-sm">{t('tags.noTagsInSelection')}</div>
                 )}
                 {filteredTags.map((t) => {
                   const checked = tagName === t.tag;
@@ -239,7 +246,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
       <div className="flex items-center justify-between mb-6 bg-[#18181B]/50 backdrop-blur-sm rounded-xl p-4 border border-[#27272A]">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-4">
-            <span className="text-[#71717A] text-sm uppercase tracking-wider font-medium">Threshold</span>
+            <span className="text-[#71717A] text-sm uppercase tracking-wider font-medium">{t('tags.threshold')}</span>
             <div className="relative w-48 h-2 bg-gradient-to-r from-[#27272A] via-[#EC4899]/20 to-[#EC4899]/40 rounded-full overflow-hidden">
               <input type="range" min={0} max={100} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} className="absolute inset-0 w-full opacity-0 cursor-pointer" />
               <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-[#EC4899] rounded-full border-2 border-[#FAFAFA] shadow-lg shadow-[#EC4899]/50 pointer-events-none" style={{ left: `${threshold}%` }}></div>
@@ -248,32 +255,32 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
           </div>
           <button onClick={() => setSort(sort === 'timecode' ? 'confidence' : 'timecode')} className="flex items-center gap-2 bg-[#0F0F11] border border-[#27272A] hover:border-[#8B5CF6]/50 rounded-lg px-4 py-2 text-[#A1A1AA] hover:text-[#FAFAFA] text-sm transition-all capitalize">
             <ArrowUpDown size={14} />
-            <span>{sort}</span>
+            <span>{t(`tags.sort.${sort}`)}</span>
           </button>
           {scenes.length > 0 && (
             <button onClick={() => { if (selected.size === scenes.length) setSelected(new Set()); else setSelected(new Set(scenes.map((s) => s.id))); }} className="text-xs text-[#71717A] hover:text-[#FAFAFA] flex items-center gap-1">
-              <Layers size={12} /> {selected.size === scenes.length ? 'Clear' : 'Select all'}
+              <Layers size={12} /> {selected.size === scenes.length ? t('tags.clear') : t('tags.selectAll')}
             </button>
           )}
         </div>
         <div className="flex items-center gap-3">
-          {exportSummary && <span className={`text-xs font-mono ${exportSummary.startsWith('Error') ? 'text-red-400' : 'text-[#8B5CF6]'}`}>{exportSummary}</span>}
+          {exportSummary && <span className={`text-xs font-mono ${exportSummary.isError ? 'text-red-400' : 'text-[#8B5CF6]'}`}>{exportSummary.text}</span>}
           <button disabled={selected.size === 0 || exporting} onClick={bulkExport} className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-6 py-2.5 rounded-xl text-sm font-semibold hover:shadow-lg hover:shadow-[#8B5CF6]/50 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2">
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            Export Selected{selected.size > 0 ? ` (${selected.size})` : ''}
+            {selected.size > 0 ? t('tags.exportSelectedCount', { count: selected.size }) : t('tags.exportSelected')}
           </button>
         </div>
       </div>
 
       {loadingScenes && (
-        <div className="flex items-center justify-center text-[#71717A] py-12 gap-2"><Loader2 size={16} className="animate-spin" /> Loading scenes...</div>
+        <div className="flex items-center justify-center text-[#71717A] py-12 gap-2"><Loader2 size={16} className="animate-spin" /> {t('tags.loadingScenes')}</div>
       )}
 
       {!loadingScenes && scenes.length === 0 && videoIds.length > 0 && (
         <div className="text-center text-[#71717A] py-12 text-sm">
           {tagName
-            ? `No scenes match tag "${tagName}" at threshold ${threshold}%.`
-            : 'No scenes in this video selection yet — index it first from Settings → Databases.'}
+            ? t('tags.noScenesMatch', { tag: tagName, threshold })
+            : t('tags.noScenesYet')}
         </div>
       )}
 
@@ -299,6 +306,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
 
 function TagRow({ occ, isSelected, onToggle, onOpen, hoverDelayMs, showVideo }:
   { occ: SceneResult; isSelected: boolean; onToggle: () => void; onOpen: () => void; hoverDelayMs: number; showVideo: boolean }) {
+  const t = useT();
   const [showProxy, setShowProxy] = useState(false);
   const timeoutRef = useRef<number | null>(null);
   function start() {
@@ -317,7 +325,7 @@ function TagRow({ occ, isSelected, onToggle, onOpen, hoverDelayMs, showVideo }:
         {showProxy && occ.proxy_path ? (
           <video src={api.proxyUrl(occ.id)} autoPlay muted loop playsInline className="w-full h-full object-cover" />
         ) : (
-          <img src={api.thumbnailUrl(occ.id)} alt="Scene" className="w-full h-full object-cover" loading="lazy" />
+          <img src={api.thumbnailUrl(occ.id)} alt={t('tags.sceneAlt')} className="w-full h-full object-cover" loading="lazy" />
         )}
       </div>
       <div className="flex-1 flex flex-col">

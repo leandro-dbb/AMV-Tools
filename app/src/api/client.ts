@@ -1,5 +1,7 @@
 import type {
   AppSettings,
+  DerushFolder,
+  DerushItem,
   IndexQueueItem,
   ProgressEvent,
   SceneResult,
@@ -81,11 +83,12 @@ export const api = {
   videoTags: (videoId: number) =>
     req<{ tags: TagSummary[] }>(`/api/videos/${videoId}/tags`),
 
-  videoScenes: (videoId: number | number[], opts: { tag?: string; threshold?: number; sort?: string }) => {
+  videoScenes: (videoId: number | number[], opts: { tag?: string; threshold?: number; sort?: string; topOnly?: boolean }) => {
     const qs = new URLSearchParams();
     if (opts.tag) qs.set('tag', opts.tag);
     if (opts.threshold != null) qs.set('threshold', String(opts.threshold));
     if (opts.sort) qs.set('sort', opts.sort);
+    if (opts.topOnly) qs.set('top_only', 'true');
     if (Array.isArray(videoId)) {
       videoId.forEach((id) => qs.append('video_id', String(id)));
       return req<{ scenes: SceneResult[] }>(`/api/scenes?${qs.toString()}`);
@@ -97,7 +100,7 @@ export const api = {
     req<{ frames: string[]; proxy_url?: string }>(`/api/scene/${sceneId}/preview`),
 
   queue: () => req<{ items: IndexQueueItem[] }>('/api/index/queue'),
-  enqueue: (paths: { path: string; recursive?: boolean }[]) =>
+  enqueue: (paths: { path: string; recursive?: boolean; group?: string | null }[]) =>
     req<{ added: number }>('/api/index/queue', {
       method: 'POST',
       body: JSON.stringify({ paths }),
@@ -162,6 +165,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  relinkFolder: (body: { db_path: string; search_dirs: string[]; video_ids?: number[] }) =>
+    req<{ relinked: number; ambiguous: string[]; still_missing: string[] }>('/api/databases/relink_folder', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   mergeDatabases: (target: string, sources: string[]) =>
     req<{ videos_added: number; scenes_added: number; tags_added: number; skipped_videos: number }>(
       '/api/databases/merge',
@@ -198,6 +206,64 @@ export const api = {
     `${getBaseUrl()}/api/scene/segment/${sessionId}/mask_preview`,
   segmentMaskUrl: (sessionId: string, idx: number) =>
     `${getBaseUrl()}/api/scene/segment/${sessionId}/mask/${idx}`,
+
+  // Derush (selects) workflow
+  derushList: () =>
+    req<{ folders: DerushFolder[]; items: DerushItem[]; exporting: boolean }>('/api/derush'),
+  derushKept: (videoId?: number) =>
+    req<{ scene_ids: number[] }>(`/api/derush/kept${videoId != null ? `?video_id=${videoId}` : ''}`),
+  derushLevel: (sceneId: number, delta: 1 | -1, folderId?: number | null) =>
+    req<{ ok: boolean; level: 0 | 1 | 2; kept: boolean; favorite: boolean; item_id: number | null; scene_id: number }>('/api/derush/level', {
+      method: 'POST',
+      body: JSON.stringify({ scene_id: sceneId, delta, folder_id: folderId ?? null }),
+    }),
+  renameVideoGroup: (oldName: string, newName: string | null) =>
+    req<{ ok: boolean; updated: number; group_name: string | null }>('/api/videos/groups/rename', {
+      method: 'POST',
+      body: JSON.stringify({ old: oldName, new: newName }),
+    }),
+  setVideoDerushed: (videoId: number, done: boolean) =>
+    req<{ ok: boolean }>(`/api/videos/${videoId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ derushed: done }),
+    }),
+  setVideoGroup: (videoId: number, group: string | null) =>
+    req<{ ok: boolean; group_name: string | null }>(`/api/videos/${videoId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(group ? { group_name: group } : { clear_group: true }),
+    }),
+  derushToggle: (sceneId: number, folderId?: number | null, favorite?: boolean) =>
+    req<{ ok: boolean; kept: boolean; item_id: number | null; scene_id: number; favorite: boolean }>('/api/derush/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ scene_id: sceneId, folder_id: folderId ?? null, favorite: favorite ?? false }),
+    }),
+  derushPatchItem: (itemId: number, body: { custom_name?: string; folder_ids?: number[]; clear_name?: boolean; favorite?: boolean }) =>
+    req<{ ok: boolean }>(`/api/derush/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  derushDeleteItem: (itemId: number) =>
+    req<{ ok: boolean }>(`/api/derush/items/${itemId}`, { method: 'DELETE' }),
+  derushCreateFolder: (name: string) =>
+    req<{ ok: boolean; id: number; name: string }>('/api/derush/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  derushRenameFolder: (id: number, name: string) =>
+    req<{ ok: boolean }>(`/api/derush/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  derushDeleteFolder: (id: number) =>
+    req<{ ok: boolean }>(`/api/derush/folders/${id}`, { method: 'DELETE' }),
+  derushExport: (scope: 'all' | 'folder' | 'root' | 'favorites', folderId?: number) =>
+    req<{ ok: boolean; started: boolean; total: number }>('/api/derush/export', {
+      method: 'POST',
+      body: JSON.stringify({ scope, folder_id: folderId ?? null }),
+    }),
+  mergeScenes: (sceneIds: number[]) =>
+    req<{ ok: boolean; kept_scene_id: number; start_ms: number; end_ms: number; removed: number[] }>(
+      '/api/scenes/merge',
+      { method: 'POST', body: JSON.stringify({ scene_ids: sceneIds }) }
+    ),
+  videoPlayable: (videoId: number) =>
+    req<{ url: string; kind: 'direct' | 'remux' | 'transcode' }>(`/api/videos/${videoId}/playable`),
+  videoTranscode: (videoId: number) =>
+    req<{ ok: boolean; ready: boolean; url?: string }>(`/api/videos/${videoId}/transcode`, { method: 'POST' }),
 
   progressSocket: () => new WebSocket(`${getBaseUrl().replace(/^http/, 'ws')}/ws/progress`),
 

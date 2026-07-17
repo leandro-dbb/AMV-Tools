@@ -102,6 +102,72 @@ def relink(body: RelinkBody):
     return {"ok": ok, "error": None if ok else "filepath collision"}
 
 
+class RelinkFolderBody(BaseModel):
+    db_path: str
+    search_dirs: List[str]
+    # When set, only these videos are candidates for relinking — used by the
+    # per-subfolder flow (e.g. relink just "S23" against its new folder).
+    video_ids: List[int] | None = None
+
+
+@router.post("/api/databases/relink_folder")
+def relink_folder(body: RelinkFolderBody):
+    """Bulk relink after moving a library to another machine.
+
+    Scans the given folders (recursively) for video files and rewrites the
+    filepath of every missing video whose basename matches exactly one
+    candidate. When several candidates share a basename, the one whose parent
+    folder name matches the old path's parent wins; otherwise the video is
+    reported as ambiguous and left untouched.
+    """
+    import os
+
+    from ..config import VIDEO_EXTENSIONS
+
+    # Index every video file found under the search dirs by lowercased basename.
+    candidates: dict[str, list[str]] = {}
+    for root_dir in body.search_dirs:
+        if not Path(root_dir).is_dir():
+            continue
+        for dirpath, _dirs, files in os.walk(root_dir):
+            for fname in files:
+                if fname.lower().endswith(VIDEO_EXTENSIONS):
+                    candidates.setdefault(fname.lower(), []).append(os.path.join(dirpath, fname))
+
+    schema.init_db(body.db_path)
+    only_ids = set(body.video_ids) if body.video_ids is not None else None
+    relinked = 0
+    ambiguous: List[str] = []
+    still_missing: List[str] = []
+    with schema.get_conn(body.db_path) as conn:
+        for vid, fp in queries.all_video_paths(conn):
+            if only_ids is not None and vid not in only_ids:
+                continue
+            if Path(fp).exists():
+                continue
+            matches = candidates.get(Path(fp).name.lower(), [])
+            if len(matches) > 1:
+                # Disambiguate by parent folder name (e.g. "Season 2/ep01.mkv").
+                old_parent = Path(fp).parent.name.lower()
+                narrowed = [m for m in matches if Path(m).parent.name.lower() == old_parent]
+                matches = narrowed if len(narrowed) == 1 else matches
+            if len(matches) == 1:
+                if queries.update_video_filepath(conn, vid, matches[0]):
+                    relinked += 1
+                else:
+                    still_missing.append(fp)
+            elif len(matches) > 1:
+                ambiguous.append(fp)
+            else:
+                still_missing.append(fp)
+
+    return {
+        "relinked": relinked,
+        "ambiguous": ambiguous,
+        "still_missing": still_missing,
+    }
+
+
 class MergeBody(BaseModel):
     target: str
     sources: List[str]

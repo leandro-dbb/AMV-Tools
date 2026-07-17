@@ -23,8 +23,13 @@ DEFAULT_SETTINGS = {
     "indexing": {
         "device": "auto",
         "batch_size": 8,
-        "mode": "fast",
-        "sub_segmentation": False,
+        # "balanced" + sub-segmentation on: long uncut scenes (pans, one-shot
+        # sequences) get split by tagger-embedding drift, which noticeably
+        # improves search granularity and derush ergonomics. "fast" skips
+        # sub-segmentation entirely regardless of the toggle — only pick it
+        # when indexing wall-clock matters more than scene quality.
+        "mode": "balanced",
+        "sub_segmentation": True,
         "sub_segmentation_threshold": 0.30,
         # Off by default: the MiniEditor streams the source file directly via
         # the /api/scene/<id>/source endpoint (FastAPI handles Range requests
@@ -66,6 +71,9 @@ DEFAULT_SETTINGS = {
         #     heavy clips. Slower (~3× track time) and pulls a 500 MB model on
         #     first use.
         "mask_engine": "birefnet",
+        # Auto-engine checkpoint. "general"/"hr"/"portrait" are BiRefNet
+        # weights; "anime" is SkyTNT's ISNet trained on anime characters
+        # (ONNX, ~170 MB) — usually the best pick on cel-shaded footage.
         "birefnet_variant": "general",
         # SAM 2.1 variant — base_plus is the qual/VRAM sweet spot on 8 GB GPUs
         # once SigLIP/tagger have been offloaded by the model rotation.
@@ -96,6 +104,21 @@ DEFAULT_SETTINGS = {
         "mask_soft_alpha_black": 0.0,
         "mask_soft_alpha_white": 1.0,
         "mask_rgb_decontaminate_enabled": False,
+        # Guided-filter upsampling of the matte to source resolution at export
+        # time. Snaps the alpha edge back onto full-res line work instead of
+        # leaving the soft bilinear halo. Cheap (~ms/frame); keep on.
+        "mask_edge_refine_enabled": True,
+        # BG-aware edge cleanup at export: re-solves the matte's soft band
+        # against the actual local background (compositing equation with
+        # nearest-FG / nearest-BG colour estimates). Removes the "old
+        # background aura" around the character. Skips pixels where FG and BG
+        # colours are too close to solve safely; keep on.
+        "mask_bg_aware_cleanup_enabled": True,
+        # Bidirectional EMA over per-frame (Auto engine) mattes — removes the
+        # silhouette flicker of frame-independent inference. Hard cuts and
+        # teleport-fast motion reset the history automatically.
+        "mask_temporal_smooth_enabled": True,
+        "mask_temporal_smooth_strength": 0.5,
         "hf_token": "",
     },
     "search": {
@@ -108,11 +131,39 @@ DEFAULT_SETTINGS = {
         # behaviour.
         "tag_boost": 0.0,
     },
+    "derush": {
+        # Player key bindings — KeyboardEvent.key values, lowercased.
+        # Remappable from Settings > Derush. level_up/level_down walk the keep
+        # ladder: none → kept → favorite and back down.
+        "keys": {
+            "level_up": "arrowup",
+            "level_down": "arrowdown",
+            "prev_scene": "arrowleft",
+            "next_scene": "arrowright",
+            "shuttle_slower": "j",
+            "pause": "k",
+            "shuttle_faster": "l",
+            "play_pause": " ",
+            "mute": "m",
+            "merge": "g",
+            "frame_back": ",",
+            "frame_forward": ".",
+            "prev_episode": "p",
+            "next_episode": "n",
+            "toggle_keep": "h",
+            "toggle_favorite": "ù",
+        },
+    },
     "export": {
+        # "h264_nvenc" = Premiere/Media Encoder-style "Match Source — Adaptive
+        # High Bitrate": hardware H.264, VBR 1-pass scaled to the source pixel
+        # rate (15.2 Mbps @1080p23.976), Rec.709 tags. CRF is ignored there.
         "codec": "libx264",
         "crf": 18,
         "resolution": "source",
         "audio": "copy",
+        # AAC bitrate when audio = "encode" (48 kHz stereo, AME-style).
+        "audio_bitrate_kbps": 320,
         "naming_template": "{anime}_{episode}_scene_{scene_id}",
         "output_folder": "",
         "open_folder_after": True,
