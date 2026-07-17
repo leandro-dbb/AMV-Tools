@@ -137,6 +137,9 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
     env: {
       ...process.env,
       PYTHONUNBUFFERED: '1',
+      // macOS: PyTorch's MPS backend is missing some ops; without this flag an
+      // unsupported op raises instead of falling back to CPU. No-op elsewhere.
+      PYTORCH_ENABLE_MPS_FALLBACK: '1',
       AMV_DATA_DIR: userDataPath,
       UV_CACHE_DIR: isDev ? path.join(runtimeUvRoot, 'uv_cache') : path.join(userDataPath, '.uv_cache'),
       UV_PYTHON_INSTALL_DIR: path.join(runtimeUvRoot, 'python'),
