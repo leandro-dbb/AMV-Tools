@@ -43,7 +43,7 @@ def _silence_proactor_reset(loop, context):
 
 
 def make_app() -> FastAPI:
-    app = FastAPI(title="AMV Tools sidecar", version="0.1.0a")
+    app = FastAPI(title="AMV Tools sidecar", version="0.2.0a")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

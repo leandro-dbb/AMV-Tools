@@ -1,6 +1,7 @@
 import { Loader2, X, Eraser, RotateCcw, Sparkles, Download, MousePointerClick, Wand2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { useT } from '../i18n';
 import type { SceneResult, SegmentPreviewResponse } from '../api/types';
 
 type Engine = 'birefnet' | 'sam2';
@@ -27,6 +28,7 @@ interface MaskModeProps {
  * The component releases the server session on unmount so the tempdir of
  * extracted frames gets cleaned up. */
 export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportError, onExportSuccess }: MaskModeProps) {
+  const t = useT();
   const [phase, setPhase] = useState<Phase>('idle');
   const [points, setPoints] = useState<Point[]>([]);
   const [box, setBox] = useState<Box>(null);
@@ -67,7 +69,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
           setMaskCacheBust((n) => n + 1);
         }
       })
-      .catch((err) => { if (!cancelled) setErrorMsg(`Init failed: ${(err as Error).message}`); })
+      .catch((err) => { if (!cancelled) setErrorMsg(t('mask.error.init', { message: (err as Error).message })); })
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,7 +209,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
     // BiRefNet auto-ran on mount — re-running is only for SAM 2 (the user
     // has added/changed clicks). Guarded for SAM 2 only:
     if (engine === 'sam2' && !points.some((p) => p.polarity === 'positive') && !box) {
-      setErrorMsg('Click at least one point on the subject before previewing.');
+      setErrorMsg(t('mask.error.clickFirst'));
       return;
     }
     setBusy(true);
@@ -227,7 +229,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
       setMaskCacheBust((n) => n + 1);
       setPhase('reviewing');
     } catch (err) {
-      setErrorMsg(`Preview failed: ${(err as Error).message}`);
+      setErrorMsg(t('mask.error.preview', { message: (err as Error).message }));
       setPhase('idle');
     } finally {
       setBusy(false);
@@ -256,7 +258,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
       setMaskCacheBust((n) => n + 1);
       setPhase('ready');
     } catch (err) {
-      setErrorMsg(`Tracking failed: ${(err as Error).message}`);
+      setErrorMsg(t('mask.error.tracking', { message: (err as Error).message }));
       setPhase('reviewing');
     } finally {
       setBusy(false);
@@ -275,7 +277,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
       onExportSuccess(r.output);
     } catch (err) {
       const msg = (err as Error).message;
-      setErrorMsg(`Alpha export failed: ${msg}`);
+      setErrorMsg(t('mask.error.export', { message: msg }));
       onExportError(msg);
     } finally {
       setBusy(false);
@@ -306,13 +308,13 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
       {/* toolbar */}
       <div className="flex items-center gap-2 mb-3">
         <div className="bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-xs font-bold px-3 py-1.5 rounded-lg uppercase tracking-wider">
-          Mask mode
+          {t('mask.badge')}
         </div>
         {/* Engine chip — quick A/B switch without leaving the editor. */}
         <div className="flex items-center bg-[#0F0F11] border border-[#27272A] rounded-lg p-0.5">
           {([
-            { id: 'birefnet', label: 'Auto', icon: Wand2, title: 'BiRefNet - automatic, recommended for anime' },
-            { id: 'sam2', label: 'Manual', icon: MousePointerClick, title: 'SAM 2 - click to pick the subject, useful when there are multiple characters' },
+            { id: 'birefnet', label: t('mask.engine.auto'), icon: Wand2, title: t('mask.engine.autoTitle') },
+            { id: 'sam2', label: t('mask.engine.manual'), icon: MousePointerClick, title: t('mask.engine.manualTitle') },
           ] as const).map(({ id, label, icon: Icon, title }) => (
             <button
               key={id}
@@ -332,27 +334,27 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         <div className="text-[#FAFAFA] text-sm font-medium ml-2">
           {phase === 'idle' && (
             engine === 'birefnet'
-              ? 'Detecting foreground automatically...'
+              ? t('mask.status.detecting')
               : (hasAnyPrompt
-                ? `Ready: ${positiveCount} subject, ${negativeCount} background${box ? ', 1 box' : ''} - click "Generate mask"`
-                : 'Step 1 - click on the character you want to isolate')
+                ? t('mask.status.ready', { positive: positiveCount, negative: negativeCount, box: box ? t('mask.status.boxPart') : '' })
+                : t('mask.status.step1'))
           )}
           {phase === 'previewing' && (
             engine === 'sam2'
-              ? 'Running SAM 2 on the reference frame…'
-              : 'Running BiRefNet on the reference frame…'
+              ? t('mask.status.previewingSam2')
+              : t('mask.status.previewingBirefnet')
           )}
           {phase === 'reviewing' && (
             engine === 'sam2'
-              ? 'Step 2 - happy with the mask? Track it across the clip. Or click more to refine.'
-              : 'Step 2 - happy with the mask? Run it across the clip. Or switch to Manual to refine.'
+              ? t('mask.status.reviewSam2')
+              : t('mask.status.reviewBirefnet')
           )}
           {phase === 'tracking' && (
             engine === 'birefnet'
-              ? `Masking every frame — ${trackPct}%`
-              : `Tracking the mask across the clip — ${trackPct}%`
+              ? t('mask.status.maskingAll', { pct: trackPct })
+              : t('mask.status.trackingAll', { pct: trackPct })
           )}
-          {phase === 'ready' && 'Step 3 — scrub to check every frame, re-run if needed, then "Export with alpha"'}
+          {phase === 'ready' && t('mask.status.step3')}
         </div>
         <div className="flex-1" />
         {engine === 'sam2' && (
@@ -361,17 +363,17 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
               disabled={phase === 'tracking' || !hasAnyPrompt}
               onClick={removeLastPrompt}
               className="px-3 py-1.5 rounded-lg bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] text-xs flex items-center gap-1.5 disabled:opacity-40"
-              title="Remove last prompt"
+              title={t('mask.undoTitle')}
             >
-              <RotateCcw size={12} /> Undo
+              <RotateCcw size={12} /> {t('mask.undo')}
             </button>
             <button
               disabled={phase === 'tracking' || !hasAnyPrompt}
               onClick={clearPrompts}
               className="px-3 py-1.5 rounded-lg bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] text-xs flex items-center gap-1.5 disabled:opacity-40"
-              title="Clear all prompts (Esc)"
+              title={t('mask.clearTitle')}
             >
-              <Eraser size={12} /> Clear
+              <Eraser size={12} /> {t('mask.clear')}
             </button>
           </>
         )}
@@ -379,7 +381,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
           onClick={onClose}
           disabled={busy}
           className="ml-2 p-1.5 rounded-lg hover:bg-[#27272A] text-[#A1A1AA] disabled:opacity-40"
-          title="Close mask mode"
+          title={t('mask.closeTitle')}
         >
           <X size={16} />
         </button>
@@ -391,24 +393,24 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
           <MousePointerClick size={14} className="text-[#A855F7]" />
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 rounded-full bg-green-400 border border-white" />
-            Click = <b className="text-[#FAFAFA]">subject</b> (keep)
+            {t('mask.legend.clickEq')} <b className="text-[#FAFAFA]">{t('mask.legend.subject')}</b> {t('mask.legend.keep')}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 rounded-full bg-red-500 border border-white" />
-            <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">Shift</kbd>+click = <b className="text-[#FAFAFA]">background</b> (drop)
+            <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">{t('mask.legend.shiftKey')}</kbd>{t('mask.legend.shiftClickEq')} <b className="text-[#FAFAFA]">{t('mask.legend.background')}</b> {t('mask.legend.drop')}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-4 h-3 border-2 border-cyan-400 rounded-sm" />
-            Drag = <b className="text-[#FAFAFA]">bounding box</b>
+            {t('mask.legend.dragEq')} <b className="text-[#FAFAFA]">{t('mask.legend.boundingBox')}</b>
           </span>
           <span className="flex items-center gap-1.5">
-            <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">Esc</kbd> clears all
+            <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">{t('mask.legend.escKey')}</kbd> {t('mask.legend.escClears')}
           </span>
         </div>
       ) : (
         <div className="flex items-center gap-2 mb-3 text-[11px] text-[#A1A1AA] bg-[#0F0F11]/80 border border-[#27272A] rounded-lg px-4 py-2">
           <Wand2 size={14} className="text-[#A855F7]" />
-          <span><b className="text-[#FAFAFA]">BiRefNet</b> auto-detects the foreground subject. No clicks needed. If you have several characters and want a specific one, switch to <b className="text-[#FAFAFA]">Manual</b> above.</span>
+          <span><b className="text-[#FAFAFA]">BiRefNet</b> {t('mask.auto.body1')} <b className="text-[#FAFAFA]">{t('mask.engine.manual')}</b> {t('mask.auto.body2')}</span>
         </div>
       )}
 
@@ -420,14 +422,14 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
           style={{ aspectRatio: `${naturalSize.w} / ${naturalSize.h}` }}
           onMouseDown={handleMouseDown}
         >
-          <img src={bgUrl} alt="reference frame" className="block w-full h-full object-cover pointer-events-none" draggable={false} />
+          <img src={bgUrl} alt={t('mask.alt.referenceFrame')} className="block w-full h-full object-cover pointer-events-none" draggable={false} />
           {/* The server renders the mask as a "spotlight matte" already
               (dark outside, transparent inside, magenta outline). Plain
               alpha compositing — no mix-blend hacks. */}
           {maskUrl && (
             <img
               src={maskUrl}
-              alt="mask overlay"
+              alt={t('mask.alt.maskOverlay')}
               className="absolute inset-0 w-full h-full pointer-events-none"
               draggable={false}
             />
@@ -448,7 +450,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
                   width: 22, height: 22,
                   transform: 'translate(-50%, -50%)',
                 }}
-                title={`${isPos ? 'Subject' : 'Background'} #${num}`}
+                title={t(isPos ? 'mask.point.subject' : 'mask.point.background', { num })}
               >
                 {isPos ? '+' : '−'}
               </div>
@@ -473,20 +475,20 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
           {/* empty state hint — only in Manual mode; Auto auto-runs */}
           {!hasAnyPrompt && phase === 'idle' && !busy && engine === 'sam2' && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#A855F7]/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none animate-pulse">
-              Click on the character you want
+              {t('mask.hint.clickCharacter')}
             </div>
           )}
           {busy && phase === 'idle' && (
             <div className="absolute inset-0 bg-black/60 flex items-center justify-center pointer-events-none">
               <div className="text-[#FAFAFA] text-sm flex items-center gap-2">
                 <Loader2 size={16} className="animate-spin" />
-                Loading reference frame…
+                {t('mask.loadingFrame')}
               </div>
             </div>
           )}
           {phase === 'tracking' && (
             <div className="absolute inset-x-0 bottom-0 bg-black/80 p-3">
-              <div className="text-white text-xs font-mono mb-1.5">Tracking… {trackPct}%</div>
+              <div className="text-white text-xs font-mono mb-1.5">{t('mask.trackingProgress', { pct: trackPct })}</div>
               <div className="h-2 bg-[#27272A] rounded">
                 <div className="h-full bg-gradient-to-r from-[#A855F7] to-[#EC4899] rounded transition-all" style={{ width: `${trackPct}%` }} />
               </div>
@@ -507,7 +509,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         {/* Frame slider — only after tracking */}
         {phase === 'ready' && session && (
           <div className="flex items-center gap-3 bg-[#0F0F11] border-2 border-[#27272A] rounded-xl px-4 py-2 flex-1 min-w-[260px]">
-            <span className="text-[#A1A1AA] text-xs font-mono whitespace-nowrap">Frame</span>
+            <span className="text-[#A1A1AA] text-xs font-mono whitespace-nowrap">{t('mask.frame')}</span>
             <input
               type="range"
               min={0}
@@ -533,7 +535,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-sm font-semibold hover:shadow-lg hover:shadow-[#A855F7]/50 disabled:opacity-50 flex items-center gap-2"
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            Generate mask
+            {t('mask.generate')}
           </button>
         )}
 
@@ -544,9 +546,9 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
                 disabled={busy}
                 onClick={runPreview}
                 className="px-4 py-2.5 rounded-xl bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] text-sm flex items-center gap-2 disabled:opacity-40"
-                title="Re-run preview on the reference frame"
+                title={t('mask.repreviewTitle')}
               >
-                <Sparkles size={14} /> Re-preview
+                <Sparkles size={14} /> {t('mask.repreview')}
               </button>
             )}
             <button
@@ -556,8 +558,8 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
             >
               {busy && phase !== 'ready' ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
               {phase === 'ready'
-                ? (engine === 'sam2' ? 'Re-track from prompts' : 'Re-run across clip')
-                : (engine === 'sam2' ? 'Track across clip' : 'Run across clip')}
+                ? (engine === 'sam2' ? t('mask.retrack') : t('mask.rerunClip'))
+                : (engine === 'sam2' ? t('mask.trackClip') : t('mask.runClip'))}
             </button>
           </>
         )}
@@ -569,17 +571,17 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
               onChange={(e) => setAlphaCodec(e.target.value as typeof alphaCodec)}
               className="bg-[#0F0F11] border-2 border-[#27272A] rounded-lg px-3 py-2 text-[#FAFAFA] text-xs"
             >
-              <option value="prores_4444_alpha">ProRes 4444 (.mov)</option>
-              <option value="vp9_alpha">VP9 alpha (.webm)</option>
+              <option value="prores_4444_alpha">{t('mask.codec.prores')}</option>
+              <option value="vp9_alpha">{t('mask.codec.vp9')}</option>
             </select>
             <button
               disabled={busy}
               onClick={runExport}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white text-sm font-semibold hover:shadow-lg hover:shadow-green-500/50 disabled:opacity-50 flex items-center gap-2"
-              title="Encode the clip with the SAM 2 mask as the alpha channel"
+              title={t('mask.exportTitle')}
             >
               {busy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-              Export with alpha
+              {t('mask.exportAlpha')}
             </button>
           </div>
         )}

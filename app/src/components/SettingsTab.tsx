@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Cpu, Zap, Target, Layers, FileVideo, HardDrive, Palette, Download, Settings2, Plus, FolderOpen, Loader2, Trash2, Upload, RefreshCw, Link, GitMerge, AlertTriangle } from 'lucide-react';
+import { Cpu, Zap, Target, Layers, FileVideo, Palette, Download, Settings2, FolderOpen, Loader2, Trash2, Upload, AlertTriangle, Clapperboard, RotateCcw } from 'lucide-react';
 import { api } from '../api/client';
-import type { AppSettings, IndexQueueItem } from '../api/types';
+import type { AppSettings } from '../api/types';
+import { DERUSH_ACTIONS, DERUSH_DEFAULT_KEYS, displayKey } from '../derushKeys';
+import { useI18n, useT, type Lang } from '../i18n';
 
 const sections = [
   { name: 'Indexing', icon: Cpu },
   { name: 'Models', icon: Zap },
   { name: 'Search', icon: Target },
   { name: 'Editor', icon: Layers },
+  { name: 'Derush', icon: Clapperboard },
   { name: 'Export', icon: FileVideo },
-  { name: 'Databases', icon: HardDrive },
   { name: 'Interface', icon: Palette },
   { name: 'Updates', icon: Download },
   { name: 'Advanced', icon: Settings2 },
@@ -17,7 +19,8 @@ const sections = [
 
 type SectionName = typeof sections[number]['name'];
 
-export default function SettingsTab({ runtimeDevice }: { runtimeDevice?: string }) {
+export default function SettingsTab({ runtimeDevice, gpuName, vramGb }: { runtimeDevice?: string; gpuName?: string; vramGb?: number | null }) {
+  const t = useT();
   const [activeSection, setActiveSection] = useState<SectionName>('Indexing');
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -53,7 +56,7 @@ export default function SettingsTab({ runtimeDevice }: { runtimeDevice?: string 
               <button key={section.name} onClick={() => setActiveSection(section.name)} className={`relative text-left px-4 py-3 rounded-xl text-sm transition-all flex items-center gap-3 ${isActive ? 'bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] shadow-lg shadow-[#8B5CF6]/30' : 'text-[#A1A1AA] hover:bg-[#27272A] hover:text-[#FAFAFA]'}`}>
                 {isActive && <div className="absolute inset-0 bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] rounded-xl blur opacity-50"></div>}
                 <Icon size={18} className="relative z-10" />
-                <span className="relative z-10 font-medium">{section.name}</span>
+                <span className="relative z-10 font-medium">{t(`settings.section.${section.name.toLowerCase()}`)}</span>
               </button>
             );
           })}
@@ -65,24 +68,24 @@ export default function SettingsTab({ runtimeDevice }: { runtimeDevice?: string 
 
         <div className="relative z-10 mb-8 flex items-end justify-between">
           <div>
-            <h2 className="text-3xl font-bold bg-gradient-to-r from-[#FAFAFA] to-[#A1A1AA] bg-clip-text text-transparent">{activeSection}</h2>
+            <h2 className="text-3xl font-bold bg-gradient-to-r from-[#FAFAFA] to-[#A1A1AA] bg-clip-text text-transparent">{t(`settings.section.${activeSection.toLowerCase()}`)}</h2>
             <div className="h-1 w-20 bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] rounded-full mt-2"></div>
           </div>
-          {saving && <div className="text-xs text-[#71717A] flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Saving</div>}
+          {saving && <div className="text-xs text-[#71717A] flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {t('common.saving')}</div>}
         </div>
 
         {error && <div className="relative z-10 mb-4 bg-red-500/10 border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2">{error}</div>}
 
         {!settings ? (
-          <div className="relative z-10 text-[#71717A] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading settings...</div>
+          <div className="relative z-10 text-[#71717A] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t('settings.loading')}</div>
         ) : (
           <div className="flex flex-col gap-4 max-w-4xl relative z-10">
-            {activeSection === 'Indexing' && <IndexingSection settings={settings} patch={patch} />}
+            {activeSection === 'Indexing' && <IndexingSection settings={settings} patch={patch} runtimeDevice={runtimeDevice} gpuName={gpuName} vramGb={vramGb} />}
             {activeSection === 'Models' && <ModelsSection settings={settings} patch={patch} runtimeDevice={runtimeDevice} />}
             {activeSection === 'Search' && <SearchSection settings={settings} patch={patch} />}
             {activeSection === 'Editor' && <EditorSection settings={settings} patch={patch} />}
+            {activeSection === 'Derush' && <DerushSection settings={settings} patch={patch} />}
             {activeSection === 'Export' && <ExportSection settings={settings} patch={patch} />}
-            {activeSection === 'Databases' && <DatabasesSection />}
             {activeSection === 'Interface' && <InterfaceSection settings={settings} patch={patch} />}
             {activeSection === 'Updates' && <UpdatesSection />}
             {activeSection === 'Advanced' && <AdvancedSection settings={settings} setSettings={setSettings} />}
@@ -130,12 +133,35 @@ function Slider({ value, min, max, step, onChange }: { value: number; min: numbe
   );
 }
 
-function IndexingSection({ settings, patch }: { settings: AppSettings; patch: Patch }) {
+// Rough VRAM → batch-size heuristic for SigLIP + wd-tagger inference at the
+// default 128-patch budget. Deliberately conservative: an OOM mid-index costs
+// far more time than a slightly under-filled GPU.
+function recommendedBatch(vramGb: number): number {
+  if (vramGb >= 24) return 32;
+  if (vramGb >= 16) return 24;
+  if (vramGb >= 12) return 16;
+  if (vramGb >= 10) return 12;
+  if (vramGb >= 8) return 8;
+  if (vramGb >= 6) return 6;
+  return 4;
+}
+
+function IndexingSection({ settings, patch, runtimeDevice, gpuName, vramGb }: { settings: AppSettings; patch: Patch; runtimeDevice?: string; gpuName?: string; vramGb?: number | null }) {
+  const t = useT();
   const s = settings.indexing;
   const isCpu = s.device === 'cpu';
+  const cpuRuntime = isCpu || runtimeDevice === 'cpu';
+  const rec = !cpuRuntime && typeof vramGb === 'number' && vramGb > 0 ? recommendedBatch(vramGb) : null;
+  const batchHint = `${t('settings.batch.hint')} ${
+    cpuRuntime
+      ? t('settings.batch.rec.cpu')
+      : rec !== null
+        ? t('settings.batch.rec', { gpu: gpuName ?? 'GPU', vram: vramGb!, rec })
+        : ''
+  }`.trim();
   return (
     <>
-      <Row label="Acceleration" hint="Toggle between GPU (auto-detect best backend) and CPU. Indexing on CPU is ~20× slower but works everywhere.">
+      <Row label={t('settings.indexing.accel.label')} hint={t('settings.indexing.accel.hint')}>
         <div className="flex gap-2">
           <button
             onClick={() => patch('indexing', { device: 'auto' })}
@@ -159,46 +185,56 @@ function IndexingSection({ settings, patch }: { settings: AppSettings; patch: Pa
           </button>
         </div>
       </Row>
-      <Row label="Device (advanced)" hint="Override the auto-detection — only for power users with multiple GPUs or specific backend needs.">
+      <Row label={t('settings.indexing.device.label')} hint={t('settings.indexing.device.hint')}>
         <select value={s.device} onChange={(e) => patch('indexing', { device: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value="auto">Auto-detect (recommended)</option>
+          <option value="auto">{t('settings.indexing.device.auto')}</option>
           <option value="cuda">CUDA (NVIDIA)</option>
-          <option value="dml">DirectML (AMD / Intel on Windows)</option>
+          <option value="dml">{t('settings.indexing.device.dml')}</option>
           <option value="xpu">Intel XPU</option>
           <option value="mps">Apple MPS</option>
           <option value="cpu">CPU</option>
         </select>
       </Row>
-      <Row label="Batch size" hint="Frames processed per inference pass">
-        <Slider value={s.batch_size} min={1} max={64} step={1} onChange={(v) => patch('indexing', { batch_size: v })} />
+      <Row label={t('settings.batch.label')} hint={batchHint}>
+        <div className="flex items-center gap-3">
+          {rec !== null && rec !== s.batch_size && (
+            <button
+              onClick={() => patch('indexing', { batch_size: rec })}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#8B5CF6]/20 text-[#A78BFA] border border-[#8B5CF6]/40 hover:bg-[#8B5CF6]/30 whitespace-nowrap"
+            >
+              {t('settings.batch.apply')} {rec}
+            </button>
+          )}
+          <Slider value={s.batch_size} min={1} max={64} step={1} onChange={(v) => patch('indexing', { batch_size: v })} />
+        </div>
       </Row>
-      <Row label="Indexing mode" hint="Trade speed for accuracy">
+      <Row label={t('settings.indexing.mode.label')} hint={t('settings.indexing.mode.hint')}>
         <div className="flex gap-2">
           {(['fast', 'balanced', 'accurate'] as const).map((m) => (
             <button key={m} onClick={() => patch('indexing', { mode: m })} className={`px-4 py-2 rounded-lg text-sm capitalize ${s.mode === m ? 'bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-white shadow-lg shadow-[#8B5CF6]/30' : 'bg-[#27272A] text-[#71717A] hover:text-[#FAFAFA]'}`}>{m}</button>
           ))}
         </div>
       </Row>
-      <Row label="Sub-segmentation" hint="Split long scenes via wd-tagger embedding drift">
+      <Row label={t('settings.subseg.label')} hint={s.sub_segmentation && s.mode === 'fast' ? t('settings.subseg.fastWarning') : t('settings.subseg.hint')}>
         <Toggle on={s.sub_segmentation} onChange={(v) => patch('indexing', { sub_segmentation: v })} />
       </Row>
-      <Row label="Sub-seg threshold" hint="Higher = fewer sub-cuts (0.2 - 0.5)">
+      <Row label={t('settings.subseg.threshold.label')} hint={t('settings.subseg.threshold.hint')}>
         <Slider value={Math.round(s.sub_segmentation_threshold * 100)} min={20} max={50} step={1} onChange={(v) => patch('indexing', { sub_segmentation_threshold: v / 100 })} />
       </Row>
-      <Row label="Generate proxies" hint="VP9 WebM proxies for fast hover preview">
+      <Row label={t('settings.indexing.proxies.label')} hint={t('settings.indexing.proxies.hint')}>
         <Toggle on={s.generate_proxies} onChange={(v) => patch('indexing', { generate_proxies: v })} />
       </Row>
-      <Row label="Proxy quality" hint="Bitrate for proxy files">
+      <Row label={t('settings.indexing.proxyQuality.label')} hint={t('settings.indexing.proxyQuality.hint')}>
         <select value={s.proxy_quality} onChange={(e) => patch('indexing', { proxy_quality: e.target.value as any })} className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#EC4899]">
-          <option value="low">Low (300 kbps)</option>
-          <option value="medium">Medium (500 kbps)</option>
-          <option value="high">High (1 Mbps)</option>
+          <option value="low">{t('settings.indexing.proxyQuality.low')}</option>
+          <option value="medium">{t('settings.indexing.proxyQuality.medium')}</option>
+          <option value="high">{t('settings.indexing.proxyQuality.high')}</option>
         </select>
       </Row>
-      <Row label="Auto-skip indexed" hint="Skip videos already in the database">
+      <Row label={t('settings.indexing.autoSkip.label')} hint={t('settings.indexing.autoSkip.hint')}>
         <Toggle on={s.auto_skip_indexed} onChange={(v) => patch('indexing', { auto_skip_indexed: v })} />
       </Row>
-      <Row label="Scene-detect threshold" hint="ffmpeg scene-change sensitivity">
+      <Row label={t('settings.indexing.sceneThreshold.label')} hint={t('settings.indexing.sceneThreshold.hint')}>
         <Slider value={Math.round(s.scene_detect_threshold * 100)} min={10} max={60} step={1} onChange={(v) => patch('indexing', { scene_detect_threshold: v / 100 })} />
       </Row>
     </>
@@ -206,85 +242,87 @@ function IndexingSection({ settings, patch }: { settings: AppSettings; patch: Pa
 }
 
 function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettings; patch: Patch; runtimeDevice?: string }) {
+  const t = useT();
   const s = settings.models;
   const sam2Available = runtimeDevice !== 'dml';
   return (
     <>
-      <Row label="wd-tagger variant" hint="Anime tagger backbone">
+      <Row label={t('settings.models.wd.label')} hint={t('settings.models.wd.hint')}>
         <select value={s.wd_tagger_variant} onChange={(e) => patch('models', { wd_tagger_variant: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value="SmilingWolf/wd-vit-tagger-v3">wd-vit-v3 (default, fast)</option>
-          <option value="SmilingWolf/wd-vit-large-tagger-v3">wd-vit-large-v3 (better)</option>
-          <option value="SmilingWolf/wd-eva02-large-tagger-v3">wd-eva02-large-v3 (best)</option>
+          <option value="SmilingWolf/wd-vit-tagger-v3">{t('settings.models.wd.opt.default')}</option>
+          <option value="SmilingWolf/wd-vit-large-tagger-v3">{t('settings.models.wd.opt.better')}</option>
+          <option value="SmilingWolf/wd-eva02-large-tagger-v3">{t('settings.models.wd.opt.best')}</option>
         </select>
       </Row>
-      <Row label="SigLIP variant" hint="Semantic embedding backbone. base is fast but can confuse similar proper nouns (Lucario vs Dracaufeu). so400m is 4× bigger and discriminates them properly — pick it if your library has lots of named entities.">
+      <Row label={t('settings.models.siglip.label')} hint={t('settings.models.siglip.hint')}>
         <select value={s.siglip_variant} onChange={(e) => patch('models', { siglip_variant: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value="google/siglip2-base-patch16-naflex">base-naflex — 93M, ~35s/ep, ⚡ Speed (default)</option>
-          <option value="google/siglip2-so400m-patch16-naflex">so400m-naflex — 400M, ~60s/ep, ⭐ Legacy quality</option>
+          <option value="google/siglip2-base-patch16-naflex">{t('settings.models.siglip.opt.base')}</option>
+          <option value="google/siglip2-so400m-patch16-naflex">{t('settings.models.siglip.opt.so400m')}</option>
         </select>
       </Row>
-      <Row label="SigLIP patches" hint="NaFlex token budget per image. 128 is the sweet spot; bumping to 256 only adds ~5-10% accuracy on fine visual detail and costs ~50% more wallclock per episode. Lower if you want to push speed further.">
+      <Row label={t('settings.models.patches.label')} hint={t('settings.models.patches.hint')}>
         <select value={s.siglip_max_num_patches} onChange={(e) => patch('models', { siglip_max_num_patches: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value={64}>64 — fastest, noticeable accuracy drop</option>
-          <option value={128}>128 — Balanced (default)</option>
+          <option value={64}>{t('settings.models.patches.opt.64')}</option>
+          <option value={128}>{t('settings.models.patches.opt.128')}</option>
           <option value={192}>192</option>
-          <option value={256}>256 — legacy / max quality, ~+50% time</option>
+          <option value={256}>{t('settings.models.patches.opt.256')}</option>
         </select>
       </Row>
-      <Row label="Tag storage threshold" hint="Discard tags below this confidence at index time">
+      <Row label={t('settings.models.tagThreshold.label')} hint={t('settings.models.tagThreshold.hint')}>
         <Slider value={Math.round(s.default_tag_threshold * 100)} min={30} max={70} step={1} onChange={(v) => patch('models', { default_tag_threshold: v / 100 })} />
       </Row>
-      <Row label="VRAM idle offload" hint="Seconds before models unload from GPU">
+      <Row label={t('settings.models.vramOffload.label')} hint={t('settings.models.vramOffload.hint')}>
         <select value={s.vram_idle_offload} onChange={(e) => patch('models', { vram_idle_offload: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#EC4899]">
-          <option value={0}>Off</option>
+          <option value={0}>{t('common.off')}</option>
           <option value={30}>30 s</option>
           <option value={60}>60 s</option>
           <option value={300}>5 min</option>
         </select>
       </Row>
-      <Row label="TensorRT optimization" hint="CUDA only. Compiles SigLIP vision passes on first use when torch-tensorrt is installed">
+      <Row label={t('settings.models.tensorrt.label')} hint={t('settings.models.tensorrt.hint')}>
         <Toggle on={s.use_tensorrt} onChange={(v) => patch('models', { use_tensorrt: v })} />
       </Row>
-      <Row label="Mask & alpha export" hint="Adds a 🎭 Mask button in the MiniEditor. Lets you isolate a character and export the clip as ProRes 4444 alpha .mov for compositing in Resolve/AE.">
+      <Row label={t('settings.models.mask.label')} hint={t('settings.models.mask.hint')}>
         <Toggle on={!!s.enable_mask} onChange={(v) => patch('models', { enable_mask: v })} />
       </Row>
-      <Row label="Mask engine" hint="BiRefNet = automatic foreground segmentation. SAM 2 = click-to-mask tracking when you need to pick one character among several.">
+      <Row label={t('settings.models.maskEngine.label')} hint={t('settings.models.maskEngine.hint')}>
         <select
           value={sam2Available ? (s.mask_engine || 'birefnet') : 'birefnet'}
           onChange={(e) => patch('models', { mask_engine: e.target.value as 'birefnet' | 'sam2' })}
           disabled={!s.enable_mask}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
-          <option value="birefnet">BiRefNet — Auto, recommended for anime (default)</option>
-          <option value="sam2" disabled={!sam2Available}>SAM 2 - Manual click, for multi-subject scenes</option>
+          <option value="birefnet">{t('settings.models.maskEngine.opt.birefnet')}</option>
+          <option value="sam2" disabled={!sam2Available}>{t('settings.models.maskEngine.opt.sam2')}</option>
         </select>
       </Row>
-      <Row label="BiRefNet variant" hint="Used by Auto. general = best all-rounder. HR = 2K+ inputs, fine hair/fur, ~2x VRAM. portrait = face-tuned.">
+      <Row label={t('settings.models.autoModel.label')} hint={t('settings.models.autoModel.hint')}>
         <select
           value={s.birefnet_variant || 'general'}
-          onChange={(e) => patch('models', { birefnet_variant: e.target.value as 'general' | 'hr' | 'portrait' })}
+          onChange={(e) => patch('models', { birefnet_variant: e.target.value as 'general' | 'hr' | 'portrait' | 'anime' })}
           disabled={!s.enable_mask || s.mask_engine !== 'birefnet'}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
-          <option value="general">general — ~440 MB, ⭐ Default</option>
-          <option value="hr">HR — high-resolution, ~2× VRAM</option>
-          <option value="portrait">portrait — face-tuned</option>
+          <option value="anime">{t('settings.models.autoModel.opt.anime')}</option>
+          <option value="general">{t('settings.models.autoModel.opt.general')}</option>
+          <option value="hr">{t('settings.models.autoModel.opt.hr')}</option>
+          <option value="portrait">{t('settings.models.autoModel.opt.portrait')}</option>
         </select>
       </Row>
-      <Row label="SAM 2 variant" hint="Used only when Mask engine = SAM 2. Heavier = better mask quality on hard cases. base_plus is the qual/VRAM sweet spot on 8 GB GPUs.">
+      <Row label={t('settings.models.sam2.label')} hint={t('settings.models.sam2.hint')}>
         <select
           value={s.sam2_variant || 'base_plus'}
           onChange={(e) => patch('models', { sam2_variant: e.target.value as 'tiny' | 'small' | 'base_plus' | 'large' })}
           disabled={!s.enable_mask || !sam2Available || s.mask_engine !== 'sam2'}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
-          <option value="tiny">tiny — ~150 MB, fastest, weakest on cluttered scenes</option>
-          <option value="small">small — ~190 MB</option>
-          <option value="base_plus">base_plus — ~350 MB, ⭐ Sweet spot (default)</option>
-          <option value="large">large — ~900 MB, best quality, ~+50% VRAM</option>
+          <option value="tiny">{t('settings.models.sam2.opt.tiny')}</option>
+          <option value="small">{t('settings.models.sam2.opt.small')}</option>
+          <option value="base_plus">{t('settings.models.sam2.opt.basePlus')}</option>
+          <option value="large">{t('settings.models.sam2.opt.large')}</option>
         </select>
       </Row>
-      <Row label="Roto resolution" hint="Max side sent to the roto models. 1080 preserves small anime hair better than 720; 1440+ is slower and heavier.">
+      <Row label={t('settings.models.rotoRes.label')} hint={t('settings.models.rotoRes.hint')}>
         <Slider
           value={s.mask_max_dim ?? 1080}
           min={720}
@@ -293,13 +331,31 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           onChange={(v) => patch('models', { mask_max_dim: v })}
         />
       </Row>
-      <Row label="Hard-mask shrink (px)" hint="SAM 2/manual cleanup only. Auto soft alpha skips this so hair tips and antialiased outlines stay intact. 0 = preserve detail, 2+ = aggressive halo removal.">
+      <Row label={t('settings.models.edgeRefine.label')} hint={t('settings.models.edgeRefine.hint')}>
+        <Toggle on={s.mask_edge_refine_enabled ?? true} onChange={(v) => patch('models', { mask_edge_refine_enabled: v })} />
+      </Row>
+      <Row label={t('settings.models.bgAware.label')} hint={t('settings.models.bgAware.hint')}>
+        <Toggle on={s.mask_bg_aware_cleanup_enabled ?? true} onChange={(v) => patch('models', { mask_bg_aware_cleanup_enabled: v })} />
+      </Row>
+      <Row label={t('settings.models.temporal.label')} hint={t('settings.models.temporal.hint')}>
+        <Toggle on={s.mask_temporal_smooth_enabled ?? true} onChange={(v) => patch('models', { mask_temporal_smooth_enabled: v })} />
+      </Row>
+      <Row label={t('settings.models.smoothStrength.label')} hint={t('settings.models.smoothStrength.hint')}>
+        <Slider
+          value={Math.round((s.mask_temporal_smooth_strength ?? 0.5) * 100)}
+          min={10}
+          max={100}
+          step={5}
+          onChange={(v) => patch('models', { mask_temporal_smooth_strength: v / 100 })}
+        />
+      </Row>
+      <Row label={t('settings.models.hardShrink.label')} hint={t('settings.models.hardShrink.hint')}>
         <Slider value={s.mask_shrink_px ?? 0} min={0} max={5} step={1} onChange={(v) => patch('models', { mask_shrink_px: v })} />
       </Row>
-      <Row label="Suppress BG-colored halo" hint="SAM 2/manual cleanup only. Leave off for soft alpha: it can mistake dark hair or shaded line art for background and erase detail.">
+      <Row label={t('settings.models.bgSuppress.label')} hint={t('settings.models.bgSuppress.hint')}>
         <Toggle on={s.mask_bg_suppress_enabled ?? false} onChange={(v) => patch('models', { mask_bg_suppress_enabled: v })} />
       </Row>
-      <Row label="BG suppress threshold" hint="Hard-mask cleanup threshold. Lower (10-15) preserves detail, higher (40-50) removes more halo but can eat real line art. Ignored for Auto soft alpha.">
+      <Row label={t('settings.models.bgSuppressThreshold.label')} hint={t('settings.models.bgSuppressThreshold.hint')}>
         <Slider
           value={s.mask_bg_suppress_threshold ?? 25}
           min={10}
@@ -308,10 +364,10 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           onChange={(v) => patch('models', { mask_bg_suppress_threshold: v })}
         />
       </Row>
-      <Row label="Soft-alpha BG cleanup" hint="Auto cleanup. Removes background-coloured pixels near hair gaps while keeping soft alpha on the real strand edges.">
+      <Row label={t('settings.models.softBg.label')} hint={t('settings.models.softBg.hint')}>
         <Toggle on={s.mask_soft_bg_suppress_enabled ?? false} onChange={(v) => patch('models', { mask_soft_bg_suppress_enabled: v })} />
       </Row>
-      <Row label="Soft BG threshold" hint="Lower preserves more edge detail, higher removes more leaked background between hair spikes.">
+      <Row label={t('settings.models.softBgThreshold.label')} hint={t('settings.models.softBgThreshold.hint')}>
         <Slider
           value={s.mask_soft_bg_suppress_threshold ?? 25}
           min={8}
@@ -320,7 +376,7 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           onChange={(v) => patch('models', { mask_soft_bg_suppress_threshold: v })}
         />
       </Row>
-      <Row label="Soft cleanup band" hint="Width in pixels around the alpha boundary to inspect. Higher reaches deeper into concave hair gaps.">
+      <Row label={t('settings.models.softBand.label')} hint={t('settings.models.softBand.hint')}>
         <Slider
           value={s.mask_soft_bg_suppress_edge_px ?? 16}
           min={2}
@@ -329,7 +385,7 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           onChange={(v) => patch('models', { mask_soft_bg_suppress_edge_px: v })}
         />
       </Row>
-      <Row label="Soft alpha shrink" hint="Contracts Auto alpha before export. 0 preserves the model output; 1+ can remove haze but may eat hair/body parts.">
+      <Row label={t('settings.models.softShrink.label')} hint={t('settings.models.softShrink.hint')}>
         <Slider
           value={s.mask_soft_shrink_px ?? 0}
           min={0}
@@ -338,7 +394,7 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           onChange={(v) => patch('models', { mask_soft_shrink_px: v })}
         />
       </Row>
-      <Row label="Soft alpha low cut" hint="Pixels below this alpha are pushed toward transparent. Keep at 0 to avoid deleting weak hair/body alpha.">
+      <Row label={t('settings.models.softLowCut.label')} hint={t('settings.models.softLowCut.hint')}>
         <Slider
           value={Math.round((s.mask_soft_alpha_black ?? 0.0) * 100)}
           min={0}
@@ -347,10 +403,10 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           onChange={(v) => patch('models', { mask_soft_alpha_black: v / 100 })}
         />
       </Row>
-      <Row label="RGB decontaminate export" hint="Slow high-quality edge color cleanup for soft alpha. Keep off for fast exports; enable only when edge color spill is worse than export time.">
+      <Row label={t('settings.models.rgbDecontam.label')} hint={t('settings.models.rgbDecontam.hint')}>
         <Toggle on={s.mask_rgb_decontaminate_enabled ?? false} onChange={(v) => patch('models', { mask_rgb_decontaminate_enabled: v })} />
       </Row>
-      <Row label="Hugging Face token" hint="Optional — for private models or to avoid rate limits">
+      <Row label={t('settings.models.hfToken.label')} hint={t('settings.models.hfToken.hint')}>
         <input
           type="password"
           value={s.hf_token}
@@ -364,21 +420,22 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
 }
 
 function SearchSection({ settings, patch }: { settings: AppSettings; patch: Patch }) {
+  const t = useT();
   const s = settings.search;
   return (
     <>
-      <Row label="Default similarity threshold" hint="Below this, results are hidden. SigLIP 2 NaFlex scores are typically 0.05-0.20 so 10 is a good default.">
+      <Row label={t('settings.search.threshold.label')} hint={t('settings.search.threshold.hint')}>
         <Slider value={Math.round(s.threshold * 100)} min={5} max={50} step={1} onChange={(v) => patch('search', { threshold: v / 100 })} />
       </Row>
-      <Row label="Max results" hint="Cap on returned scenes per query">
+      <Row label={t('settings.search.maxResults.label')} hint={t('settings.search.maxResults.hint')}>
         <select value={s.max_results} onChange={(e) => patch('search', { max_results: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
           <option value={50}>50</option>
           <option value={200}>200</option>
           <option value={1000}>1000</option>
-          <option value={10000}>Unlimited</option>
+          <option value={10000}>{t('settings.search.maxResults.unlimited')}</option>
         </select>
       </Row>
-      <Row label="wd-tagger boost" hint="Score bonus per matched tag token">
+      <Row label={t('settings.search.tagBoost.label')} hint={t('settings.search.tagBoost.hint')}>
         <Slider value={Math.round(s.tag_boost * 100)} min={0} max={30} step={1} onChange={(v) => patch('search', { tag_boost: v / 100 })} />
       </Row>
     </>
@@ -386,10 +443,11 @@ function SearchSection({ settings, patch }: { settings: AppSettings; patch: Patc
 }
 
 function EditorSection({ settings, patch }: { settings: AppSettings; patch: Patch }) {
+  const t = useT();
   const s = settings.interface;
   return (
     <>
-      <Row label="Hover preview delay" hint="Time before proxy starts playing on hover">
+      <Row label={t('settings.editor.hoverDelay.label')} hint={t('settings.editor.hoverDelay.hint')}>
         <select value={s.hover_delay_ms} onChange={(e) => patch('interface', { hover_delay_ms: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#EC4899]">
           <option value={100}>100 ms</option>
           <option value={200}>200 ms</option>
@@ -397,26 +455,92 @@ function EditorSection({ settings, patch }: { settings: AppSettings; patch: Patc
         </select>
       </Row>
       <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
-        <div className="text-[#FAFAFA] font-semibold mb-2">Keyboard shortcuts (mini-editor)</div>
+        <div className="text-[#FAFAFA] font-semibold mb-2">{t('settings.editor.shortcuts.title')}</div>
         <div className="grid grid-cols-2 gap-2 text-sm font-mono">
-          <div className="text-[#71717A]">J / K / L</div><div className="text-[#A1A1AA]">Scrub back · pause · scrub forward</div>
-          <div className="text-[#71717A]">, / .</div><div className="text-[#A1A1AA]">Step 1 frame back / forward</div>
-          <div className="text-[#71717A]">I / O</div><div className="text-[#A1A1AA]">Set IN / OUT to current frame</div>
-          <div className="text-[#71717A]">← / →</div><div className="text-[#A1A1AA]">Prev / next scene in the current list</div>
-          <div className="text-[#71717A]">Space</div><div className="text-[#A1A1AA]">Play / pause</div>
+          <div className="text-[#71717A]">J / K / L</div><div className="text-[#A1A1AA]">{t('settings.editor.shortcuts.jkl')}</div>
+          <div className="text-[#71717A]">, / .</div><div className="text-[#A1A1AA]">{t('settings.editor.shortcuts.step')}</div>
+          <div className="text-[#71717A]">I / O</div><div className="text-[#A1A1AA]">{t('settings.editor.shortcuts.inout')}</div>
+          <div className="text-[#71717A]">← / →</div><div className="text-[#A1A1AA]">{t('settings.editor.shortcuts.prevnext')}</div>
+          <div className="text-[#71717A]">Space</div><div className="text-[#A1A1AA]">{t('settings.editor.shortcuts.space')}</div>
         </div>
       </div>
     </>
   );
 }
 
+function DerushSection({ settings, patch }: { settings: AppSettings; patch: Patch }) {
+  const t = useT();
+  const keys = { ...DERUSH_DEFAULT_KEYS, ...(settings.derush?.keys ?? {}) };
+  const setKey = (action: string, key: string) => {
+    // Steal the key from any action that already uses it, so two actions can
+    // never silently share a binding.
+    const next = { ...keys };
+    for (const a of Object.keys(next)) {
+      if (next[a] === key && a !== action) next[a] = '';
+    }
+    next[action] = key;
+    patch('derush', { keys: next });
+  };
+  return (
+    <>
+      <div className="text-sm text-[#71717A] -mb-1">
+        {t('settings.derush.intro')}
+      </div>
+      {DERUSH_ACTIONS.map((a) => (
+        <Row key={a.id} label={t(`derush.action.${a.id}.label`)} hint={t(`derush.action.${a.id}.hint`)}>
+          <KeyCapture value={keys[a.id] ?? ''} onChange={(k) => setKey(a.id, k)} />
+        </Row>
+      ))}
+      <Row label={t('settings.derush.reset.label')} hint={t('settings.derush.reset.hint')}>
+        <button
+          onClick={() => patch('derush', { keys: { ...DERUSH_DEFAULT_KEYS } })}
+          className="flex items-center gap-2 bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm"
+        >
+          <RotateCcw size={14} /> {t('settings.derush.reset.button')}
+        </button>
+      </Row>
+    </>
+  );
+}
+
+function KeyCapture({ value, onChange }: { value: string; onChange: (key: string) => void }) {
+  const t = useT();
+  const [listening, setListening] = useState(false);
+  return (
+    <button
+      onClick={() => setListening(true)}
+      onKeyDown={(e) => {
+        if (!listening) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'Escape') { setListening(false); return; }
+        if (['shift', 'control', 'alt', 'meta'].includes(e.key.toLowerCase())) return;
+        onChange(e.key.toLowerCase());
+        setListening(false);
+      }}
+      onBlur={() => setListening(false)}
+      className={`min-w-[110px] px-4 py-2 rounded-lg text-sm font-mono font-bold border-2 transition-all ${
+        listening
+          ? 'border-[#EC4899] bg-[#EC4899]/10 text-[#EC4899] animate-pulse'
+          : value
+            ? 'border-[#27272A] bg-[#0F0F11] text-[#FAFAFA] hover:border-[#8B5CF6]'
+            : 'border-dashed border-[#3F3F46] bg-[#0F0F11] text-[#71717A]'
+      }`}
+    >
+      {listening ? t('settings.key.press') : value ? displayKey(value) : t('settings.key.unbound')}
+    </button>
+  );
+}
+
 function ExportSection({ settings, patch }: { settings: AppSettings; patch: Patch }) {
+  const t = useT();
   const s = settings.export;
   return (
     <>
-      <Row label="Codec" hint="Video codec for exported clips">
+      <Row label={t('settings.export.codec.label')} hint={t('settings.export.codec.hint')}>
         <select value={s.codec} onChange={(e) => patch('export', { codec: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value="libx264">H.264</option>
+          <option value="h264_nvenc">{t('settings.export.codec.opt.nvenc')}</option>
+          <option value="libx264">H.264 (CPU, CRF)</option>
           <option value="libx265">H.265 / HEVC</option>
           <option value="prores_ks">ProRes 422</option>
           <option value="dnxhr">DNxHR</option>
@@ -424,37 +548,46 @@ function ExportSection({ settings, patch }: { settings: AppSettings; patch: Patc
           <option value="libsvtav1">AV1</option>
         </select>
       </Row>
-      <Row label="CRF" hint="Lower = better quality, larger files">
+      <Row label={t('settings.export.crf.label')} hint={t('settings.export.crf.hint')}>
         <Slider value={s.crf} min={0} max={51} step={1} onChange={(v) => patch('export', { crf: v })} />
       </Row>
-      <Row label="Resolution" hint="Output resolution">
+      <Row label={t('settings.export.resolution.label')} hint={t('settings.export.resolution.hint')}>
         <select value={s.resolution} onChange={(e) => patch('export', { resolution: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value="source">Source</option>
+          <option value="source">{t('settings.export.resolution.source')}</option>
           <option value="1080p">1080p</option>
           <option value="720p">720p</option>
           <option value="480p">480p</option>
         </select>
       </Row>
-      <Row label="Audio" hint="How to handle audio track">
+      <Row label={t('settings.export.audio.label')} hint={t('settings.export.audio.hint')}>
         <select value={s.audio} onChange={(e) => patch('export', { audio: e.target.value })} className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#EC4899]">
-          <option value="copy">Copy (fast)</option>
-          <option value="encode">Re-encode AAC</option>
-          <option value="mute">Mute</option>
+          <option value="copy">{t('settings.export.audio.copy')}</option>
+          <option value="encode">{t('settings.export.audio.encode')}</option>
+          <option value="mute">{t('settings.export.audio.mute')}</option>
         </select>
       </Row>
-      <Row label="Naming template" hint="Variables: {anime} {episode} {scene_id} {tags}">
+      {s.audio === 'encode' && (
+        <Row label={t('settings.export.aacBitrate.label')} hint={t('settings.export.aacBitrate.hint')}>
+          <select value={s.audio_bitrate_kbps ?? 320} onChange={(e) => patch('export', { audio_bitrate_kbps: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#EC4899]">
+            <option value={192}>192 kbps</option>
+            <option value={256}>256 kbps</option>
+            <option value={320}>320 kbps</option>
+          </select>
+        </Row>
+      )}
+      <Row label={t('settings.export.naming.label')} hint={t('settings.export.naming.hint')}>
         <input type="text" value={s.naming_template} onChange={(e) => patch('export', { naming_template: e.target.value })} className="bg-[#0F0F11] border-2 border-[#27272A] rounded-lg px-4 py-2.5 text-[#FAFAFA] text-sm font-mono focus:outline-none focus:border-[#8B5CF6] w-80" />
       </Row>
-      <Row label="Output folder" hint="Where exported clips are saved">
+      <Row label={t('settings.export.outputFolder.label')} hint={t('settings.export.outputFolder.hint')}>
         <button onClick={async () => {
           const p = await window.amvBridge?.openFileDialog({ directory: true });
           if (p && p[0]) patch('export', { output_folder: p[0] });
         }} className="bg-[#0F0F11] border-2 border-[#27272A] hover:border-[#8B5CF6]/50 rounded-lg px-4 py-2.5 text-[#A1A1AA] text-sm flex items-center gap-2 max-w-[400px] truncate">
           <FolderOpen size={14} />
-          <span className="truncate">{s.output_folder || 'Choose folder...'}</span>
+          <span className="truncate">{s.output_folder || t('settings.export.outputFolder.choose')}</span>
         </button>
       </Row>
-      <Row label="Open folder after export" hint="Reveal exported file in the OS file manager">
+      <Row label={t('settings.export.openAfter.label')} hint={t('settings.export.openAfter.hint')}>
         <Toggle on={s.open_folder_after} onChange={(v) => patch('export', { open_folder_after: v })} />
       </Row>
     </>
@@ -462,22 +595,29 @@ function ExportSection({ settings, patch }: { settings: AppSettings; patch: Patc
 }
 
 function InterfaceSection({ settings, patch }: { settings: AppSettings; patch: Patch }) {
+  const { lang, setLang, t } = useI18n();
   const s = settings.interface;
   return (
     <>
-      <Row label="Theme" hint="Light theme planned for v0.5">
+      <Row label={t('settings.language.label')} hint={t('settings.language.hint')}>
+        <select value={lang} onChange={(e) => setLang(e.target.value as Lang)} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+        </select>
+      </Row>
+      <Row label={t('settings.interface.theme.label')} hint={t('settings.interface.theme.hint')}>
         <select disabled value={s.theme} className="bg-[#0F0F11] border-2 border-[#27272A] rounded-lg px-5 py-2.5 text-[#71717A] opacity-60">
-          <option value="dark">Dark</option>
+          <option value="dark">{t('settings.interface.theme.dark')}</option>
         </select>
       </Row>
-      <Row label="Thumbnail size" hint="Gallery thumbnail size">
+      <Row label={t('settings.interface.thumb.label')} hint={t('settings.interface.thumb.hint')}>
         <select value={s.thumbnail_size} onChange={(e) => patch('interface', { thumbnail_size: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
-          <option value="small">Small</option>
-          <option value="medium">Medium</option>
-          <option value="large">Large</option>
+          <option value="small">{t('common.small')}</option>
+          <option value="medium">{t('common.medium')}</option>
+          <option value="large">{t('common.large')}</option>
         </select>
       </Row>
-      <Row label="Hover preview delay" hint="Time before video proxy starts">
+      <Row label={t('settings.editor.hoverDelay.label')} hint={t('settings.interface.hoverDelay.hint')}>
         <select value={s.hover_delay_ms} onChange={(e) => patch('interface', { hover_delay_ms: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#EC4899]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#EC4899]">
           <option value={100}>100 ms</option>
           <option value={200}>200 ms</option>
@@ -489,10 +629,11 @@ function InterfaceSection({ settings, patch }: { settings: AppSettings; patch: P
 }
 
 function UpdatesSection() {
+  const t = useT();
   return (
     <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
-      <div className="text-[#FAFAFA] font-semibold mb-1">AMV Tools v0.1.0-alpha</div>
-      <div className="text-[#71717A] text-sm">Auto-update will ship with v1.0 via electron-updater.</div>
+      <div className="text-[#FAFAFA] font-semibold mb-1">AMV Tools v0.2.0-alpha</div>
+      <div className="text-[#71717A] text-sm">{t('settings.updates.body')}</div>
     </div>
   );
 }
@@ -520,20 +661,21 @@ function AdvancedSection({ settings, setSettings }: { settings: AppSettings; set
   }
 
   const ref = useRef<HTMLInputElement>(null);
+  const t = useT();
 
   return (
     <>
       <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
-        <div className="text-[#FAFAFA] font-semibold mb-2">Settings JSON</div>
-        <div className="text-[#71717A] text-sm mb-4">Export/import full settings. Useful for backups or sharing presets between machines.</div>
+        <div className="text-[#FAFAFA] font-semibold mb-2">{t('settings.advanced.json.title')}</div>
+        <div className="text-[#71717A] text-sm mb-4">{t('settings.advanced.json.hint')}</div>
         <div className="flex gap-3">
-          <button onClick={exportJson} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Download size={14} /> Export JSON</button>
-          <button onClick={() => ref.current?.click()} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Upload size={14} /> Import JSON</button>
+          <button onClick={exportJson} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Download size={14} /> {t('settings.advanced.exportJson')}</button>
+          <button onClick={() => ref.current?.click()} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Upload size={14} /> {t('settings.advanced.importJson')}</button>
           <input ref={ref} type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importJson(f); }} />
         </div>
       </div>
       <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
-        <div className="text-[#FAFAFA] font-semibold mb-1">Settings file</div>
+        <div className="text-[#FAFAFA] font-semibold mb-1">{t('settings.advanced.file')}</div>
         <div className="text-[#71717A] text-xs font-mono break-all">{`~/.AMVTools/settings.json`} (Windows: %APPDATA%\\AMVTools\\settings.json)</div>
       </div>
       <DangerZone />
@@ -542,6 +684,7 @@ function AdvancedSection({ settings, setSettings }: { settings: AppSettings; set
 }
 
 function DangerZone() {
+  const t = useT();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const supported = typeof window.amvBridge?.cleanReinstall === 'function';
@@ -554,7 +697,7 @@ function DangerZone() {
       // The app is being relaunched — nothing more to do.
     } catch (err) {
       setBusy(false);
-      alert(`Clean install failed: ${(err as Error).message}`);
+      alert(t('settings.danger.alert', { message: (err as Error).message }));
     }
   }
 
@@ -563,26 +706,24 @@ function DangerZone() {
       <div className="flex items-start gap-3 mb-3">
         <AlertTriangle size={20} className="text-red-400 mt-0.5 flex-shrink-0" />
         <div className="flex-1">
-          <div className="text-red-300 font-semibold">Danger zone</div>
+          <div className="text-red-300 font-semibold">{t('settings.danger.title')}</div>
           <div className="text-[#A1A1AA] text-sm mt-1">
-            Reset the Python environment and the local index, then relaunch the
-            onboarding wizard. Use this if the GPU backend is misconfigured or if
-            the venv is corrupted.
+            {t('settings.danger.desc')}
           </div>
         </div>
       </div>
       <div className="text-xs text-[#71717A] mb-4 ml-8">
-        <div className="font-semibold text-[#A1A1AA] mb-1">This will delete:</div>
+        <div className="font-semibold text-[#A1A1AA] mb-1">{t('settings.danger.deletes')}</div>
         <ul className="list-disc list-inside space-y-0.5">
-          <li>The Python virtual environment (<span className="font-mono">.venv</span>) — full re-download of PyTorch &amp; co. (~1-3 GB) on next launch</li>
-          <li>The scene index database (<span className="font-mono">amv_tools.db</span>) — all indexed scenes are lost</li>
-          <li>Settings and thumbnails — your preferences will be reset</li>
+          <li>{t('settings.danger.del.venv.a')}<span className="font-mono">.venv</span>{t('settings.danger.del.venv.b')}</li>
+          <li>{t('settings.danger.del.db.a')}<span className="font-mono">amv_tools.db</span>{t('settings.danger.del.db.b')}</li>
+          <li>{t('settings.danger.del.settings')}</li>
         </ul>
-        <div className="font-semibold text-[#A1A1AA] mt-2 mb-1">Preserved:</div>
+        <div className="font-semibold text-[#A1A1AA] mt-2 mb-1">{t('settings.danger.preserved')}</div>
         <ul className="list-disc list-inside space-y-0.5">
-          <li>Your video files (we never touch them)</li>
-          <li>Exported clips and proxy videos</li>
-          <li>The uv binary itself (so reinstall can run)</li>
+          <li>{t('settings.danger.keep.videos')}</li>
+          <li>{t('settings.danger.keep.exports')}</li>
+          <li>{t('settings.danger.keep.uv')}</li>
         </ul>
       </div>
       {!confirming ? (
@@ -590,9 +731,9 @@ function DangerZone() {
           onClick={() => setConfirming(true)}
           disabled={!supported}
           className="ml-8 bg-red-500/20 hover:bg-red-500/30 border-2 border-red-500/40 text-red-200 px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
-          title={supported ? undefined : 'Only available inside the Electron app'}
+          title={supported ? undefined : t('settings.danger.electronOnly')}
         >
-          <Trash2 size={14} /> Reinstall from scratch
+          <Trash2 size={14} /> {t('settings.danger.reinstall')}
         </button>
       ) : (
         <div className="ml-8 flex items-center gap-2">
@@ -602,218 +743,17 @@ function DangerZone() {
             className="bg-red-500/30 hover:bg-red-500/40 border-2 border-red-500/60 text-red-100 px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-50"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-            {busy ? 'Wiping and relaunching…' : 'Yes, wipe everything'}
+            {busy ? t('settings.danger.wiping') : t('settings.danger.confirm')}
           </button>
           <button
             onClick={() => setConfirming(false)}
             disabled={busy}
             className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-5 py-2 rounded-lg text-sm"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function DatabasesSection() {
-  const [databases, setDatabases] = useState<{ path: string; scenes: number; videos: number; size_kb: number; primary: boolean }[]>([]);
-  const [queue, setQueue] = useState<IndexQueueItem[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-
-  async function refresh() {
-    const [dbs, q] = await Promise.all([api.listDatabases(), api.queue()]);
-    setDatabases(dbs.databases);
-    setQueue(q.items);
-  }
-
-  useEffect(() => { refresh().catch(() => {}); }, []);
-
-  async function addFolder() {
-    const paths = await window.amvBridge?.openFileDialog({ directory: true, multi: true });
-    if (!paths || paths.length === 0) return;
-    await api.enqueue(paths.map((p) => ({ path: p, recursive: true })));
-    refresh();
-  }
-
-  async function startIndex(phases: ('tag' | 'embed')[]) {
-    setBusy(true);
-    try { await api.startIndexing(phases); }
-    finally { setBusy(false); refresh(); }
-  }
-
-  async function addDb() {
-    const paths = await window.amvBridge?.openFileDialog({
-      directory: false,
-      filters: [{ name: 'SQLite DB', extensions: ['db', 'sqlite', 'sqlite3'] }],
-    });
-    if (!paths || !paths[0]) return;
-    await api.addDatabase(paths[0]);
-    refresh();
-  }
-
-  async function newDb() {
-    const path = await window.amvBridge?.saveFileDialog({
-      defaultPath: 'amv-tools.db',
-      filters: [{ name: 'SQLite DB', extensions: ['db'] }],
-    });
-    if (!path) return;
-    await api.addDatabase(path);
-    await api.setPrimaryDatabase(path);
-    refresh();
-  }
-
-  const onDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const files = Array.from(e.dataTransfer.files) as (File & { path?: string })[];
-    const paths = files.map((f) => f.path).filter(Boolean) as string[];
-    if (paths.length === 0) return;
-    await api.enqueue(paths.map((p) => ({ path: p, recursive: true })));
-    refresh();
-  };
-
-  return (
-    <>
-      <div className={`bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 ${dragOver ? 'border-[#8B5CF6]' : 'border-[#27272A]'} rounded-xl p-5 transition-colors`}
-           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-           onDragLeave={() => setDragOver(false)}
-           onDrop={onDrop}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <span className="text-[#FAFAFA] font-semibold">Index queue</span>
-            <div className="text-[#71717A] text-sm">{queue.length} pending · drop folders here</div>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <button onClick={addFolder} className="flex items-center gap-2 bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm">
-              <Plus size={14} /> Add folder
-            </button>
-            <button
-              disabled={busy || queue.length === 0}
-              onClick={() => startIndex(['tag', 'embed'])}
-              title="Tags + embeddings (sequential, ~4 GB VRAM peak)"
-              className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-30 flex items-center gap-2"
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <><Zap size={14} /> Index full</>}
-            </button>
-            <button
-              disabled={busy || queue.length === 0}
-              onClick={() => startIndex(['tag'])}
-              title="wd-tagger only — fast browsing by Danbooru tags"
-              className="bg-[#0F0F11] border-2 border-[#8B5CF6]/40 hover:border-[#8B5CF6] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-30 flex items-center gap-2"
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <><Target size={14} /> Tags only</>}
-            </button>
-            <button
-              disabled={busy || queue.length === 0}
-              onClick={() => startIndex(['embed'])}
-              title="SigLIP only — semantic text/image search, no tag browsing"
-              className="bg-[#0F0F11] border-2 border-[#EC4899]/40 hover:border-[#EC4899] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-30 flex items-center gap-2"
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <><Layers size={14} /> Embeddings only</>}
-            </button>
-          </div>
-        </div>
-        {queue.length === 0 ? (
-          <div className="text-[#71717A] text-sm text-center py-8 border-2 border-dashed border-[#27272A] rounded-lg">
-            Drop folders or files here, or click <span className="text-[#FAFAFA]">Add folder</span>.
-          </div>
-        ) : (
-          <div className="space-y-1 max-h-60 overflow-auto">
-            {queue.map((q) => (
-              <div key={q.id} className="text-xs font-mono text-[#A1A1AA] flex items-center gap-2 py-1 px-2 hover:bg-[#27272A]/50 rounded">
-                <span className="text-[#8B5CF6]">{q.is_directory ? '📁' : '🎞'}</span>
-                <span className="truncate flex-1">{q.path}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-[#FAFAFA] font-semibold">Active databases</div>
-            <div className="text-[#71717A] text-sm">Click a row to set it as the primary indexing target.</div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={addDb} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><FolderOpen size={14} /> Open existing</button>
-            <button onClick={newDb} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Plus size={14} /> Create new</button>
-          </div>
-        </div>
-        {databases.length === 0 ? (
-          <div className="text-[#71717A] text-sm">No databases configured yet.</div>
-        ) : (
-          <div className="space-y-2">
-            {databases.map((db) => (
-              <DbRow key={db.path} db={db} onChange={refresh} />
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function DbRow({ db, onChange }: { db: { path: string; scenes: number; videos: number; size_kb: number; primary: boolean }; onChange: () => Promise<void> | void }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [maintMsg, setMaintMsg] = useState<string | null>(null);
-
-  async function setPrimary() {
-    await api.setPrimaryDatabase(db.path);
-    onChange();
-  }
-
-  async function cleanup() {
-    setBusy('cleanup'); setMaintMsg(null);
-    try {
-      const r = await api.cleanupDatabase(db.path);
-      setMaintMsg(`Removed ${r.removed} orphaned video(s)`);
-      onChange();
-    } catch (e) {
-      setMaintMsg(`Error: ${(e as Error).message}`);
-    } finally { setBusy(null); }
-  }
-
-  async function verify() {
-    setBusy('verify'); setMaintMsg(null);
-    try {
-      const r = await api.verifyDatabase(db.path);
-      setMaintMsg(r.missing.length === 0 ? 'All videos present.' : `${r.missing.length} missing video(s). Open Verify panel to relink.`);
-    } catch (e) {
-      setMaintMsg(`Error: ${(e as Error).message}`);
-    } finally { setBusy(null); }
-  }
-
-  async function remove() {
-    if (!confirm(`Remove ${db.path} from active list? Files on disk are not deleted.`)) return;
-    await api.removeDatabase(db.path);
-    onChange();
-  }
-
-  return (
-    <div className={`p-3 rounded-lg border-2 transition-all ${db.primary ? 'border-[#8B5CF6] bg-[#8B5CF6]/10' : 'border-[#27272A] hover:border-[#3f3f46]'}`}>
-      <div className="flex items-center justify-between gap-3">
-        <button onClick={setPrimary} className="flex-1 min-w-0 text-left flex items-center gap-3">
-          <span className="font-mono text-sm truncate flex-1">{db.path}</span>
-          <div className="text-xs text-[#71717A] font-mono whitespace-nowrap">{db.videos} videos · {db.scenes} scenes · {(db.size_kb / 1024).toFixed(1)} MB</div>
-          {db.primary && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase">Primary</span>}
-        </button>
-        <div className="flex items-center gap-1">
-          <button onClick={verify} disabled={!!busy} title="Verify missing files" className="p-1.5 text-[#71717A] hover:text-[#8B5CF6] hover:bg-[#27272A] rounded">
-            {busy === 'verify' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          </button>
-          <button onClick={cleanup} disabled={!!busy} title="Cleanup orphans" className="p-1.5 text-[#71717A] hover:text-[#EC4899] hover:bg-[#27272A] rounded">
-            {busy === 'cleanup' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-          </button>
-          <button onClick={remove} title="Remove from active list" className="p-1.5 text-[#71717A] hover:text-red-400 hover:bg-[#27272A] rounded">
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-      {maintMsg && <div className="text-xs text-[#A1A1AA] mt-2 font-mono">{maintMsg}</div>}
     </div>
   );
 }

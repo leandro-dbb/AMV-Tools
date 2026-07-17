@@ -2,6 +2,7 @@ import { Search, Play, Sparkles, Loader2, FolderPlus, X, Image as ImageIcon } fr
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { SceneResult } from '../api/types';
+import { useT } from '../i18n';
 
 const DEFAULT_RECENT = ['Gojo combat', 'Eva 01 rage', 'Pikachu cute'];
 
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
+  const t = useT();
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
   // SigLIP 2 NaFlex produces lower cosine scores than v1 (sigmoid loss).
@@ -107,7 +109,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
         <div className="absolute inset-4 border-4 border-dashed border-[#8B5CF6] rounded-2xl bg-[#8B5CF6]/10 flex items-center justify-center pointer-events-none z-30">
           <div className="text-center">
             <ImageIcon size={48} className="text-[#8B5CF6] mx-auto mb-2" />
-            <div className="text-[#FAFAFA] font-semibold text-lg">Drop an image to search by reference</div>
+            <div className="text-[#FAFAFA] font-semibold text-lg">{t('search.dropImage')}</div>
           </div>
         </div>
       )}
@@ -118,7 +120,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
           <div className="relative">
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-[#8B5CF6]" size={22} />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="text-[#8B5CF6]/60 hover:text-[#8B5CF6] p-1.5 rounded-lg hover:bg-[#27272A]" title="Search by image">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="text-[#8B5CF6]/60 hover:text-[#8B5CF6] p-1.5 rounded-lg hover:bg-[#27272A]" title={t('search.byImageTitle')}>
                 <ImageIcon size={18} />
               </button>
               {loading ? <Loader2 className="text-[#8B5CF6] animate-spin" size={20} /> : <Sparkles className="text-[#8B5CF6]/60" size={18} />}
@@ -129,7 +131,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
               onFocus={() => setSuggestionsOpen(true)}
               onBlur={() => setTimeout(() => setSuggestionsOpen(false), 150)}
               type="text"
-              placeholder="Search scenes... (e.g. Charizard fire breath, sad Shinji moment)"
+              placeholder={t('search.placeholder')}
               className="w-full bg-[#18181B]/80 backdrop-blur-xl border-2 border-[#27272A] rounded-xl pl-14 pr-24 py-4 text-[#FAFAFA] text-lg placeholder:text-[#71717A] focus:outline-none focus:border-[#8B5CF6] transition-all shadow-2xl shadow-[#8B5CF6]/5"
             />
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) runImageSearch(f); }} />
@@ -148,7 +150,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
 
         {imagePreview && (
           <div className="mb-4 relative">
-            <img src={imagePreview} className="h-20 rounded-lg border-2 border-[#8B5CF6]/50" alt="ref" />
+            <img src={imagePreview} className="h-20 rounded-lg border-2 border-[#8B5CF6]/50" alt={t('search.refAlt')} />
             <button onClick={() => { setImagePreview(null); setSubmitted(''); setResults([]); }} className="absolute -top-2 -right-2 bg-[#0F0F11] border border-[#27272A] rounded-full p-1 hover:border-[#EC4899]">
               <X size={12} className="text-[#A1A1AA]" />
             </button>
@@ -165,16 +167,16 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
 
         <div className="flex items-center gap-8 w-[750px] bg-[#18181B]/50 backdrop-blur-sm rounded-xl p-4 border border-[#27272A]">
           <div className="flex items-center gap-3">
-            <span className="text-[#71717A] text-sm uppercase tracking-wider font-medium">Sort</span>
+            <span className="text-[#71717A] text-sm uppercase tracking-wider font-medium">{t('search.sort')}</span>
             <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="bg-[#0F0F11] border border-[#8B5CF6]/30 rounded-lg px-4 py-2 text-[#FAFAFA] text-sm focus:outline-none focus:border-[#8B5CF6] cursor-pointer">
-              <option value="relevance">Relevance</option>
-              <option value="duration">Duration</option>
-              <option value="video">Video</option>
-              <option value="random">Random</option>
+              <option value="relevance">{t('search.sortRelevance')}</option>
+              <option value="duration">{t('search.sortDuration')}</option>
+              <option value="video">{t('search.sortVideo')}</option>
+              <option value="random">{t('search.sortRandom')}</option>
             </select>
           </div>
           <div className="flex items-center gap-4 flex-1">
-            <span className="text-[#71717A] text-sm uppercase tracking-wider font-medium">Threshold</span>
+            <span className="text-[#71717A] text-sm uppercase tracking-wider font-medium">{t('search.threshold')}</span>
             <div className="relative flex-1 h-2 bg-gradient-to-r from-[#27272A] via-[#8B5CF6]/20 to-[#8B5CF6]/40 rounded-full overflow-hidden">
               <input type="range" min={0} max={100} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} className="absolute inset-0 w-full opacity-0 cursor-pointer" />
               <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-[#8B5CF6] rounded-full border-2 border-[#FAFAFA] shadow-lg shadow-[#8B5CF6]/50 pointer-events-none" style={{ left: `${threshold}%` }}></div>
@@ -191,13 +193,13 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
       {!submitted && !loading && results.length === 0 && (
         <div className="flex flex-col items-center justify-center text-center max-w-md mx-auto mt-12 text-[#71717A]">
           <FolderPlus size={40} className="mb-3 text-[#8B5CF6]/60" />
-          <div className="text-[#A1A1AA] mb-1">Index a folder of anime to start searching.</div>
-          <div className="text-xs">Go to <span className="text-[#FAFAFA]">Settings → Databases</span> or drop an image to search by reference.</div>
+          <div className="text-[#A1A1AA] mb-1">{t('search.emptyIndexHint')}</div>
+          <div className="text-xs">{t('search.hintGoTo')} <span className="text-[#FAFAFA]">{t('search.hintPath')}</span> {t('search.hintOrDrop')}</div>
         </div>
       )}
 
       {empty && submitted && (
-        <div className="text-center text-[#71717A] mt-8 text-sm">No scenes matched at threshold {threshold}%.</div>
+        <div className="text-center text-[#71717A] mt-8 text-sm">{t('search.noMatches', { threshold })}</div>
       )}
 
       <div className="grid grid-cols-6 gap-3 relative z-10">

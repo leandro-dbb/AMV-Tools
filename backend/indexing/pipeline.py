@@ -146,6 +146,7 @@ def index_video(
     auto_skip_indexed: bool = True,
     cancel_event: Optional[threading.Event] = None,
     progress_cb: Optional[Callable[[dict], None]] = None,
+    group_name: Optional[str] = None,
 ) -> None:
     phases = tuple(p for p in phases if p in ALL_PHASES) or ALL_PHASES
     batch_size = max(1, batch_size)
@@ -275,6 +276,7 @@ def index_video(
             conn, video_path, _display_name(video_path),
             info["duration_ms"], info["fps"], info["resolution"],
             model_version=cache_key, status="indexing",
+            group_name=group_name,
         )
         queries.delete_scenes_for_video(conn, video_id)
         for (scene_idx, s_ms, e_ms, parent_marker, _img), thumb in zip(work, thumbs):
@@ -370,26 +372,29 @@ def index_queue(
     with schema.get_conn(db_path) as conn:
         items = queries.get_queue(conn)
 
-    all_files: list[str] = []
+    # (filepath, group) pairs — the queue item's user-chosen import group is
+    # stamped on every video found under it.
+    all_files: list[tuple[str, str | None]] = []
     for item in items:
         p = Path(item["path"])
+        group = item.get("group_name") or None
         if not p.exists():
             continue
         if p.is_file():
             if p.suffix.lower() in VIDEO_EXTENSIONS:
-                all_files.append(str(p))
+                all_files.append((str(p), group))
             continue
         pattern_iter = p.rglob("*") if item["recursive"] else p.iterdir()
         for sub in pattern_iter:
             if sub.is_file() and sub.suffix.lower() in VIDEO_EXTENSIONS:
-                all_files.append(str(sub))
+                all_files.append((str(sub), group))
 
-    for i, fp in enumerate(all_files):
+    for i, (fp, group) in enumerate(all_files):
         if cancel_event and cancel_event.is_set():
             return "cancelled"
         try:
             index_video(db_path, fp, siglip, tagger, cancel_event=cancel_event,
-                        progress_cb=progress_cb, **kwargs)
+                        progress_cb=progress_cb, group_name=group, **kwargs)
         except Exception as e:
             log.error("indexing failed for %s: %s", fp, e, exc_info=True)
             if progress_cb:

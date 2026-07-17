@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Sparkles, Loader2, AlertCircle } from 'lucide-react';
+import { useT } from '../i18n';
 
 interface BootstrapLine {
   line: string;
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function BootstrapScreen({ lines, error }: Props) {
+  const t = useT();
   const preRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
@@ -19,8 +21,8 @@ export default function BootstrapScreen({ lines, error }: Props) {
   }, [lines.length]);
 
   const subtitle = error
-    ? 'Something went wrong while starting the Python backend.'
-    : detectStage(lines);
+    ? t('bootstrap.errorSubtitle')
+    : t(detectStage(lines));
 
   return (
     <div
@@ -41,7 +43,7 @@ export default function BootstrapScreen({ lines, error }: Props) {
               AMV Tools
             </h1>
             <div className="text-[#71717A] text-sm uppercase tracking-wider">
-              {error ? 'Backend failure' : 'Starting backend'}
+              {error ? t('bootstrap.failure') : t('bootstrap.starting')}
             </div>
           </div>
         </div>
@@ -65,11 +67,10 @@ export default function BootstrapScreen({ lines, error }: Props) {
               ) : (
                 <>
                   <div className="font-semibold">
-                    First launch — fetching the Python sidecar
+                    {t('bootstrap.firstLaunch')}
                   </div>
                   <div className="text-xs text-[#71717A]">
-                    This usually takes 1-3 minutes the first time. The app will
-                    open automatically when the backend is ready.
+                    {t('bootstrap.firstLaunchHint')}
                   </div>
                 </>
               )}
@@ -80,7 +81,7 @@ export default function BootstrapScreen({ lines, error }: Props) {
             className="bg-[#0F0F11] border border-[#27272A] rounded-lg p-3 text-xs font-mono max-h-[420px] overflow-auto whitespace-pre-wrap"
           >
             {lines.length === 0 ? (
-              <span className="text-[#71717A]">Waiting for sidecar output…</span>
+              <span className="text-[#71717A]">{t('bootstrap.waitingOutput')}</span>
             ) : (
               lines.map((l, i) => (
                 <div
@@ -94,9 +95,7 @@ export default function BootstrapScreen({ lines, error }: Props) {
           </pre>
           {error && (
             <div className="text-xs text-[#71717A] mt-3">
-              Close and relaunch AMV Tools to retry. If the problem persists,
-              check the log above for clues (most often: missing network access
-              for the initial wheel download, or insufficient disk space).
+              {t('bootstrap.retryHint')}
             </div>
           )}
         </div>
@@ -105,16 +104,17 @@ export default function BootstrapScreen({ lines, error }: Props) {
   );
 }
 
+// Returns an i18n key; the caller resolves it with t().
 function detectStage(lines: BootstrapLine[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i].line;
-    if (/Uvicorn running/i.test(l)) return 'Backend is responding — opening the app.';
-    if (/Application startup complete/i.test(l)) return 'FastAPI started — handshake in progress.';
-    if (/Installed \d+ packages/i.test(l)) return 'Packages installed — launching server.';
-    if (/Downloading /i.test(l)) return 'Downloading Python wheels…';
-    if (/Resolved \d+ packages/i.test(l)) return 'Resolving dependencies…';
-    if (/Creating virtual environment/i.test(l)) return 'Creating the Python environment…';
-    if (/Using CPython/i.test(l)) return 'Preparing Python runtime…';
+    if (/Uvicorn running/i.test(l)) return 'bootstrap.stage.responding';
+    if (/Application startup complete/i.test(l)) return 'bootstrap.stage.started';
+    if (/Installed \d+ packages/i.test(l)) return 'bootstrap.stage.installed';
+    if (/Downloading /i.test(l)) return 'bootstrap.stage.downloading';
+    if (/Resolved \d+ packages/i.test(l)) return 'bootstrap.stage.resolving';
+    if (/Creating virtual environment/i.test(l)) return 'bootstrap.stage.venv';
+    if (/Using CPython/i.test(l)) return 'bootstrap.stage.runtime';
   }
-  return 'Initialising — this can take a couple of minutes on first launch.';
+  return 'bootstrap.stage.init';
 }

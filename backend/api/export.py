@@ -32,7 +32,7 @@ def _sanitize(name: str) -> str:
 
 
 def _suffix_for_codec(codec: str) -> str:
-    if codec in ("libx264", "libx265", "libsvtav1"):
+    if codec in ("libx264", "libx265", "libsvtav1", "h264_nvenc"):
         return ".mp4"
     if codec in ("prores_ks", "dnxhr"):
         return ".mov"
@@ -57,6 +57,7 @@ def _export_one(scene: dict, settings: dict, output_dir: Path,
         target,
         codec=settings["codec"], crf=settings["crf"],
         audio=settings["audio"], resolution=settings["resolution"],
+        audio_bitrate_kbps=int(settings.get("audio_bitrate_kbps", 320)),
     )
 
 

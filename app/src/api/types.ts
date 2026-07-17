@@ -20,6 +20,8 @@ export interface VideoSummary {
   resolution: string;
   scene_count: number;
   status: 'pending' | 'indexing' | 'completed' | 'failed';
+  group_name: string | null;
+  derushed: boolean;
 }
 
 export interface TagSummary {
@@ -42,11 +44,13 @@ export interface IndexQueueItem {
   path: string;
   is_directory: boolean;
   recursive: boolean;
+  group_name: string | null;
 }
 
 export interface ProgressEvent {
-  type: 'indexing' | 'proxy' | 'export' | 'idle' | 'install' | 'merge' | 'sam2_track';
+  type: 'indexing' | 'proxy' | 'export' | 'idle' | 'install' | 'merge' | 'sam2_track' | 'derush_export' | 'derush_prepare';
   video?: string;
+  video_id?: number;
   current?: number;
   total?: number;
   percent?: number;
@@ -54,8 +58,30 @@ export interface ProgressEvent {
   line?: string;
   done?: boolean;
   ok?: boolean;
+  output?: string;
   session_id?: string;
   frame_idx?: number;
+}
+
+export interface DerushFolder {
+  id: number;
+  name: string;
+  item_count: number;
+}
+
+export interface DerushItem {
+  id: number;
+  scene_id: number;
+  folder_ids: number[];
+  custom_name: string | null;
+  added_at: string;
+  video_id: number;
+  video_display: string;
+  scene_index: number;
+  start_ms: number;
+  end_ms: number;
+  has_proxy: boolean;
+  favorite: boolean;
 }
 
 export interface SegmentPromptBody {
@@ -107,7 +133,7 @@ export interface AppSettings {
     siglip_max_num_patches: number;
     enable_mask: boolean;
     mask_engine: 'birefnet' | 'sam2';
-    birefnet_variant: 'general' | 'hr' | 'portrait';
+    birefnet_variant: 'general' | 'hr' | 'portrait' | 'anime';
     sam2_variant: 'tiny' | 'small' | 'base_plus' | 'large';
     mask_max_dim: number;
     mask_shrink_px: number;
@@ -120,6 +146,10 @@ export interface AppSettings {
     mask_soft_alpha_black: number;
     mask_soft_alpha_white: number;
     mask_rgb_decontaminate_enabled: boolean;
+    mask_edge_refine_enabled: boolean;
+    mask_bg_aware_cleanup_enabled: boolean;
+    mask_temporal_smooth_enabled: boolean;
+    mask_temporal_smooth_strength: number;
     hf_token: string;
   };
   search: {
@@ -128,11 +158,15 @@ export interface AppSettings {
     sort: string;
     tag_boost: number;
   };
+  derush: {
+    keys: Record<string, string>;
+  };
   export: {
     codec: string;
     crf: number;
     resolution: string;
     audio: string;
+    audio_bitrate_kbps: number;
     naming_template: string;
     output_folder: string;
     open_folder_after: boolean;
@@ -153,6 +187,7 @@ export interface SystemStatus {
   setup_required: boolean;
   device: string;
   gpu_name?: string;
+  vram_gb?: number | null;
   models_loaded: boolean;
   python_version: string;
   tagger_provider?: string | null;

@@ -1,6 +1,6 @@
 [project]
 name = "amv-tools"
-version = "0.1.0a0"
+version = "0.2.0a0"
 description = "AMV Tools — semantic scene browser for anime music video creators."
 readme = "README.md"
 requires-python = ">=3.12, <3.14"
@@ -27,6 +27,10 @@ dependencies = [
     "timm>=1.0.0",
     "einops>=0.7.0",
     "kornia>=0.7.0",
+    # Mask post-processing (erosion, BG suppression, decontaminate) and the
+    # guided-filter alpha upsampling at export all use cv2. Headless build:
+    # no Qt payload, works in the sidecar.
+    "opencv-python-headless>=4.9.0",
 ]
 # Note on MatAnyone: the upstream package is git-only (github.com/pq-yang/MatAnyone)
 # and not published on PyPI. We deliberately do NOT pull it in here to keep the

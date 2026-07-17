@@ -10,8 +10,9 @@ Workflow exposed to the MiniEditor MaskMode:
      (semi-transparent green) for the review slider.
   4. ``POST /api/scene/{id}/segment/track`` — propagate the mask across all
      extracted frames using the SAM 2 video predictor.
-  5. ``POST /api/scene/{id}/segment/export`` — pipe source + mask PNGs through
-     ffmpeg's alphamerge to ProRes 4444 alpha .mov (or VP9 alpha .webm).
+  5. ``POST /api/scene/{id}/segment/export`` — re-decode the source on the
+     session's frame timeline, merge each frame with its matte, encode
+     ProRes 4444 alpha .mov (or VP9 alpha .webm).
   6. ``DELETE /api/scene/segment/{session}`` — clean the tempdir.
 
 Sessions live in process memory (cleared by the Danger Zone reinstall). For a
@@ -23,8 +24,6 @@ from __future__ import annotations
 import io
 import importlib.util
 import logging
-import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -39,6 +38,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..db import queries, schema
+from ..indexing.cuts import probe_video
 from ..models.sam2 import cleanup_frames_dir, extract_clip_frames
 from ..paths import user_data_dir
 from ..state import get_state
@@ -179,20 +179,6 @@ def _mask_to_png_overlay(mask: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
-def _mask_to_png_alpha(mask: np.ndarray) -> bytes:
-    """Render a mask as a single-channel grayscale PNG alpha plane. This is
-    what ffmpeg's ``alphamerge`` reads — the luma of the second input becomes
-    the alpha of the first."""
-    h, w = mask.shape
-    if mask.dtype == bool:
-        arr = mask.astype(np.uint8) * 255
-    else:
-        arr = (np.clip(mask.astype(np.float32), 0.0, 1.0) * 255.0).astype(np.uint8)
-    buf = io.BytesIO()
-    Image.fromarray(arr, "L").save(buf, format="PNG", optimize=False)
-    return buf.getvalue()
-
-
 def _clean_soft_alpha_for_frame(mask: np.ndarray, frame_path: Path, models_cfg: dict) -> np.ndarray:
     """Apply colour-key cleanup to soft alpha mattes near their boundary.
 
@@ -267,11 +253,16 @@ def preview(scene_id: int, body: Prompt):
     if existing is not None:
         session = existing
     else:
-        # Fresh extract.
-        # Estimate fps from scene duration vs. probed video — for V1 we use the
-        # same 24 fps default as the wrapper; SAM 2 doesn't care about the
-        # actual playback rate, only the count of consecutive frames.
-        fps = 24.0
+        # Fresh extract. Probe the source's real frame rate — the mask session
+        # and the alpha export share this value, so mask N and export frame N
+        # stay locked to the same source frame. (A hard-coded 24 here used to
+        # make the matte drift progressively on 23.976/29.97/60 fps sources.)
+        try:
+            fps = float(probe_video(scene["filepath"]).get("fps") or 24.0)
+        except Exception:
+            log.warning("fps probe failed for %s — assuming 24", scene["filepath"])
+            fps = 24.0
+        fps = max(1.0, min(120.0, fps))
         mask_max_dim = int(state.settings.get("models", {}).get("mask_max_dim", 1080) or 1080)
         mask_max_dim = max(360, min(2160, mask_max_dim))
         frames_dir, frame_paths, (w, h) = extract_clip_frames(
@@ -348,13 +339,13 @@ def preview(scene_id: int, body: Prompt):
 
 @router.get("/api/scene/segment/{session_id}/frame/{idx}")
 def session_frame(session_id: str, idx: int):
-    """JPG of the extracted frame N. Used by the MiniEditor's review slider so
+    """PNG of the extracted frame N. Used by the MiniEditor's review slider so
     the canvas can show the original frame under the mask overlay."""
     sess = _get_session_or_404(session_id)
     if idx < 0 or idx >= len(sess.frame_paths):
         raise HTTPException(404, "frame out of range")
     data = sess.frame_paths[idx].read_bytes()
-    return Response(content=data, media_type="image/jpeg",
+    return Response(content=data, media_type="image/png",
                     headers={"Cache-Control": "no-cache"})
 
 
@@ -436,6 +427,16 @@ def track(scene_id: int, body: TrackRequest):
                 with Image.open(fp) as im:
                     masks[i] = birefnet.mask_image(im.convert("RGB"))
                 progress(i + 1, n_frames)
+            # Per-frame inference re-decides the silhouette on every frame —
+            # smooth the stack so static regions stop flickering. Hard cuts /
+            # teleport motion reset the EMA history inside the helper.
+            models_cfg = state.settings.get("models", {})
+            if bool(models_cfg.get("mask_temporal_smooth_enabled", True)) and n_frames >= 3:
+                from ..models.mask_postprocess import temporal_smooth_alpha
+                masks = temporal_smooth_alpha(
+                    masks,
+                    strength=float(models_cfg.get("mask_temporal_smooth_strength", 0.5)),
+                )
             sess.masks = masks
         elif engine == "matanyone":
             # Two-stage: BiRefNet for the chosen reference-frame seed (good
@@ -537,8 +538,9 @@ def _sanitize(name: str) -> str:
 @router.post("/api/scene/{scene_id}/segment/export")
 def export_alpha(scene_id: int, body: ExportAlphaRequest):
     """Export the clip with the propagated alpha channel as ProRes 4444 .mov
-    (or VP9 alpha .webm). Writes the mask PNG sequence to a tempdir, then runs
-    a single ffmpeg with ``alphamerge`` over the source clip."""
+    (or VP9 alpha .webm). Re-decodes the source at full resolution on the same
+    frame timeline as the mask session, pairs frame i with mask i, and encodes
+    the RGBA sequence — see ``export_scene_with_alpha``."""
     sess = _get_session_or_404(body.session_id)
     if sess.scene_id != scene_id:
         raise HTTPException(400, "session is for a different scene")
@@ -600,6 +602,8 @@ def export_alpha(scene_id: int, body: ExportAlphaRequest):
         codec=body.codec,
         fps=sess.fps,
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
+        edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
+        bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
     )
     return {"ok": True, "output": out}
 

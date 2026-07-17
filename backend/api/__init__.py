@@ -1,5 +1,5 @@
 """HTTP route modules."""
-from . import status, search, videos, settings, index, export, databases, setup, scene, tags, segment
+from . import status, search, videos, settings, index, export, databases, setup, scene, tags, segment, derush
 
 ROUTERS = [
     status.router,
@@ -9,6 +9,7 @@ ROUTERS = [
     videos.router,
     scene.router,
     segment.router,
+    derush.router,
     settings.router,
     index.router,
     export.router,

@@ -8,6 +8,8 @@ Layout:
     index_queue          -- inherited
     image_embeddings     -- kept for backward compat, unused going forward
     search_history       -- new: persisted recent queries
+    derush_folders       -- v5: user folders organising kept scenes
+    derush_items         -- v5: scenes kept during a derush pass (one per scene)
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 8
 
 V4_SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -77,6 +79,26 @@ CREATE INDEX IF NOT EXISTS idx_scene_tags_scene ON scene_tags(scene_id);
 CREATE INDEX IF NOT EXISTS idx_search_history_used ON search_history(last_used DESC);
 """
 
+# v5: derush (selects) tables. Applied on top of v4 — all IF NOT EXISTS so the
+# script is idempotent and can run both on fresh DBs and as the 4→5 migration.
+V5_SCHEMA = """
+CREATE TABLE IF NOT EXISTS derush_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS derush_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scene_id INTEGER UNIQUE NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    folder_id INTEGER REFERENCES derush_folders(id) ON DELETE SET NULL,
+    custom_name TEXT,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_derush_items_folder ON derush_items(folder_id);
+"""
+
 
 @contextmanager
 def get_conn(db_path: str | Path) -> Iterator[sqlite3.Connection]:
@@ -96,6 +118,48 @@ def current_version(db_path: str | Path) -> int:
         return conn.execute("PRAGMA user_version").fetchone()[0]
 
 
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def _apply_v6(conn: sqlite3.Connection) -> None:
+    """v6: import groups (user-named subfolders) + derush favorites.
+    Column adds are guarded so this is idempotent on any prior version."""
+    _add_column_if_missing(conn, "videos", "group_name", "TEXT")
+    _add_column_if_missing(conn, "index_queue", "group_name", "TEXT")
+    _add_column_if_missing(conn, "derush_items", "favorite", "INTEGER NOT NULL DEFAULT 0")
+
+
+V7_SCHEMA = """
+CREATE TABLE IF NOT EXISTS derush_item_folders (
+    item_id INTEGER NOT NULL REFERENCES derush_items(id) ON DELETE CASCADE,
+    folder_id INTEGER NOT NULL REFERENCES derush_folders(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, folder_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_derush_item_folders_folder ON derush_item_folders(folder_id);
+"""
+
+
+def _apply_v7(conn: sqlite3.Connection) -> None:
+    """v7: derush items can live in SEVERAL folders (chill + S23…) — junction
+    table replaces the single derush_items.folder_id, which is backfilled
+    into it once and ignored from then on."""
+    conn.executescript(V7_SCHEMA)
+    conn.execute(
+        """INSERT OR IGNORE INTO derush_item_folders (item_id, folder_id)
+           SELECT id, folder_id FROM derush_items WHERE folder_id IS NOT NULL"""
+    )
+
+
+def _apply_v8(conn: sqlite3.Connection) -> None:
+    """v8: per-episode "already derushed" flag, toggled by the user from the
+    Derush playlist so finished episodes are easy to spot."""
+    _add_column_if_missing(conn, "videos", "derushed", "INTEGER NOT NULL DEFAULT 0")
+
+
 def init_db(db_path: str | Path) -> None:
     """Apply schema and migrations. Idempotent."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -105,11 +169,16 @@ def init_db(db_path: str | Path) -> None:
             return
         if version == 0:
             conn.executescript(V4_SCHEMA)
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            return
-        if version < 4:
-            _migrate_v3_to_v4(conn)
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            conn.executescript(V5_SCHEMA)
+        else:
+            if version < 4:
+                _migrate_v3_to_v4(conn)
+            if version < 5:
+                conn.executescript(V5_SCHEMA)
+        _apply_v6(conn)
+        _apply_v7(conn)
+        _apply_v8(conn)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:

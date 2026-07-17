@@ -6,11 +6,11 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 
-from ..indexing.cuts import _ffmpeg_path, probe_video
+from ..indexing.cuts import _ffmpeg_path
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,36 @@ def _has_nvenc_h264() -> bool:
     return _NVENC_AVAILABLE
 
 
+# Bits-per-pixel of Adobe Media Encoder's "Match Source — Adaptive High
+# Bitrate" H.264 preset: it targets 15.2 Mbps for 1080p23.976, i.e.
+# 15.2e6 / (1920*1080*23.976) ≈ 0.306 bit/pixel. We reuse that constant so
+# the NVENC preset produces the same target at any source resolution/fps.
+_ADAPTIVE_BPP = 0.306
+_ADAPTIVE_MIN_BPS = 4_000_000
+_ADAPTIVE_MAX_BPS = 40_000_000
+
+
+def _adaptive_bitrate(src_path: str, resolution: str) -> int:
+    """AME-style adaptive VBR target from the output's pixel rate."""
+    from ..indexing.cuts import probe_video
+
+    w, h, fps = 1920, 1080, 24.0
+    try:
+        info = probe_video(src_path)
+        fps = float(info.get("fps") or 24.0)
+        res = str(info.get("resolution") or "")
+        w_s, h_s = res.lower().split("x", 1)
+        w, h = int(w_s) or 1920, int(h_s) or 1080
+    except Exception as exc:
+        log.warning("adaptive bitrate probe failed (%s) — assuming 1080p24", exc)
+    out_h = {"1080p": 1080, "720p": 720, "480p": 480}.get(resolution)
+    if out_h and h > 0:
+        w = int(round(w * out_h / h))
+        h = out_h
+    target = int(_ADAPTIVE_BPP * w * h * min(120.0, max(1.0, fps)))
+    return max(_ADAPTIVE_MIN_BPS, min(_ADAPTIVE_MAX_BPS, target))
+
+
 def export_scene(
     src_path: str,
     start_ms: int,
@@ -58,6 +88,7 @@ def export_scene(
     crf: int = 18,
     audio: str = "copy",
     resolution: str = "source",
+    audio_bitrate_kbps: int = 320,
 ) -> str:
     """Frame-accurate export with two-pass seek (fast then exact)."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -67,10 +98,15 @@ def export_scene(
     fast_seek = max(0.0, start_sec - buffer_sec)
     exact_seek = start_sec - fast_seek
 
-    # Map the setting name to the actual ffmpeg encoder. Notable case:
+    # Map the setting name to the actual ffmpeg encoder. Notable cases:
     # `dnxhr` (what the user picks) is produced by ffmpeg's `dnxhd` encoder —
     # the dnxhr_* profile flag is what switches it to the modern variant.
+    # `h264_nvenc` silently falls back to libx264 (same VBR targets) on
+    # machines without an NVIDIA encoder.
     encoder = "dnxhd" if codec == "dnxhr" else codec
+    if codec == "h264_nvenc" and not _has_nvenc_h264():
+        log.warning("h264_nvenc requested but unavailable — falling back to libx264 VBR")
+        encoder = "libx264"
 
     cmd = [
         _ffmpeg_path(),
@@ -81,7 +117,27 @@ def export_scene(
         "-t", f"{duration_sec}",
         "-c:v", encoder,
     ]
-    if codec in ("libx264", "libx265", "libsvtav1", "libvpx-vp9"):
+    if codec == "h264_nvenc":
+        # Premiere/Media Encoder "Match Source — Adaptive High Bitrate":
+        # hardware H.264, VBR 1-pass, target scaled to the source pixel rate
+        # (15.2 Mbps at 1080p23.976), High profile, Rec.709 tags, yuv420p.
+        target = _adaptive_bitrate(src_path, resolution)
+        rate_args = [
+            "-b:v", str(target),
+            "-maxrate", str(int(target * 1.5)),
+            "-bufsize", str(int(target * 2)),
+            "-pix_fmt", "yuv420p",
+            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+            # NVENC doesn't reliably copy the colour flags into the H.264 VUI,
+            # so stamp them at the bitstream level too (AME writes full Rec.709
+            # signalling; players otherwise guess).
+            "-bsf:v", "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0",
+        ]
+        if encoder == "h264_nvenc":
+            cmd.extend(["-preset", "p5", "-profile:v", "high", "-rc", "vbr", *rate_args])
+        else:
+            cmd.extend(["-preset", "medium", "-profile:v", "high", *rate_args])
+    elif codec in ("libx264", "libx265", "libsvtav1", "libvpx-vp9"):
         cmd.extend(["-crf", str(crf), "-preset", "medium"])
     elif codec == "prores_ks":
         # ProRes profile 3 = ProRes 422 HQ, the sane default for delivery.
@@ -100,7 +156,9 @@ def export_scene(
     if audio == "copy":
         cmd.extend(["-c:a", "copy"])
     elif audio == "encode":
-        cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        # AAC stereo at 48 kHz — matches the AME preset (320 kbps by default).
+        kbps = max(96, min(512, int(audio_bitrate_kbps or 320)))
+        cmd.extend(["-c:a", "aac", "-b:a", f"{kbps}k", "-ar", "48000", "-ac", "2"])
     elif audio == "mute":
         cmd.extend(["-an"])
 
@@ -181,39 +239,69 @@ def generate_proxy(src_path: str, start_ms: int, end_ms: int, output_path: str,
     return output_path
 
 
-def _write_mask_png_seq(masks: np.ndarray, out_dir: Path) -> None:
-    """Write a ``(T, H, W)`` mask stack as ``00000.png``…``NNNNN.png`` 8-bit
-    grayscale PNGs that ffmpeg's ``alphamerge`` reads as the alpha channel.
+# ── roto frame extraction (shared with the mask session) ────────────────────
+def extract_png_frames(
+    src_path: str,
+    start_ms: int,
+    end_ms: int,
+    out_pattern: Path,
+    *,
+    fps: float,
+    max_dim: Optional[int] = None,
+    max_frames: Optional[int] = None,
+) -> List[Path]:
+    """Decode a clip window to a PNG sequence on a deterministic frame timeline.
 
-    Accepts either bool (binary mask) or float32 [0, 1] (continuous alpha).
-    Per-frame post-processing (shrink, BG suppression) is handled by the
-    caller before passing the masks in — keeps this function trivial."""
-    from PIL import Image
+    This is THE canonical frame sampler for the roto pipeline: the mask
+    session (``models.sam2.extract_clip_frames``) and the alpha export both
+    go through it with identical seek + fps arguments, so mask index N and
+    export frame N always come from the same source frame. Do not fork this
+    command elsewhere — a second extraction with different seek/fps args is
+    exactly how mattes drift out of sync with their footage.
 
-    for i, m in enumerate(masks):
-        if m.dtype == bool:
-            arr = (m.astype(np.uint8) * 255)
-        else:
-            arr = (np.clip(m.astype(np.float32), 0.0, 1.0) * 255.0).astype(np.uint8)
-        Image.fromarray(arr, "L").save(out_dir / f"{i:05d}.png", optimize=False)
+    ``fps`` must be the source's probed average rate (``probe_video``): the
+    fps filter is then a 1:1 pass-through on CFR sources and resamples VFR
+    sources onto a stable CFR timeline that both consumers share.
+    """
+    filters = [f"fps={fps}"]
+    if max_dim is not None:
+        # Resize so the long side is at most `max_dim`. Lanczos preserves
+        # anime line work better than the default bicubic scaler.
+        filters.append(
+            f"scale='if(gt(iw,ih),min(iw,{max_dim}),-2)':"
+            f"'if(gt(iw,ih),-2,min(ih,{max_dim}))':flags=lanczos"
+        )
 
+    start_sec = max(0.0, start_ms / 1000.0)
+    duration_sec = max(0.05, (end_ms - start_ms) / 1000.0)
+    cmd = [
+        _ffmpeg_path(),
+        "-hide_banner", "-loglevel", "error",
+        "-ss", f"{start_sec}",
+        "-i", src_path,
+        "-t", f"{duration_sec}",
+        "-vf", ",".join(filters),
+    ]
+    if max_frames is not None:
+        cmd.extend(["-frames:v", str(int(max_frames))])
+    cmd.extend(["-start_number", "0", str(out_pattern)])
 
-def _source_video_size(src_path: str) -> tuple[int, int] | None:
-    try:
-        resolution = str(probe_video(src_path).get("resolution") or "")
-        w_s, h_s = resolution.lower().split("x", 1)
-        w, h = int(w_s), int(h_s)
-        if w > 0 and h > 0:
-            return w, h
-    except Exception as exc:
-        log.warning("could not probe source size for alpha export: %s", exc)
-    return None
+    proc = subprocess.run(cmd, capture_output=True, text=True, creationflags=_creation_flags())
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg frame extraction failed: {proc.stderr[-800:]}")
+    return sorted(out_pattern.parent.glob(f"*{out_pattern.suffix}"))
 
 
 def _encoder_args_for_alpha(codec: str) -> list[str]:
     if codec == "prores_4444_alpha":
+        # Profile 4 = ProRes 4444 (10-bit + alpha). yuva444p10le is the pixel
+        # format that actually carries the alpha channel — without it ffmpeg
+        # would silently drop the alpha plane.
         return ["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le"]
     if codec == "vp9_alpha":
+        # libvpx-vp9 + yuva420p = VP9 with embedded alpha in WebM. The
+        # `auto-alt-ref` flag must be off when emitting alpha, otherwise
+        # libvpx silently strips it.
         return [
             "-c:v", "libvpx-vp9",
             "-pix_fmt", "yuva420p",
@@ -233,76 +321,6 @@ def _resize_alpha(mask: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     return (np.asarray(resized).astype(np.float32) / 65535.0).clip(0.0, 1.0)
 
 
-def _export_soft_alpha_as_rgba_sequence(
-    src_path: str,
-    start_sec: float,
-    duration_sec: float,
-    masks: np.ndarray,
-    output_path: str,
-    *,
-    codec: str,
-    fps: float,
-) -> str:
-    """Export soft alpha as decontaminated RGBA frames.
-
-    A plain alphamerge keeps original RGB under semi-transparent pixels, so the
-    old scene background bleeds into hair edges when composited elsewhere.
-    This path replaces soft-edge RGB with nearby confident-foreground colour
-    before encoding ProRes/WebM alpha.
-    """
-    from PIL import Image
-    from ..models.mask_postprocess import decontaminate_rgb_with_alpha
-
-    with tempfile.TemporaryDirectory(prefix="amv_soft_alpha_") as tmp:
-        tmp_path = Path(tmp)
-        rgb_dir = tmp_path / "rgb"
-        rgba_dir = tmp_path / "rgba"
-        rgb_dir.mkdir()
-        rgba_dir.mkdir()
-
-        extract_cmd = [
-            _ffmpeg_path(),
-            "-hide_banner", "-loglevel", "error",
-            "-ss", f"{start_sec}",
-            "-t", f"{duration_sec}",
-            "-i", src_path,
-            "-vf", f"fps={fps}",
-            "-frames:v", str(masks.shape[0]),
-            "-start_number", "0",
-            str(rgb_dir / "%05d.png"),
-        ]
-        proc = subprocess.run(extract_cmd, capture_output=True, text=True, creationflags=_creation_flags())
-        if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg soft-alpha frame extract failed: {proc.stderr[-800:]}")
-
-        frame_paths = sorted(rgb_dir.glob("*.png"))
-        if not frame_paths:
-            raise RuntimeError("ffmpeg produced no RGB frames for soft-alpha export")
-
-        n = min(len(frame_paths), masks.shape[0])
-        for i in range(n):
-            with Image.open(frame_paths[i]) as im:
-                rgb = np.asarray(im.convert("RGB"))
-            alpha = _resize_alpha(masks[i], (rgb.shape[1], rgb.shape[0]))
-            clean_rgb = decontaminate_rgb_with_alpha(rgb, alpha)
-            rgba = np.dstack([clean_rgb, (alpha * 255.0).round().astype(np.uint8)])
-            Image.fromarray(rgba, "RGBA").save(rgba_dir / f"{i:05d}.png", optimize=False)
-
-        cmd = [
-            _ffmpeg_path(),
-            "-hide_banner", "-loglevel", "error",
-            "-framerate", f"{fps}",
-            "-i", str(rgba_dir / "%05d.png"),
-            "-an",
-            *_encoder_args_for_alpha(codec),
-            "-y", output_path,
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, creationflags=_creation_flags())
-        if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg soft-alpha export failed: {proc.stderr[-800:]}")
-    return output_path
-
-
 def export_scene_with_alpha(
     src_path: str,
     start_ms: int,
@@ -313,94 +331,87 @@ def export_scene_with_alpha(
     codec: str = "prores_4444_alpha",
     fps: float = 24.0,
     decontaminate_rgb: bool = False,
+    edge_refine: bool = True,
+    bg_aware_cleanup: bool = True,
 ) -> str:
-    """Encode the clip with the SAM 2 masks as the alpha channel.
+    """Encode the clip with the roto masks as the alpha channel.
 
     ``codec`` is either ``prores_4444_alpha`` (ProRes 4444, 10-bit, ``.mov`` —
     Resolve/AE/Premiere all consume it natively) or ``vp9_alpha`` (VP9 + alpha
     in ``.webm`` — lighter, web-friendly, less universally supported).
 
-    Pipeline:
-        Input 0 = source clip with ``-ss/-t`` trim (keeps native fps and res).
-        Input 1 = PNG sequence of masks at the same fps as the SAM 2 extract,
-                  sized to whatever ``predict_video_masks`` returned.
-        filter  = scale mask to source res, then ``alphamerge``.
+    Single unified path: the source is re-decoded at full resolution through
+    :func:`extract_png_frames` with the SAME fps/seek arguments the mask
+    session used, so RGB frame i and mask i are guaranteed to come from the
+    same source frame. The alpha is then upscaled to source resolution — with
+    a guided filter that snaps the matte edge back onto full-res line work
+    when ``edge_refine`` is on, plain bilinear otherwise — optionally
+    RGB-decontaminated, and the RGBA sequence is encoded in one ffmpeg pass.
 
-    The mask res may differ from the source res (we resize during extraction
-    to keep SAM 2 fast). ffmpeg upscales the mask with bilinear inside the
-    filter chain — usable for AMV compositing, but if you need pixel-perfect
-    you'd want to re-run SAM 2 at native resolution.
+    (The previous implementation fed the native-fps source and a fixed-24fps
+    mask PNG sequence to ``alphamerge``, which pairs frames blindly — any
+    source that wasn't exactly 24 fps drifted progressively out of sync with
+    its matte. ``fps`` here must be the session's probed rate.)
     """
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    start_sec = max(0.0, start_ms / 1000.0)
-    duration_sec = max(0.05, (end_ms - start_ms) / 1000.0)
+    from PIL import Image
+    from ..models.mask_postprocess import (
+        clean_edges_with_background,
+        decontaminate_rgb_with_alpha,
+        upsample_alpha_guided,
+    )
 
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     if masks.ndim != 3:
         raise ValueError(f"masks must be (T, H, W), got shape {masks.shape}")
 
-    if decontaminate_rgb and np.issubdtype(masks.dtype, np.floating):
-        return _export_soft_alpha_as_rgba_sequence(
-            src_path,
-            start_sec,
-            duration_sec,
-            masks,
-            output_path,
-            codec=codec,
-            fps=fps,
-        )
-
     with tempfile.TemporaryDirectory(prefix="amv_alpha_") as tmp:
         tmp_path = Path(tmp)
-        _write_mask_png_seq(masks, tmp_path)
+        rgb_dir = tmp_path / "rgb"
+        rgba_dir = tmp_path / "rgba"
+        rgb_dir.mkdir()
+        rgba_dir.mkdir()
 
-        if codec == "prores_4444_alpha":
-            # Profile 4 = ProRes 4444 (10-bit + alpha). yuva444p10le is the
-            # pixel format that actually carries the alpha channel — without
-            # it ffmpeg would silently drop the alpha plane.
-            encoder = ["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le"]
-        elif codec == "vp9_alpha":
-            # libvpx-vp9 + yuva420p = VP9 with embedded alpha in WebM. The
-            # `auto-alt-ref` flag must be off when emitting alpha, otherwise
-            # libvpx silently strips it.
-            encoder = [
-                "-c:v", "libvpx-vp9",
-                "-pix_fmt", "yuva420p",
-                "-auto-alt-ref", "0",
-                "-b:v", "2M",
-                "-row-mt", "1",
-            ]
-        else:
-            raise ValueError(f"unknown alpha codec: {codec}")
+        frame_paths = extract_png_frames(
+            src_path, start_ms, end_ms, rgb_dir / "%05d.png",
+            fps=fps, max_frames=int(masks.shape[0]),
+        )
+        if not frame_paths:
+            raise RuntimeError("ffmpeg produced no RGB frames for alpha export")
 
-        # alphamerge needs a grayscale mask at the same resolution as the
-        # source. Prefer an explicit source-sized scale because scale2ref can
-        # crash on some Windows ffmpeg builds.
-        source_size = _source_video_size(src_path)
-        if source_size is not None:
-            source_w, source_h = source_size
-            filter_complex = (
-                f"[1:v]scale={source_w}:{source_h}:flags=bilinear,format=gray[maskg];"
-                "[0:v][maskg]alphamerge[out]"
+        n = min(len(frame_paths), int(masks.shape[0]))
+        if abs(len(frame_paths) - masks.shape[0]) > 1:
+            log.warning(
+                "alpha export: %d source frames vs %d masks — encoding the first %d",
+                len(frame_paths), masks.shape[0], n,
             )
-        else:
-            filter_complex = (
-                "[1:v][0:v]scale2ref=flags=bilinear[mask][base];"
-                "[mask]format=gray[maskg];"
-                "[base][maskg]alphamerge[out]"
-            )
+
+        for i in range(n):
+            with Image.open(frame_paths[i]) as im:
+                rgb = np.asarray(im.convert("RGB"))
+            alpha = np.clip(masks[i].astype(np.float32), 0.0, 1.0)
+            if alpha.shape != rgb.shape[:2]:
+                if edge_refine:
+                    alpha = upsample_alpha_guided(alpha, rgb)
+                else:
+                    alpha = _resize_alpha(alpha, (rgb.shape[1], rgb.shape[0]))
+            # BG-aware cleanup re-solves the soft band against the actual
+            # local background (kills the "old background aura" around the
+            # matte); the legacy decontaminate is the weaker fallback that
+            # only recolours edge RGB without touching alpha.
+            if bg_aware_cleanup:
+                rgb, alpha = clean_edges_with_background(rgb, alpha)
+            elif decontaminate_rgb:
+                rgb = decontaminate_rgb_with_alpha(rgb, alpha)
+            rgba = np.dstack([rgb, (alpha * 255.0).round().astype(np.uint8)])
+            Image.fromarray(rgba, "RGBA").save(rgba_dir / f"{i:05d}.png", optimize=False)
 
         cmd = [
             _ffmpeg_path(),
             "-hide_banner", "-loglevel", "error",
-            "-ss", f"{start_sec}",
-            "-t", f"{duration_sec}",
-            "-i", src_path,
             "-framerate", f"{fps}",
-            "-i", str(tmp_path / "%05d.png"),
-            "-filter_complex", filter_complex,
-            "-map", "[out]",
+            "-i", str(rgba_dir / "%05d.png"),
             "-an",  # alpha exports for compositing don't carry audio
-            *encoder,
+            *_encoder_args_for_alpha(codec),
             "-y", output_path,
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, creationflags=_creation_flags())

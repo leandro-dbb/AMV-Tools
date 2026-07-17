@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, FolderPlus, Search, Tag, Sparkles, X } from 'lucide-react';
+import { useT } from '../i18n';
 
 interface Step {
   icon: typeof FolderPlus;
@@ -7,30 +8,32 @@ interface Step {
   body: string;
 }
 
+// title/body hold i18n keys; resolved with t() at render time.
 const STEPS: Step[] = [
   {
     icon: FolderPlus,
-    title: '1. Add your library',
-    body: 'Open Settings → Databases and drop a folder of anime episodes into the index queue. AMV Tools will detect cuts, sub-segment long scenes, and run wd-tagger + SigLIP 2.',
+    title: 'tutorial.step1.title',
+    body: 'tutorial.step1.body',
   },
   {
     icon: Search,
-    title: '2. Search in plain English',
-    body: 'Type "Gojo combat" or "Charizard fire breath" in the Search tab. Drop an image to find similar scenes. Tune the threshold if you want stricter or looser matches.',
+    title: 'tutorial.step2.title',
+    body: 'tutorial.step2.body',
   },
   {
     icon: Tag,
-    title: '3. Browse by tag',
-    body: 'In the Tags tab, pick one or several videos and a tag (e.g. "fighting") to see every occurrence with hover preview. Multi-select and bulk-export in one click.',
+    title: 'tutorial.step3.title',
+    body: 'tutorial.step3.body',
   },
   {
     icon: Sparkles,
-    title: '4. Edit and export',
-    body: 'Click any scene to open the mini-editor. J/K/L scrub, I/O set in-out, ← → walk the list. Hit Export scene when you\'re done — frame-accurate via ffmpeg.',
+    title: 'tutorial.step4.title',
+    body: 'tutorial.step4.body',
   },
 ];
 
 export default function TutorialOverlay({ onDone }: { onDone: () => void }) {
+  const t = useT();
   const [step, setStep] = useState(0);
   const S = STEPS[step];
   const Icon = S.icon;
@@ -49,11 +52,11 @@ export default function TutorialOverlay({ onDone }: { onDone: () => void }) {
               <Icon size={24} className="text-white" />
             </div>
           </div>
-          <div className="text-[#71717A] text-xs uppercase tracking-wider">Getting started</div>
+          <div className="text-[#71717A] text-xs uppercase tracking-wider">{t('tutorial.gettingStarted')}</div>
         </div>
 
-        <h2 className="text-2xl font-bold mb-2">{S.title}</h2>
-        <p className="text-[#A1A1AA] mb-6">{S.body}</p>
+        <h2 className="text-2xl font-bold mb-2">{t(S.title)}</h2>
+        <p className="text-[#A1A1AA] mb-6">{t(S.body)}</p>
 
         <div className="flex items-center justify-between">
           <div className="flex gap-1.5">
@@ -62,14 +65,14 @@ export default function TutorialOverlay({ onDone }: { onDone: () => void }) {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onDone} className="text-[#71717A] hover:text-[#FAFAFA] text-sm">Skip</button>
+            <button onClick={onDone} className="text-[#71717A] hover:text-[#FAFAFA] text-sm">{t('tutorial.skip')}</button>
             {step < STEPS.length - 1 ? (
               <button onClick={() => setStep(step + 1)} className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-white px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">
-                Next <ChevronRight size={14} />
+                {t('tutorial.next')} <ChevronRight size={14} />
               </button>
             ) : (
               <button onClick={onDone} className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-white px-5 py-2 rounded-lg text-sm font-semibold">
-                Let's go
+                {t('tutorial.letsGo')}
               </button>
             )}
           </div>
