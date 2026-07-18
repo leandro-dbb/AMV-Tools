@@ -19,8 +19,15 @@ fi
 
 export PATH="$UV_DIR:$PATH"
 
-echo "Syncing CPU-only baseline (GPU backend installs in-app)..."
-"$UV_EXE" sync --extra cpu
+if [ "$(uname -s)" = "Darwin" ]; then
+  # macOS: the mps extra is the full-featured baseline (torch with Metal/MPS,
+  # onnxruntime with the Core ML EP, SAM 2 for the roto feature).
+  echo "Syncing Apple Silicon (MPS) baseline..."
+  "$UV_EXE" sync --extra mps
+else
+  echo "Syncing CPU-only baseline (GPU backend installs in-app)..."
+  "$UV_EXE" sync --extra cpu
+fi
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "[!] npm not found. Install Node.js 20+ from https://nodejs.org"

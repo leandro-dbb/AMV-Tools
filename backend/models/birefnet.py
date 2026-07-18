@@ -125,9 +125,9 @@ class BiRefNetModel:
     def _ensure_loaded_anime(self):
         """Load SkyTNT's ISNet anime-seg checkpoint through onnxruntime.
 
-        Same provider selection as the wd-tagger: CUDA/DML when the app runs
-        on that backend, CPU fallback otherwise. Preprocessing lives in
-        :meth:`_mask_image_anime` and mirrors the upstream demo exactly.
+        Same provider selection as the wd-tagger: CUDA/DML/CoreML when the
+        app runs on that backend, CPU fallback otherwise. Preprocessing lives
+        in :meth:`_mask_image_anime` and mirrors the upstream demo exactly.
         """
         if self._onnx_session is not None:
             return
@@ -137,23 +137,15 @@ class BiRefNetModel:
             import onnxruntime as ort
             from huggingface_hub import hf_hub_download
 
-            from .wd_tagger import _register_cuda12_dll_dirs
+            from .wd_tagger import _register_cuda12_dll_dirs, build_onnx_providers, make_onnx_session
 
             _register_cuda12_dll_dirs(required=(self.device.backend == "cuda"), ort=ort)
 
             log.info("loading anime-seg ISNet (%s)", self.repo_id)
             model_path = hf_hub_download(self.repo_id, "isnetis.onnx", token=self.hf_token)
 
-            available = set(ort.get_available_providers())
-            preferred: list[str] = []
-            if self.device.backend == "cuda":
-                preferred.append("CUDAExecutionProvider")
-            elif self.device.backend == "dml":
-                preferred.append("DmlExecutionProvider")
-            providers = [p for p in preferred if p in available]
-            providers.append("CPUExecutionProvider")
-
-            self._onnx_session = ort.InferenceSession(model_path, providers=providers)
+            providers = build_onnx_providers(self.device.backend, ort)
+            self._onnx_session = make_onnx_session(ort, model_path, providers)
             self._onnx_input = self._onnx_session.get_inputs()[0].name
             self._start_offload_watcher()
 
@@ -177,6 +169,7 @@ class BiRefNetModel:
 
     def offload(self):
         import gc
+        from .device import empty_device_cache
         with self._lock:
             self._model = None
             self._transform = None
@@ -184,12 +177,7 @@ class BiRefNetModel:
             self._onnx_session = None
             self._onnx_input = None
         gc.collect()
-        if self.device.backend == "cuda":
-            try:
-                import torch
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
+        empty_device_cache(self.device.backend)
 
     # ── inference ───────────────────────────────────────────────────────────
     def mask_image(

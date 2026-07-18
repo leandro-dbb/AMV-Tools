@@ -97,15 +97,11 @@ class MatAnyoneModel:
 
     def offload(self):
         import gc
+        from .device import empty_device_cache
         with self._lock:
             self._processor = None
         gc.collect()
-        if self.device.backend == "cuda":
-            try:
-                import torch
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
+        empty_device_cache(self.device.backend)
 
     # ── inference ───────────────────────────────────────────────────────────
     def propagate(

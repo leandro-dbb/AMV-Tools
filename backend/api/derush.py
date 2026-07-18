@@ -182,7 +182,7 @@ def derush_delete_folder(folder_id: int):
 
 # ── batch export ────────────────────────────────────────────────────────────
 def _suffix_for_codec(codec: str) -> str:
-    if codec in ("libx264", "libx265", "libsvtav1", "h264_nvenc"):
+    if codec in ("libx264", "libx265", "libsvtav1", "h264_nvenc", "h264_videotoolbox"):
         return ".mp4"
     if codec in ("prores_ks", "dnxhr"):
         return ".mov"

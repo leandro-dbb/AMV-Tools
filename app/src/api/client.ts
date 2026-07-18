@@ -52,7 +52,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   status: () => req<SystemStatus>('/api/status'),
 
-  setupGpu: (backend: 'cu130' | 'cu130-trt' | 'cu126' | 'dml' | 'xpu' | 'cpu' | 'rocm') =>
+  setupGpu: (backend: 'cu130' | 'cu130-trt' | 'cu126' | 'dml' | 'xpu' | 'mps' | 'cpu' | 'rocm') =>
     req<{ ok: boolean; log: string; hint?: string }>('/api/setup/install', {
       method: 'POST',
       body: JSON.stringify({ backend }),

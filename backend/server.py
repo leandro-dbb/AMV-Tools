@@ -8,8 +8,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
+
+# PyTorch's MPS backend still lacks a few ops; opt into the CPU fallback
+# before anything can import torch, so a manual `python backend/server.py`
+# behaves like an Electron launch (main.ts sets the same variable).
+if sys.platform == "darwin":
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 # Allow `python backend/server.py` from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -43,7 +50,7 @@ def _silence_proactor_reset(loop, context):
 
 
 def make_app() -> FastAPI:
-    app = FastAPI(title="AMV Tools sidecar", version="0.2.0a")
+    app = FastAPI(title="AMV Tools sidecar", version="0.3.0a")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

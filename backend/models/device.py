@@ -14,6 +14,22 @@ class DeviceInfo:
     vram_gb: Optional[float] = None  # total VRAM; None when the backend can't report it
 
 
+def empty_device_cache(backend: str) -> None:
+    """Release cached allocator blocks back to the OS/driver.
+
+    Matters twice as much on Apple Silicon: MPS allocations live in unified
+    memory, so a bloated cache pressures the entire system, not just "VRAM".
+    """
+    try:
+        import torch
+        if backend == "cuda":
+            torch.cuda.empty_cache()
+        elif backend == "mps" and hasattr(torch, "mps"):
+            torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
 def detect_device(forced: Optional[str] = None) -> DeviceInfo:
     import torch
 
@@ -37,6 +53,19 @@ def detect_device(forced: Optional[str] = None) -> DeviceInfo:
         except Exception:
             return None
 
+    def mps_info() -> DeviceInfo:
+        # fp16 halves inference time and unified-memory footprint on Apple
+        # Silicon — same trade-off we already make on CUDA (sm70+). The
+        # BiRefNet checkpoint even ships fp16 natively.
+        try:
+            # Metal's working-set ceiling (~70-75% of unified memory) — the
+            # honest equivalent of VRAM for the batch-size recommendation.
+            mem = round(torch.mps.recommended_max_memory() / 2**30, 1)
+        except Exception:
+            mem = None
+        return DeviceInfo("mps", "Apple Silicon GPU (MPS)", torch.device("mps"),
+                          torch.float16, vram_gb=mem)
+
     if forced and forced != "auto":
         if forced == "cuda" and torch.cuda.is_available():
             return cuda_info()
@@ -45,7 +74,7 @@ def detect_device(forced: Optional[str] = None) -> DeviceInfo:
         if forced == "dml" and torch_directml and torch_directml.is_available():
             return DeviceInfo("dml", "DirectML GPU", torch_directml.device(), torch.float32)
         if forced == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return DeviceInfo("mps", "Apple MPS", torch.device("mps"), torch.float32)
+            return mps_info()
         return DeviceInfo("cpu", "CPU (forced fallback)", torch.device("cpu"), torch.float32)
 
     if torch.cuda.is_available():
@@ -55,5 +84,5 @@ def detect_device(forced: Optional[str] = None) -> DeviceInfo:
     if torch_directml and torch_directml.is_available():
         return DeviceInfo("dml", "DirectML GPU", torch_directml.device(), torch.float32)
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return DeviceInfo("mps", "Apple MPS", torch.device("mps"), torch.float32)
+        return mps_info()
     return DeviceInfo("cpu", "CPU", torch.device("cpu"), torch.float32)

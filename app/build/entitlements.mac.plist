@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Electron's V8 JIT requires these two under the hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- The app spawns the uv-managed Python sidecar and its native
+         extensions (torch, onnxruntime, PyAV), none of which are signed by
+         our team — library validation must stay off for that process tree. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Sidecar HTTP/WebSocket on 127.0.0.1 + model downloads. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+  </dict>
+</plist>

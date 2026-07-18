@@ -51,6 +51,12 @@ export const onboardingStrings: Dict = {
     en: 'For Intel Arc A-series and Xe.',
     fr: 'Pour les Intel Arc série A et Xe.',
   },
+  'onboarding.opt.mps.title': { en: 'Apple Silicon (MPS + Core ML)', fr: 'Apple Silicon (MPS + Core ML)' },
+  'onboarding.opt.mps.subtitle': { en: 'M1 and newer', fr: 'M1 et plus récents' },
+  'onboarding.opt.mps.detail': {
+    en: 'SigLIP + BiRefNet on the Apple GPU via Metal (MPS), wd-tagger on the Neural Engine via Core ML, video decode/encode on VideoToolbox. Also enables SAM 2 roto on macOS.',
+    fr: 'SigLIP + BiRefNet sur le GPU Apple via Metal (MPS), wd-tagger sur le Neural Engine via Core ML, décodage/encodage vidéo sur VideoToolbox. Active aussi le roto SAM 2 sur macOS.',
+  },
   'onboarding.opt.cpu.title': { en: 'CPU only', fr: 'CPU uniquement' },
   'onboarding.opt.cpu.subtitle': { en: 'No GPU acceleration', fr: 'Sans accélération GPU' },
   'onboarding.opt.cpu.detail': {
@@ -72,7 +78,7 @@ export const onboardingStrings: Dict = {
     fr: 'L\'installation a échoué. Réessayez ce backend ou choisissez CPU pour ouvrir l\'application.',
   },
   'onboarding.tryAnother': { en: 'Try another backend', fr: 'Essayer un autre backend' },
-  'onboarding.version': { en: 'AMV Tools v0.1 alpha', fr: 'AMV Tools v0.1 alpha' },
+  'onboarding.version': { en: 'AMV Tools v0.3 alpha', fr: 'AMV Tools v0.3 alpha' },
 
   // Indexing preference question (speed vs quality)
   'onboarding.profile.title': { en: 'How should your episodes be indexed?', fr: 'Comment indexer tes épisodes ?' },

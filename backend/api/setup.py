@@ -24,7 +24,7 @@ class SetupRequest(BaseModel):
     backend: str
 
 
-_VALID = {"cu130", "cu130-trt", "cu126", "dml", "xpu", "rocm", "cpu"}
+_VALID = {"cu130", "cu130-trt", "cu126", "dml", "xpu", "rocm", "mps", "cpu"}
 _TORCH_BACKENDS = {"cu130", "cu130-trt", "cu126", "xpu", "rocm"}
 
 
@@ -53,6 +53,7 @@ def _settings_for_backend(backend: str) -> dict:
         "cu126": "cuda",
         "dml": "dml",
         "xpu": "xpu",
+        "mps": "mps",
         "cpu": "cpu",
         "rocm": "auto",
     }
@@ -92,6 +93,7 @@ def _validate_backend(backend: str) -> tuple[bool, str]:
         "cu126": "cuda",
         "dml": "dml",
         "xpu": "xpu",
+        "mps": "mps",
         "rocm": "cuda",
     }
     expected = checks.get(backend)
@@ -121,6 +123,11 @@ elif expected == "dml":
     if not torch_directml.is_available():
         raise SystemExit("torch-directml is installed, but DirectML is not available")
     print("DirectML available")
+elif expected == "mps":
+    import torch
+    if not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        raise SystemExit(f"torch {torch.__version__} was installed, but Apple MPS is not available")
+    print(f"torch {torch.__version__}, Apple MPS available")
 else:
     raise SystemExit(f"Unknown validation target for {backend}: {expected}")
 """

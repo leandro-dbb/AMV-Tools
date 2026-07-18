@@ -164,8 +164,9 @@ def video_stream(video_id: int, variant: str = Query(default="remux")):
 @router.post("/api/videos/{video_id}/transcode")
 def video_transcode(video_id: int):
     """Decode-proof fallback for sources Chromium can't decode even after the
-    remux (hevc, 10-bit h264): background H.264 8-bit transcode (NVENC when
-    available), progress streamed as ``derush_prepare`` events."""
+    remux (hevc, 10-bit h264): background H.264 8-bit transcode (NVENC or
+    VideoToolbox when available), progress streamed as ``derush_prepare``
+    events."""
     filepath = _video_path_or_404(video_id)
     enc = _cache_dir() / f"{video_id}.enc.mp4"
     if enc.exists():
@@ -183,13 +184,25 @@ def video_transcode(video_id: int):
 
     def worker():
         from ..indexing.cuts import _ffmpeg_path
-        from ..export.ffmpeg import _creation_flags, _has_nvenc_h264
+        from ..export.ffmpeg import _adaptive_bitrate, _creation_flags, _hw_h264_encoder
         tmp = enc.with_suffix(".tmp.mp4")
-        vcodec = (["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
-                  if _has_nvenc_h264() else
-                  ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
+        hw = _hw_h264_encoder()
+        decode_args: list[str] = []
+        if hw == "h264_nvenc":
+            vcodec = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
+        elif hw == "h264_videotoolbox":
+            # VideoToolbox has no constant-quality flag that works everywhere,
+            # so target the AME-style adaptive bitrate instead; decode on VT
+            # too since hevc/10-bit software decode is the slow part here.
+            target = _adaptive_bitrate(filepath, "source")
+            vcodec = ["-c:v", "h264_videotoolbox", "-allow_sw", "1",
+                      "-b:v", str(target), "-maxrate", str(int(target * 1.5))]
+            decode_args = ["-hwaccel", "videotoolbox"]
+        else:
+            vcodec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
         cmd = [
             _ffmpeg_path(), "-hide_banner", "-loglevel", "error",
+            *decode_args,
             "-i", filepath,
             "-map", "0:v:0", "-map", "0:a:0?",
             *vcodec, "-pix_fmt", "yuv420p",

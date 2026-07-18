@@ -8,16 +8,17 @@ We tried two earlier approaches:
      Decodes on GPU but every frame is downloaded full-res to CPU before the
      downscale, which costs ~60 s for a 22-min episode on consumer NVMe.
 
-This module now uses approach 3: spawn ffmpeg with NVDEC + the `scale_cuda`
-filter so the 160×90 downscale happens on the GPU, and only the tiny
+This module now uses approach 3: spawn ffmpeg with hardware decode (NVDEC on
+NVIDIA, VideoToolbox on macOS) + an on-device downscale filter (`scale_cuda`
+or `scale_vt`) so the 160×90 downscale happens on the GPU, and only the tiny
 grayscale plane is piped to stdout. Net effect: detect_cuts becomes
-~3× faster, dominated by the NVDEC decode alone (which is itself near
-the limit of what consumer GPUs can do on h264).
+~3× faster, dominated by the hardware decode alone.
 
 Fallbacks, in order of preference:
-  - ffmpeg + cuda + scale_cuda  (this is what we want)
-  - PyAV + NVDEC + CPU reformat  (works without scale_cuda)
-  - PyAV + CPU decode + CPU reformat  (works without any NVIDIA stack)
+  - ffmpeg + hw decode + on-device scale  (scale_cuda / scale_vt)
+  - ffmpeg + VideoToolbox decode + CPU scale  (macOS builds without scale_vt)
+  - PyAV + NVDEC/VideoToolbox + CPU reformat
+  - PyAV + CPU decode + CPU reformat  (works without any GPU stack)
 """
 from __future__ import annotations
 
@@ -61,61 +62,92 @@ def _ffmpeg_path() -> str:
         raise RuntimeError("ffmpeg not found")
 
 
-# ── scale_cuda probe ────────────────────────────────────────────────────────
-_FFMPEG_CUDA_PROBED = False
-_FFMPEG_CUDA_AVAILABLE = False
+# ── hardware decode profile probe ───────────────────────────────────────────
+_HW_PROFILE_PROBED = False
+_HW_PROFILE: Optional[dict] = None
 
 
-def _ffmpeg_supports_scale_cuda() -> bool:
-    """Return True if the ffmpeg binary has both the `cuda` hwaccel and the
-    `scale_cuda` filter compiled in. Cached for the process lifetime."""
-    global _FFMPEG_CUDA_PROBED, _FFMPEG_CUDA_AVAILABLE
-    if _FFMPEG_CUDA_PROBED:
-        return _FFMPEG_CUDA_AVAILABLE
-    _FFMPEG_CUDA_PROBED = True
+def _ffmpeg_hw_profile() -> Optional[dict]:
+    """Best hardware decode+downscale profile for this ffmpeg build.
+
+    Returns a dict (cached for the process lifetime) with:
+      name        — 'cuda' | 'videotoolbox'
+      input_args  — hwaccel flags to place before `-i`
+      scale_vf    — vf prefix with `{w}`/`{h}` placeholders; after it the
+                    frames are in CPU memory, ready for a trailing `format=`
+    or None when no hardware decode path exists (callers fall back to PyAV).
+
+    On macOS we prefer `scale_vt` (VTPixelTransferSession, ffmpeg 6.1+) so
+    the downscale happens on-device like `scale_cuda`; older builds still get
+    VideoToolbox decode with a cheap CPU downscale, which already removes the
+    dominant cost (full-res software decode).
+    """
+    global _HW_PROFILE_PROBED, _HW_PROFILE
+    if _HW_PROFILE_PROBED:
+        return _HW_PROFILE
+    _HW_PROFILE_PROBED = True
     try:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         filters = subprocess.run(
             [_ffmpeg_path(), "-hide_banner", "-filters"],
             capture_output=True, text=True, timeout=10, creationflags=flags,
-        )
+        ).stdout or ""
         accels = subprocess.run(
             [_ffmpeg_path(), "-hide_banner", "-hwaccels"],
             capture_output=True, text=True, timeout=10, creationflags=flags,
-        )
-        has_filter = "scale_cuda" in (filters.stdout or "")
-        has_cuda = "cuda" in (accels.stdout or "")
-        _FFMPEG_CUDA_AVAILABLE = bool(has_filter and has_cuda)
-        if _FFMPEG_CUDA_AVAILABLE:
-            log.info("ffmpeg+scale_cuda available — using full-GPU detect_cuts")
+        ).stdout or ""
+
+        if "cuda" in accels and "scale_cuda" in filters:
+            # `scale_cuda` must declare its GPU output pixel format explicitly,
+            # otherwise hwdownload chokes with EINVAL on some ffmpeg builds
+            # (ours included). Force NV12 → CPU.
+            _HW_PROFILE = {
+                "name": "cuda",
+                "input_args": ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"],
+                "scale_vf": "scale_cuda={w}:{h}:format=nv12,hwdownload,format=nv12",
+            }
+        elif sys.platform == "darwin" and "videotoolbox" in accels:
+            if "scale_vt" in filters:
+                _HW_PROFILE = {
+                    "name": "videotoolbox",
+                    "input_args": ["-hwaccel", "videotoolbox",
+                                   "-hwaccel_output_format", "videotoolbox_vld"],
+                    "scale_vf": "scale_vt={w}:{h},hwdownload,format=nv12",
+                }
+            else:
+                _HW_PROFILE = {
+                    "name": "videotoolbox",
+                    "input_args": ["-hwaccel", "videotoolbox"],
+                    "scale_vf": "scale={w}:{h}:flags=fast_bilinear",
+                }
+        if _HW_PROFILE is not None:
+            log.info("ffmpeg hardware decode available (%s) — using full-HW detect_cuts",
+                     _HW_PROFILE["name"])
         else:
-            log.info(
-                "ffmpeg+scale_cuda not available (filter=%s, hwaccel=%s); "
-                "detect_cuts will use PyAV fallback",
-                has_filter, has_cuda,
-            )
+            log.info("no ffmpeg hardware decode path; detect_cuts will use PyAV fallback")
     except Exception as exc:
         log.warning("ffmpeg capability probe failed: %s", exc)
-        _FFMPEG_CUDA_AVAILABLE = False
-    return _FFMPEG_CUDA_AVAILABLE
+        _HW_PROFILE = None
+    return _HW_PROFILE
 
 
-# ── NVDEC handle (for the PyAV fallback path only) ──────────────────────────
-_NVDEC_PROBED = False
-_NVDEC_HW: Optional[av.codec.hwaccel.HWAccel] = None
+# ── hwaccel handle (for the PyAV fallback path only) ────────────────────────
+_PYAV_HW_PROBED = False
+_PYAV_HW: Optional[av.codec.hwaccel.HWAccel] = None
 
 
-def _nvdec_handle() -> Optional[av.codec.hwaccel.HWAccel]:
-    global _NVDEC_PROBED, _NVDEC_HW
-    if not _NVDEC_PROBED:
-        _NVDEC_PROBED = True
+def _pyav_hwaccel_handle() -> Optional[av.codec.hwaccel.HWAccel]:
+    global _PYAV_HW_PROBED, _PYAV_HW
+    if not _PYAV_HW_PROBED:
+        _PYAV_HW_PROBED = True
+        device_type = "videotoolbox" if sys.platform == "darwin" else "cuda"
         try:
-            _NVDEC_HW = av.codec.hwaccel.HWAccel(device_type="cuda", allow_software_fallback=True)
-            log.info("NVDEC enabled for PyAV fallback path")
+            _PYAV_HW = av.codec.hwaccel.HWAccel(device_type=device_type, allow_software_fallback=True)
+            log.info("%s enabled for PyAV fallback path", device_type)
         except Exception as exc:
-            log.debug("NVDEC unavailable: %s", exc)
-            _NVDEC_HW = None
-    return _NVDEC_HW
+            log.debug("PyAV hwaccel (%s) unavailable: %s", device_type, exc)
+            _PYAV_HW = None
+    return _PYAV_HW
 
 
 # ── Probe ───────────────────────────────────────────────────────────────────
@@ -167,17 +199,17 @@ def _hist_from_av_plane(small_frame) -> np.ndarray:
     return hist_norm / total if total > 0 else hist_norm
 
 
-# ── Primary path: subprocess ffmpeg + scale_cuda ────────────────────────────
-def _detect_cuts_via_ffmpeg_cuda(
-    path: str, threshold: float, fps: float, duration_ms: int
+# ── Primary path: subprocess ffmpeg + hardware decode ───────────────────────
+def _detect_cuts_via_ffmpeg_hw(
+    path: str, threshold: float, fps: float, duration_ms: int, profile: dict
 ) -> List[int]:
-    """Decode + downscale + grayscale entirely on the GPU via ffmpeg, then
-    read 160×90 gray planes from stdout. Returns the list of cut timestamps
-    (start of each scene, in ms)."""
+    """Decode + downscale on the GPU via ffmpeg (`profile` from
+    `_ffmpeg_hw_profile`), then read 160×90 gray planes from stdout. Returns
+    the list of cut timestamps (start of each scene, in ms)."""
     w, h = _DIFF_W, _DIFF_H
     frame_bytes = w * h
 
-    # `scale_cuda` resizes on-device, `hwdownload` copies to host memory,
+    # The profile's scale_vf resizes (on-device when the build allows it),
     # `format=gray` discards chroma. -an / -sn skip audio + subs (anime MKVs
     # are often loaded with both).
     #
@@ -189,14 +221,10 @@ def _detect_cuts_via_ffmpeg_cuda(
         _ffmpeg_path(),
         "-hide_banner", "-nostats", "-loglevel", "error",
         "-fflags", "+discardcorrupt",
-        "-hwaccel", "cuda",
-        "-hwaccel_output_format", "cuda",
+        *profile["input_args"],
         "-i", path,
         "-an", "-sn",
-        # `scale_cuda` must declare its GPU output pixel format explicitly,
-        # otherwise hwdownload chokes with EINVAL on some ffmpeg builds (ours
-        # included). Force NV12 → CPU → gray.
-        "-vf", f"scale_cuda={w}:{h}:format=nv12,hwdownload,format=nv12,format=gray",
+        "-vf", profile["scale_vf"].format(w=w, h=h) + ",format=gray",
         "-fps_mode", "cfr",
         "-f", "rawvideo",
         "-pix_fmt", "gray",
@@ -265,14 +293,14 @@ def _detect_cuts_via_ffmpeg_cuda(
     return cuts_ms
 
 
-# ── Fallback path: PyAV (NVDEC or CPU) + CPU reformat ───────────────────────
+# ── Fallback path: PyAV (NVDEC/VideoToolbox or CPU) + CPU reformat ──────────
 def _open_for_decode(path: str) -> tuple[av.container.InputContainer, bool]:
-    hw = _nvdec_handle()
+    hw = _pyav_hwaccel_handle()
     if hw is not None:
         try:
             return av.open(path, hwaccel=hw, options={"err_detect": "ignore_err"}), True
         except av.AVError as exc:
-            log.warning("NVDEC open failed for %s, falling back to CPU: %s", path, exc)
+            log.warning("hwaccel open failed for %s, falling back to CPU: %s", path, exc)
     return av.open(path, options={"err_detect": "ignore_err"}), False
 
 
@@ -329,13 +357,14 @@ def detect_cuts(path: str, threshold: float = 0.30) -> List[Tuple[int, int]]:
         return []
 
     cuts_ms: Optional[List[int]] = None
-    if _ffmpeg_supports_scale_cuda():
+    profile = _ffmpeg_hw_profile()
+    if profile is not None:
         try:
-            cuts_ms = _detect_cuts_via_ffmpeg_cuda(path, threshold, fps, duration_ms)
+            cuts_ms = _detect_cuts_via_ffmpeg_hw(path, threshold, fps, duration_ms, profile)
         except Exception as exc:
             log.warning(
-                "ffmpeg scale_cuda path failed for %s (%s); falling back to PyAV",
-                path, exc,
+                "ffmpeg %s path failed for %s (%s); falling back to PyAV",
+                profile["name"], path, exc,
             )
             cuts_ms = None
 
