@@ -1,6 +1,6 @@
 [project]
 name = "amv-tools"
-version = "0.2.0a0"
+version = "0.3.0a0"
 description = "AMV Tools — semantic scene browser for anime music video creators."
 readme = "README.md"
 requires-python = ">=3.12, <3.14"
@@ -45,6 +45,17 @@ cpu = [
     "torchvision==0.26.0",
     "onnxruntime>=1.18.0",
     "sam2==1.1.0 ; sys_platform != 'darwin'",
+]
+# Apple Silicon: torch/torchvision resolve from PyPI, whose macOS arm64
+# wheels ship the MPS (Metal) backend. onnxruntime's standard macOS wheel
+# includes the CoreML EP for the wd-tagger/ISNet path. SAM 2 runs on MPS
+# (PYTORCH_ENABLE_MPS_FALLBACK covers its few missing ops) — this is what
+# enables the roto/click-to-mask feature on macOS.
+mps = [
+    "torch==2.11.0 ; sys_platform == 'darwin'",
+    "torchvision==0.26.0 ; sys_platform == 'darwin'",
+    "onnxruntime>=1.18.0",
+    "sam2==1.1.0 ; sys_platform == 'darwin'",
 ]
 cu126 = [
     "torch==2.11.0 ; sys_platform != 'darwin'",
@@ -107,6 +118,31 @@ xpu = [
 ]
 dml       = ["torch==2.4.1", "torch-directml ; sys_platform == 'win32'", "onnxruntime-directml>=1.18.0 ; sys_platform == 'win32'"]
 
+# The tensorrt sdists (pulled via cu130-trt → torch-tensorrt) generate their
+# metadata dynamically, and their setup.py aborts on machines without an
+# NVIDIA driver — which made `uv lock` impossible on macOS. Their dependency
+# sets are static in practice (values below match the published packages and
+# the previously locked graph), so declare them here and let uv resolve
+# without building the sdists. Install-time builds on the target machine are
+# unaffected.
+[[tool.uv.dependency-metadata]]
+name = "tensorrt"
+version = "10.15.1.29"
+requires-dist = ["tensorrt-cu13==10.15.1.29"]
+
+[[tool.uv.dependency-metadata]]
+name = "tensorrt-cu13"
+version = "10.15.1.29"
+requires-dist = [
+    "tensorrt-cu13-bindings==10.15.1.29",
+    "tensorrt-cu13-libs==10.15.1.29",
+]
+
+[[tool.uv.dependency-metadata]]
+name = "tensorrt-cu13-libs"
+version = "10.15.1.29"
+requires-dist = []
+
 [tool.uv]
 environments = [
     "sys_platform == 'darwin'",
@@ -117,6 +153,7 @@ package = false
 conflicts = [
   [
     { extra = "cpu" },
+    { extra = "mps" },
     { extra = "cu126" },
     { extra = "cu130" },
     { extra = "cu130-trt" },

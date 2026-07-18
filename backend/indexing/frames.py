@@ -6,16 +6,17 @@ wd-tagger and SigLIP. With PyAV+CPU we decoded every frame full-res 1920×1080
 and downloaded it back from GPU to CPU before any downscale — ~30 s per
 22-min episode just for this phase.
 
-The new GPU path runs the downscale inside ffmpeg via `scale_cuda`, so each
-frame leaves the GPU already at 512×288 RGB (442 KB) instead of full 1080p
-(6 MB). That's ~14× less bandwidth on the GPU→host bus and brings extraction
-down to ~10-12 s on a typical 5070-class GPU.
+The new GPU path runs the downscale inside ffmpeg via `scale_cuda` (NVIDIA)
+or `scale_vt` (macOS VideoToolbox), so each frame leaves the GPU already at
+512×288 RGB (442 KB) instead of full 1080p (6 MB). That's ~14× less bandwidth
+on the GPU→host bus and brings extraction down to ~10-12 s on a typical
+5070-class GPU.
 
 Both consumer models we run downstream are fine with 512×288 input:
   - wd-tagger preprocesses to 448² (pads aspect ratio) — 512×288 → 448×252 → pad
   - SigLIP NaFlex with max_num_patches=128 covers ~256×128 effective patches
 
-Falls back to PyAV CPU decode whenever ffmpeg+scale_cuda isn't usable.
+Falls back to PyAV CPU decode whenever no ffmpeg hardware path is usable.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from PIL import Image
 
 import av
 
-from . import cuts  # for _ffmpeg_path and _ffmpeg_supports_scale_cuda
+from . import cuts  # for _ffmpeg_path and _ffmpeg_hw_profile
 
 log = logging.getLogger(__name__)
 av.logging.set_level(av.logging.PANIC)
@@ -45,14 +46,14 @@ _SEEK_SAFETY_MS = 500
 _GPU_FRAME_W, _GPU_FRAME_H = 512, 288
 
 
-def _extract_frames_via_ffmpeg_cuda(
-    path: str, targets_ms: list[int], fps: float
+def _extract_frames_via_ffmpeg_hw(
+    path: str, targets_ms: list[int], fps: float, profile: dict
 ) -> Iterator[Tuple[int, Image.Image]]:
     """Single ffmpeg subprocess that decodes from `targets_ms[0] - safety` to
-    the end, with `scale_cuda` doing the downscale on-device. We read raw
-    512×288×3 RGB frames from stdout, count them to recover their timestamp
-    (relative to the seek point), and yield only those that match a requested
-    target."""
+    the end, with hardware decode + downscale per `profile` (NVDEC+scale_cuda
+    or VideoToolbox+scale_vt/CPU scale). We read raw 512×288×3 RGB frames
+    from stdout, count them to recover their timestamp (relative to the seek
+    point), and yield only those that match a requested target."""
     if not targets_ms:
         return
     targets = sorted(set(targets_ms))
@@ -71,17 +72,14 @@ def _extract_frames_via_ffmpeg_cuda(
         cuts._ffmpeg_path(),
         "-hide_banner", "-nostats", "-loglevel", "error",
         "-fflags", "+discardcorrupt",
-        "-hwaccel", "cuda",
-        "-hwaccel_output_format", "cuda",
+        *profile["input_args"],
     ]
     if seek_seconds > 0:
         cmd += ["-ss", f"{seek_seconds:.3f}"]
     cmd += [
         "-i", path,
         "-an", "-sn",
-        # Force NV12 between scale_cuda and hwdownload, else the filter graph
-        # fails with EINVAL on this ffmpeg build (see cuts.py for the same fix).
-        "-vf", f"scale_cuda={w}:{h}:format=nv12,hwdownload,format=nv12,format=rgb24",
+        "-vf", profile["scale_vf"].format(w=w, h=h) + ",format=rgb24",
         "-fps_mode", "cfr",
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
@@ -188,13 +186,15 @@ def _extract_frames_via_pyav(
 def extract_frames_at(path: str, timestamps_ms: list[int]) -> Iterator[Tuple[int, Image.Image]]:
     """Yield (requested_ms, PIL.Image) for each ms in `timestamps_ms`, in order.
 
-    Prefers ffmpeg+scale_cuda (GPU pipeline). Falls back to PyAV CPU if the
-    subprocess path is unavailable or fails mid-stream.
+    Prefers the ffmpeg hardware pipeline (NVDEC+scale_cuda or VideoToolbox).
+    Falls back to PyAV CPU if the subprocess path is unavailable or fails
+    mid-stream.
     """
     if not timestamps_ms:
         return
 
-    if cuts._ffmpeg_supports_scale_cuda():
+    profile = cuts._ffmpeg_hw_profile()
+    if profile is not None:
         # We can't easily resume a generator if the subprocess fails mid-way
         # (we've already yielded some frames). Strategy: collect targets, run
         # the GPU path eagerly, fall back to PyAV only on outright failure
@@ -202,12 +202,12 @@ def extract_frames_at(path: str, timestamps_ms: list[int]) -> Iterator[Tuple[int
         try:
             info = cuts.probe_video(path)
             fps = info["fps"]
-            yield from _extract_frames_via_ffmpeg_cuda(path, timestamps_ms, fps)
+            yield from _extract_frames_via_ffmpeg_hw(path, timestamps_ms, fps, profile)
             return
         except Exception as exc:
             log.warning(
-                "ffmpeg scale_cuda extract failed for %s (%s); falling back to PyAV",
-                path, exc,
+                "ffmpeg %s extract failed for %s (%s); falling back to PyAV",
+                profile["name"], path, exc,
             )
 
     yield from _extract_frames_via_pyav(path, timestamps_ms)

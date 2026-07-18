@@ -1,7 +1,7 @@
 {
   "name": "amv-tools",
   "private": true,
-  "version": "0.2.0-alpha",
+  "version": "0.3.0-alpha",
   "description": "Local desktop app for anime scene search, trimming, and alpha export workflows.",
   "author": "AMV Tools contributors",
   "type": "module",
@@ -65,7 +65,12 @@
       }
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
       "icon": "../assets/logo/amv-tools-logo.ico",
       "extraResources": [
         {
@@ -76,10 +81,21 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64"]
+        }
       ],
+      "icon": "../assets/logo/amv-tools-logo.icns",
       "category": "public.app-category.video",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extraResources": [
         {
           "from": "../.uv/uv",

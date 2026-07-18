@@ -123,6 +123,71 @@ def _register_cuda12_dll_dirs(*, required: bool = False, ort=None) -> None:
         log.warning(_CUDA12_WARNING)
 
 
+def _coreml_provider_entry() -> tuple:
+    """CoreML EP with its recommended options.
+
+    MLProgram = the modern Core ML format (fp16-native, better op coverage);
+    MLComputeUnits=ALL lets Core ML schedule each partition on the ANE, GPU
+    or CPU, whichever is fastest. ModelCacheDirectory persists the compiled
+    model — without it every session re-creation (the idle-offload watcher
+    drops sessions after ~30 s) would pay the full Core ML compile again.
+    """
+    options = {"ModelFormat": "MLProgram", "MLComputeUnits": "ALL"}
+    try:
+        from ..paths import user_data_dir
+        cache = user_data_dir() / "coreml_cache"
+        cache.mkdir(parents=True, exist_ok=True)
+        options["ModelCacheDirectory"] = str(cache)
+    except Exception:
+        pass
+    return ("CoreMLExecutionProvider", options)
+
+
+def build_onnx_providers(device_backend: str, ort) -> list:
+    """Provider list for InferenceSession, best hardware EP first.
+
+    CoreML is included on macOS for the 'mps'/'auto' backends — without it
+    the ONNX models (wd-tagger, anime ISNet) run pure-CPU on Apple Silicon,
+    which is ~20× slower than the ANE/GPU path for the tagging pass.
+    """
+    available = set(ort.get_available_providers())
+    preferred: list = []
+    if device_backend == "cuda":
+        preferred.append("CUDAExecutionProvider")
+    elif device_backend == "dml":
+        preferred.append("DmlExecutionProvider")
+    elif device_backend == "mps":
+        preferred.append(_coreml_provider_entry())
+    elif device_backend == "auto":
+        preferred.extend(["CUDAExecutionProvider", "DmlExecutionProvider"])
+        if sys.platform == "darwin":
+            preferred.append(_coreml_provider_entry())
+    providers = [p for p in preferred
+                 if (p[0] if isinstance(p, tuple) else p) in available]
+    providers.append("CPUExecutionProvider")
+    return providers
+
+
+def make_onnx_session(ort, model_path: str, providers: list):
+    """InferenceSession with graceful degradation.
+
+    Older onnxruntime wheels reject the CoreML string options, and a broken
+    EP install shouldn't take indexing down with it — retry with the bare
+    provider names, then CPU-only as the last resort.
+    """
+    try:
+        return ort.InferenceSession(model_path, providers=providers)
+    except Exception as exc:
+        stripped = [p[0] if isinstance(p, tuple) else p for p in providers]
+        log.warning("InferenceSession with %s failed (%s); retrying without provider options",
+                    stripped, exc)
+        try:
+            return ort.InferenceSession(model_path, providers=stripped)
+        except Exception as exc2:
+            log.warning("hardware EPs unavailable (%s); falling back to CPU", exc2)
+            return ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+
+
 class WDTaggerModel:
     """Lazy-loading wd-tagger with batched ONNX Runtime inference."""
 
@@ -163,19 +228,8 @@ class WDTaggerModel:
             model_path = hf_hub_download(self.repo_id, "model.onnx", token=self.hf_token)
             labels_path = hf_hub_download(self.repo_id, "selected_tags.csv", token=self.hf_token)
 
-            available = set(ort.get_available_providers())
-            preferred: list[str] = []
-            if self.device_backend == "cuda":
-                preferred.append("CUDAExecutionProvider")
-            elif self.device_backend == "dml":
-                preferred.append("DmlExecutionProvider")
-            elif self.device_backend == "auto":
-                preferred.extend(["CUDAExecutionProvider", "DmlExecutionProvider"])
-
-            providers = [p for p in preferred if p in available]
-            providers.append("CPUExecutionProvider")
-
-            self._session = ort.InferenceSession(model_path, providers=providers)
+            providers = build_onnx_providers(self.device_backend, ort)
+            self._session = make_onnx_session(ort, model_path, providers)
             self._active_providers = list(self._session.get_providers())
             input_meta = self._session.get_inputs()[0]
             self._input_name = input_meta.name
@@ -185,6 +239,11 @@ class WDTaggerModel:
             if self.device_backend == "cuda" and "CUDAExecutionProvider" not in self._active_providers:
                 self._runtime_warnings.append(
                     "CUDA selected, but wd-tagger is running on CPU. Check CUDA 12 runtimes and NVIDIA driver."
+                )
+            if self.device_backend == "mps" and "CoreMLExecutionProvider" not in self._active_providers:
+                self._runtime_warnings.append(
+                    "Apple Silicon selected, but wd-tagger is running on CPU (Core ML EP unavailable). "
+                    "Reinstall the MPS backend from Settings → Models."
                 )
             if _CUDA12_WARNING:
                 self._runtime_warnings.append(_CUDA12_WARNING)

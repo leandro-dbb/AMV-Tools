@@ -16,36 +16,72 @@ log = logging.getLogger(__name__)
 
 _PROXY_BITRATES = {"low": "300k", "medium": "500k", "high": "1000k"}
 
+# The "adaptive hardware H.264" codec family — both remap transparently to
+# whichever hardware encoder the machine actually has (NVENC on NVIDIA,
+# VideoToolbox on Apple Silicon), libx264 otherwise.
+_HW_H264_CODECS = ("h264_nvenc", "h264_videotoolbox")
+
 
 def _creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
-# ── NVENC probe ─────────────────────────────────────────────────────────────
-_NVENC_PROBED = False
-_NVENC_AVAILABLE = False
+# ── hardware encoder probe ──────────────────────────────────────────────────
+_ENCODERS_PROBED = False
+_ENCODERS: set[str] = set()
 
 
-def _has_nvenc_h264() -> bool:
-    """True if this ffmpeg has h264_nvenc compiled in. Cached per process."""
-    global _NVENC_PROBED, _NVENC_AVAILABLE
-    if _NVENC_PROBED:
-        return _NVENC_AVAILABLE
-    _NVENC_PROBED = True
+def _available_encoders() -> set[str]:
+    """Names of the encoders compiled into this ffmpeg. Cached per process."""
+    global _ENCODERS_PROBED, _ENCODERS
+    if _ENCODERS_PROBED:
+        return _ENCODERS
+    _ENCODERS_PROBED = True
     try:
         proc = subprocess.run(
             [_ffmpeg_path(), "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=10,
             creationflags=_creation_flags(),
         )
-        _NVENC_AVAILABLE = "h264_nvenc" in (proc.stdout or "")
-        if _NVENC_AVAILABLE:
-            log.info("h264_nvenc available — proxies will be GPU-encoded")
-        else:
-            log.info("h264_nvenc not available — proxies will use libx264 CPU (slower)")
+        _ENCODERS = {
+            line.split()[1]
+            for line in (proc.stdout or "").splitlines()
+            if len(line.split()) >= 2 and line.lstrip()[:1] in ("V", "A", "S")
+        }
     except Exception as exc:
-        log.warning("NVENC probe failed: %s", exc)
-    return _NVENC_AVAILABLE
+        log.warning("encoder probe failed: %s", exc)
+    return _ENCODERS
+
+
+def _has_nvenc_h264() -> bool:
+    return "h264_nvenc" in _available_encoders()
+
+
+def _has_videotoolbox_h264() -> bool:
+    # The encoder is compiled into every macOS build; actual hardware encode
+    # exists on all Apple Silicon (and most Intel) Macs. `-allow_sw 1` keeps
+    # it working even on the rare machine without the hardware block.
+    return sys.platform == "darwin" and "h264_videotoolbox" in _available_encoders()
+
+
+_HW_ENCODER_LOGGED = False
+
+
+def _hw_h264_encoder() -> Optional[str]:
+    """Best hardware H.264 encoder on this machine, or None (libx264 only)."""
+    global _HW_ENCODER_LOGGED
+    enc = None
+    if _has_nvenc_h264():
+        enc = "h264_nvenc"
+    elif _has_videotoolbox_h264():
+        enc = "h264_videotoolbox"
+    if not _HW_ENCODER_LOGGED:
+        _HW_ENCODER_LOGGED = True
+        if enc:
+            log.info("%s available — proxies/exports will be GPU-encoded", enc)
+        else:
+            log.info("no hardware H.264 encoder — falling back to libx264 CPU (slower)")
+    return enc
 
 
 # Bits-per-pixel of Adobe Media Encoder's "Match Source — Adaptive High
@@ -101,12 +137,18 @@ def export_scene(
     # Map the setting name to the actual ffmpeg encoder. Notable cases:
     # `dnxhr` (what the user picks) is produced by ffmpeg's `dnxhd` encoder —
     # the dnxhr_* profile flag is what switches it to the modern variant.
-    # `h264_nvenc` silently falls back to libx264 (same VBR targets) on
-    # machines without an NVIDIA encoder.
+    # `h264_nvenc`/`h264_videotoolbox` (the "adaptive hardware H.264" family)
+    # silently remap to whatever hardware encoder this machine actually has,
+    # and fall back to libx264 (same VBR targets) when there is none — so a
+    # library exported on an NVIDIA box re-exports fine on a Mac and
+    # vice-versa.
     encoder = "dnxhd" if codec == "dnxhr" else codec
-    if codec == "h264_nvenc" and not _has_nvenc_h264():
-        log.warning("h264_nvenc requested but unavailable — falling back to libx264 VBR")
-        encoder = "libx264"
+    if codec in _HW_H264_CODECS:
+        requested_ok = (_has_nvenc_h264() if codec == "h264_nvenc"
+                        else _has_videotoolbox_h264())
+        if not requested_ok:
+            encoder = _hw_h264_encoder() or "libx264"
+            log.warning("%s requested but unavailable — using %s (same VBR targets)", codec, encoder)
 
     cmd = [
         _ffmpeg_path(),
@@ -117,7 +159,7 @@ def export_scene(
         "-t", f"{duration_sec}",
         "-c:v", encoder,
     ]
-    if codec == "h264_nvenc":
+    if codec in _HW_H264_CODECS:
         # Premiere/Media Encoder "Match Source — Adaptive High Bitrate":
         # hardware H.264, VBR 1-pass, target scaled to the source pixel rate
         # (15.2 Mbps at 1080p23.976), High profile, Rec.709 tags, yuv420p.
@@ -128,13 +170,18 @@ def export_scene(
             "-bufsize", str(int(target * 2)),
             "-pix_fmt", "yuv420p",
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-            # NVENC doesn't reliably copy the colour flags into the H.264 VUI,
-            # so stamp them at the bitstream level too (AME writes full Rec.709
-            # signalling; players otherwise guess).
+            # Hardware encoders don't reliably copy the colour flags into the
+            # H.264 VUI, so stamp them at the bitstream level too (AME writes
+            # full Rec.709 signalling; players otherwise guess).
             "-bsf:v", "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0",
         ]
         if encoder == "h264_nvenc":
             cmd.extend(["-preset", "p5", "-profile:v", "high", "-rc", "vbr", *rate_args])
+        elif encoder == "h264_videotoolbox":
+            # VideoToolbox has no -preset/-rc flags: VBR is the default rate
+            # mode once -b:v is set. -allow_sw keeps the rare machine without
+            # the hardware encode block working (software VT path).
+            cmd.extend(["-profile:v", "high", "-allow_sw", "1", *rate_args])
         else:
             cmd.extend(["-preset", "medium", "-profile:v", "high", *rate_args])
     elif codec in ("libx264", "libx265", "libsvtav1", "libvpx-vp9"):
@@ -179,7 +226,7 @@ def generate_proxy(src_path: str, start_ms: int, end_ms: int, output_path: str,
     plays it muted on hover anyway), we don't need 30 fps (humans don't notice
     on a 320×180 thumb), and we don't need full vertical resolution.
 
-    With h264_nvenc on a consumer NVIDIA card: ~30-50× realtime → ~5-10 s of
+    With h264_nvenc or h264_videotoolbox: ~30-50× realtime → ~5-10 s of
     encode for the full ~300 proxies of a 22-min episode. With the libx264
     fallback: ~10-15 s per proxy = several minutes per episode.
     """
@@ -188,24 +235,41 @@ def generate_proxy(src_path: str, start_ms: int, end_ms: int, output_path: str,
     start_sec = start_ms / 1000.0
     duration_sec = max(0.05, (end_ms - start_ms) / 1000.0)
 
-    use_nvenc = _has_nvenc_h264() and output_path.lower().endswith(".mp4")
+    hw_encoder = _hw_h264_encoder() if output_path.lower().endswith(".mp4") else None
+    # On macOS, decode on VideoToolbox too — the proxy pipeline is otherwise
+    # dominated by the full-res software decode of the source.
+    decode_args = (["-hwaccel", "videotoolbox"]
+                   if hw_encoder == "h264_videotoolbox" else [])
 
     base = [
         _ffmpeg_path(),
         "-hide_banner", "-loglevel", "error",
+        *decode_args,
         "-ss", f"{max(0, start_sec - 0.5)}",
         "-i", src_path,
         "-ss", f"{min(start_sec, 0.5)}",
         "-t", f"{duration_sec}",
     ]
 
-    if use_nvenc:
+    if hw_encoder == "h264_nvenc":
         # `p1` = fastest preset, `tune ll` = low-latency, ~30-50× realtime on
         # consumer cards. Muted, 240p, 15 fps is way enough for hover previews.
         cmd = base + [
             "-c:v", "h264_nvenc",
             "-preset", "p1",
             "-tune", "ll",
+            "-b:v", bitrate,
+            "-vf", "scale=-2:240,fps=15",
+            "-an",
+            "-y", output_path,
+        ]
+    elif hw_encoder == "h264_videotoolbox":
+        # `-realtime 1` biases the encoder for speed over quality — the right
+        # trade-off for a 240p hover preview.
+        cmd = base + [
+            "-c:v", "h264_videotoolbox",
+            "-realtime", "1",
+            "-allow_sw", "1",
             "-b:v", bitrate,
             "-vf", "scale=-2:240,fps=15",
             "-an",

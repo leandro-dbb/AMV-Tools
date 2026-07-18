@@ -537,7 +537,7 @@ class AppState:
 
     def _generate_proxies_for_new_scenes(self) -> None:
         import concurrent.futures
-        from .export.ffmpeg import _has_nvenc_h264
+        from .export.ffmpeg import _hw_h264_encoder
         from .paths import user_data_dir
 
         proxies_dir = user_data_dir() / "proxies"
@@ -564,7 +564,7 @@ class AppState:
             slot = by_video.setdefault(vid, (fp, []))
             slot[1].append((sid, s_ms, e_ms))
 
-        use_batched = _has_nvenc_h264()
+        use_batched = _hw_h264_encoder() is not None
         completed = [0]
         progress_lock = threading.Lock()
 
@@ -583,10 +583,10 @@ class AppState:
             )
             _publish(produced)
 
-        # 2 ffmpeg pipelines in parallel: each owns one NVDEC + one NVENC
-        # session, well under what consumer GPUs support. Going higher would
-        # contend on PCIe bandwidth and gain little (NVDEC is faster than the
-        # h264 source on a 5070-class card).
+        # 2 ffmpeg pipelines in parallel: each owns one hardware decode + one
+        # hardware encode session (NVDEC+NVENC or VideoToolbox), well under
+        # what consumer GPUs support. Going higher would contend on memory
+        # bandwidth and gain little (hw decode is faster than the h264 source).
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
             futures = [ex.submit(_do_video, item) for item in by_video.items()]
             for _ in concurrent.futures.as_completed(futures):
@@ -607,15 +607,16 @@ class AppState:
     ) -> int:
         """Generate proxies for every scene of one video. Returns count produced.
 
-        Strategy: when NVENC is available AND the scenes are contiguous (every
-        end_ms[i] == start_ms[i+1] — the normal case for `fast` indexing
-        without sub-segmentation), we spawn ONE ffmpeg with the segment muxer
-        that streams a single NVDEC+scale_cuda+NVENC pass and writes N output
+        Strategy: when a hardware H.264 encoder is available (NVENC or
+        VideoToolbox) AND the scenes are contiguous (every end_ms[i] ==
+        start_ms[i+1] — the normal case for `fast` indexing without
+        sub-segmentation), we spawn ONE ffmpeg with the segment muxer that
+        streams a single hw-decode+scale+hw-encode pass and writes N output
         files. This eliminates ~200 ms of spawn overhead per scene (~1 min
         saved per episode of ~300 scenes).
 
         We fall back to per-scene generation when scenes overlap (sub-seg
-        children inside parents) or when NVENC isn't available.
+        children inside parents) or when no hardware encoder is available.
         """
         from .export.ffmpeg import generate_proxy
 
@@ -664,9 +665,12 @@ class AppState:
         import tempfile
         from pathlib import Path
         from .indexing.cuts import _ffmpeg_path
-        from .export.ffmpeg import _PROXY_BITRATES
+        from .export.ffmpeg import _PROXY_BITRATES, _hw_h264_encoder
 
         bitrate = _PROXY_BITRATES.get(quality, _PROXY_BITRATES["medium"])
+        hw_encoder = _hw_h264_encoder()
+        if hw_encoder is None:
+            raise RuntimeError("no hardware encoder, skipping batched path")
         # Break points = end_ms of every scene except the last. ffmpeg emits
         # N+1 segments for N break points; with N = len(scenes)-1 we get
         # exactly len(scenes) segments.
@@ -685,18 +689,26 @@ class AppState:
             # `-force_key_frames` at the same instants the muxer cuts on is
             # what guarantees clean splits — otherwise segments would start
             # with junk P/B frames and be slow to seek into.
+            if hw_encoder == "h264_nvenc":
+                decode_args = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+                scale_args = ["-vf", "scale_cuda=240:-2:format=nv12,hwdownload,format=nv12"]
+                encode_args = ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll"]
+            else:  # h264_videotoolbox
+                # VT decode auto-downloads to CPU frames; the 240px-wide CPU
+                # downscale is negligible next to the hw decode + encode.
+                decode_args = ["-hwaccel", "videotoolbox"]
+                scale_args = ["-vf", "scale=240:-2:flags=fast_bilinear"]
+                encode_args = ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1"]
             cmd = [
                 _ffmpeg_path(),
                 "-hide_banner", "-nostats", "-loglevel", "error",
                 "-fflags", "+discardcorrupt",
-                "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                *decode_args,
                 "-i", video_path,
                 "-an", "-sn",
-                "-vf", "scale_cuda=240:-2:format=nv12,hwdownload,format=nv12",
+                *scale_args,
                 "-r", "15",
-                "-c:v", "h264_nvenc",
-                "-preset", "p1",
-                "-tune", "ll",
+                *encode_args,
                 "-b:v", bitrate,
                 "-force_key_frames", segment_times_str,
                 "-f", "segment",

@@ -135,16 +135,12 @@ class SAM2Model:
     def offload(self):
         """Free both predictors. Will lazy-reload on next use."""
         import gc
+        from .device import empty_device_cache
         with self._lock:
             self._image_predictor = None
             self._video_predictor = None
         gc.collect()
-        if self.device.backend == "cuda":
-            try:
-                import torch
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
+        empty_device_cache(self.device.backend)
 
     # ── single-frame preview ────────────────────────────────────────────────
     def preview_mask(

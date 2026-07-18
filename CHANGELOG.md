@@ -2,6 +2,54 @@
 
 All notable changes to AMV Tools are documented here.
 
+## 0.3.0-alpha — 2026-07-18
+
+Full Apple Silicon (M1+) support: every stage that was NVIDIA-only now has a
+native macOS hardware path. NVIDIA/CUDA behaviour is byte-for-byte unchanged.
+
+### Added
+
+- **Apple Silicon backend (`mps`)**: new onboarding option "Apple Silicon
+  (MPS + Core ML)", recommended by default on macOS. SigLIP 2 + BiRefNet run
+  on the Apple GPU via Metal (MPS, float16 — same precision trade-off as
+  CUDA), and the unified-memory budget is reported to the batch-size
+  recommendation in Settings.
+- **SAM 2 roto on macOS**: the `mps` extra installs the PyPI `sam2` package
+  on Darwin, enabling the click-to-mask / temporal propagation feature that
+  was previously Windows/Linux-only.
+- **Core ML execution provider**: wd-tagger and the anime ISNet segmenter now
+  run on the Neural Engine/GPU through onnxruntime's CoreML EP (MLProgram
+  format, compiled-model cache, graceful CPU fallback + a Settings warning
+  when the fallback triggers). This was the single largest indexing
+  bottleneck on macOS (pure-CPU tagging).
+- **VideoToolbox decode/encode across the whole ffmpeg pipeline**: cut
+  detection and median-frame extraction decode on VideoToolbox with the
+  `scale_vt` on-device downscale (same architecture as the NVDEC+`scale_cuda`
+  path), and hover proxies (including the single-pass batched segment-muxer
+  path), scene exports, and the HEVC/10-bit compatibility transcode all
+  encode with `h264_videotoolbox`.
+- **Hardware H.264 codec family**: the "Match Source — Adaptive High
+  Bitrate" export codec now remaps transparently between `h264_nvenc` and
+  `h264_videotoolbox` depending on the machine, so a library exported on an
+  NVIDIA box re-exports identically on a Mac and vice-versa (libx264 remains
+  the universal fallback, same VBR targets).
+
+### Changed
+
+- **macOS build is explicitly arm64** (dmg + zip) with hardened runtime and
+  entitlements — signing/notarization-ready once a Developer ID certificate
+  is configured. Windows NSIS target is explicitly x64.
+- `install.sh` syncs the full `mps` baseline on macOS instead of the CPU-only
+  one.
+- Model offload and OOM-retry paths now release the MPS allocator cache
+  (`torch.mps.empty_cache()`) in addition to CUDA's — important on unified
+  memory where the cache pressures the whole system.
+- `PYTORCH_ENABLE_MPS_FALLBACK` is set by the backend itself, so manual
+  `python backend/server.py` launches behave like Electron launches.
+- `uv lock` can now be regenerated on macOS: the dynamic-metadata tensorrt
+  sdists (which abort without an NVIDIA driver) are declared statically via
+  `[[tool.uv.dependency-metadata]]`.
+
 ## 0.2.0-alpha — 2026-07-16
 
 ### Added

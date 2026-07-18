@@ -157,10 +157,10 @@ export const settingsStrings: Dict = {
 
   // Export section
   'settings.export.codec.label': { en: 'Codec', fr: 'Codec' },
-  'settings.export.codec.hint': { en: 'Video codec for exported clips. NVENC = Premiere-style \'Match Source — Adaptive High Bitrate\': hardware H.264, VBR 1-pass targeting ~15 Mbps at 1080p23.976 (scales with resolution/fps), Rec.709.', fr: 'Codec vidéo des clips exportés. NVENC = préréglage façon Premiere « Match Source — Adaptive High Bitrate » : H.264 matériel, VBR 1 passe visant ~15 Mbps en 1080p23.976 (s\'adapte à la résolution/fps), Rec.709.' },
-  'settings.export.codec.opt.nvenc': { en: 'H.264 NVENC — Match source, high bitrate (Premiere-like)', fr: 'H.264 NVENC — Fidèle à la source, bitrate élevé (façon Premiere)' },
+  'settings.export.codec.hint': { en: 'Video codec for exported clips. Hardware H.264 = Premiere-style \'Match Source — Adaptive High Bitrate\': NVENC on NVIDIA, VideoToolbox on Mac, VBR 1-pass targeting ~15 Mbps at 1080p23.976 (scales with resolution/fps), Rec.709.', fr: 'Codec vidéo des clips exportés. H.264 matériel = préréglage façon Premiere « Match Source — Adaptive High Bitrate » : NVENC sur NVIDIA, VideoToolbox sur Mac, VBR 1 passe visant ~15 Mbps en 1080p23.976 (s\'adapte à la résolution/fps), Rec.709.' },
+  'settings.export.codec.opt.nvenc': { en: 'H.264 Hardware (NVENC / VideoToolbox) — Match source, high bitrate', fr: 'H.264 matériel (NVENC / VideoToolbox) — Fidèle à la source, bitrate élevé' },
   'settings.export.crf.label': { en: 'CRF', fr: 'CRF' },
-  'settings.export.crf.hint': { en: 'Lower = better quality, larger files. Not used by the NVENC match-source preset (it targets a bitrate instead).', fr: 'Plus bas = meilleure qualité, fichiers plus gros. Non utilisé par le préréglage NVENC match-source (il vise un bitrate à la place).' },
+  'settings.export.crf.hint': { en: 'Lower = better quality, larger files. Not used by the hardware match-source preset (it targets a bitrate instead).', fr: 'Plus bas = meilleure qualité, fichiers plus gros. Non utilisé par le préréglage matériel match-source (il vise un bitrate à la place).' },
   'settings.export.resolution.label': { en: 'Resolution', fr: 'Résolution' },
   'settings.export.resolution.hint': { en: 'Output resolution', fr: 'Résolution de sortie' },
   'settings.export.resolution.source': { en: 'Source', fr: 'Source' },

@@ -3,7 +3,7 @@ import { Cpu, Sparkles, Check, AlertCircle, Loader2, Zap, Target } from 'lucide-
 import { api, platformIs } from '../api/client';
 import { useI18n } from '../i18n';
 
-type GpuBackend = 'cu130' | 'cu130-trt' | 'cu126' | 'dml' | 'xpu' | 'rocm' | 'cpu';
+type GpuBackend = 'cu130' | 'cu130-trt' | 'cu126' | 'dml' | 'xpu' | 'rocm' | 'mps' | 'cpu';
 
 interface Option {
   id: GpuBackend;
@@ -20,6 +20,9 @@ const ALL_OPTIONS: Option[] = [
   { id: 'cu130-trt', title: 'onboarding.opt.cu130-trt.title', subtitle: 'onboarding.opt.cu130-trt.subtitle', badge: 'onboarding.badge.gpuEverywhere', detail: 'onboarding.opt.cu130-trt.detail', platforms: ['win32', 'linux'] },
   { id: 'cu130', title: 'onboarding.opt.cu130.title', subtitle: 'onboarding.opt.cu130.subtitle', recommended: true, badge: 'onboarding.badge.gpuEverywhere', detail: 'onboarding.opt.cu130.detail', platforms: ['win32', 'linux'] },
   { id: 'cu126', title: 'onboarding.opt.cu126.title', subtitle: 'onboarding.opt.cu126.subtitle', detail: 'onboarding.opt.cu126.detail', platforms: ['win32', 'linux'] },
+  // `recommended` doesn't clash with cu130's: the two are never visible on
+  // the same platform.
+  { id: 'mps', title: 'onboarding.opt.mps.title', subtitle: 'onboarding.opt.mps.subtitle', recommended: true, badge: 'onboarding.badge.gpuEverywhere', detail: 'onboarding.opt.mps.detail', platforms: ['darwin'] },
   { id: 'dml', title: 'onboarding.opt.dml.title', subtitle: 'onboarding.opt.dml.subtitle', detail: 'onboarding.opt.dml.detail', platforms: ['win32'] },
   { id: 'rocm', title: 'onboarding.opt.rocm.title', subtitle: 'onboarding.opt.rocm.subtitle', detail: 'onboarding.opt.rocm.detail', platforms: ['linux'] },
   { id: 'xpu', title: 'onboarding.opt.xpu.title', subtitle: 'onboarding.opt.xpu.subtitle', detail: 'onboarding.opt.xpu.detail', platforms: ['win32', 'linux'] },
@@ -29,7 +32,7 @@ const ALL_OPTIONS: Option[] = [
 export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const { lang, setLang, t } = useI18n();
   const [phase, setPhase] = useState<'choose' | 'installing' | 'done' | 'error'>('choose');
-  const [selected, setSelected] = useState<GpuBackend>('cu130');
+  const [selected, setSelected] = useState<GpuBackend>(platformIs('darwin') ? 'mps' : 'cu130');
   const [profile, setProfile] = useState<'fast' | 'quality'>('quality');
   const [log, setLog] = useState<string>('');
   const [error, setError] = useState<string>('');

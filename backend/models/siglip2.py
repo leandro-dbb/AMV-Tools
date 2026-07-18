@@ -101,13 +101,12 @@ class SigLIP2Model:
 
     def offload(self):
         """Free VRAM. Will reload on next use."""
-        import torch
+        from .device import empty_device_cache
         with self._lock:
             if self._model is not None:
                 del self._model
                 self._model = None
-            if self.device.backend == "cuda":
-                torch.cuda.empty_cache()
+            empty_device_cache(self.device.backend)
 
     def embed_images(self, images: List[Image.Image], max_num_patches: Optional[int] = None) -> np.ndarray:
         if max_num_patches is None:
@@ -131,8 +130,8 @@ class SigLIP2Model:
         except RuntimeError as exc:
             if len(images) <= 1 or "out of memory" not in str(exc).lower():
                 raise
-            if self.device.backend == "cuda":
-                torch.cuda.empty_cache()
+            from .device import empty_device_cache
+            empty_device_cache(self.device.backend)
             mid = len(images) // 2
             log.warning("SigLIP batch of %d ran out of memory; retrying as smaller batches", len(images))
             return np.concatenate([
