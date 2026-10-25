@@ -147,18 +147,29 @@ by default** — enable it from `Settings > Models`.
   *main character* or *all characters* are picked automatically, and SAM 2.1
   tracks them through the clip — re-detecting them after a hard cut or when
   the track drifts. Brush corrections become keyframes and are re-propagated.
+  On NVIDIA cards (8 GB and up), **SAM 3** (text concept "anime character")
+  first tells the characters from auras, props and scenery, then the final
+  matte is hugged to its outline, which removes the background left between
+  the arms, under the chin and between hair spikes. SAM 3's weights are gated
+  on Hugging Face: accept its license with your account and paste your token
+  in `Settings > Models`; without access, Auto runs as in 0.5.
 - **Manual**: click a character and it is the whole detected character that
   is tracked (not just the colour patch under the click); a box prompt still
   goes straight to SAM 2. Clicks on several frames are keyframes.
 - Long shots are tracked window by window, so a 10 s+ shot no longer runs out
   of memory (11 s shot: 2.1 GB of VRAM instead of 9.0 GB).
+- Clean edges at export: the matte is exported as computed and the colour of
+  every semi-transparent edge pixel is decontaminated (foreground
+  estimation), so no ring or tint of the old background is left around hair
+  (ProRes 4444, VP9 and PNG).
 
 Measured on 23 real episode shots (see [Rotoscope Notes](#rotoscope-notes)
 and [the report](docs/reports/chantier-roto.md)): calm shots, dialogue,
 crowds and most action shots come out usable; auras, smoke and
 characters glued to a background object still need the brush.
 Models download on demand and are chosen per memory tier: BiRefNet (MIT,
-pinned revision) and SAM 2.1 (Apache-2.0); ISNet anime (Apache-2.0) and
+pinned revision), SAM 2.1 (Apache-2.0) and SAM 3 (SAM License, gated, see
+below); ISNet anime (Apache-2.0) and
 ToonOut (MIT weights, CC-BY-4.0 dataset) are available as alternative
 detectors. **MatAnyone is not shipped**: its S-Lab 1.0 license is
 **non-commercial**, so if you install it yourself (see `pyproject.toml`),
@@ -246,11 +257,20 @@ allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0).
 | wd-vit / wd-eva02-large tagger v3 (SmilingWolf) | 0.4 / 1.3 GB | Apache-2.0 |
 | Mask Mode detector: BiRefNet general (ZhengPeng7) | 445 MB | MIT |
 | Mask Mode tracker: SAM 2.1 tiny / base+ / large (Meta) | 156 / 324 / 898 MB | Apache-2.0 |
+| Mask Mode character pick: SAM 3 (Meta, gated, your own Hugging Face token) | 3.4 GB | SAM License (use and redistribution allowed, military/ITAR uses forbidden) |
 | Mask Mode alternatives: ISNet anime-seg (SkyTNT) / ToonOut (joelseytre) | 176 / 885 MB | Apache-2.0 / MIT (dataset CC-BY-4.0) |
+
+SAM 3 is the one model outside the allow-list: it is not downloaded by AMV
+Tools' license-checked downloader but fetched by Hugging Face with *your*
+token once you have accepted Meta's SAM License on the model page (the
+license text is linked in `Settings > Models`; it allows use, including
+commercial, forbids military / nuclear / ITAR uses and reverse engineering).
 
 Mask Mode per tier: BiRefNet general + SAM 2.1 tiny (Fast, NVIDIA 8 GB, Mac
 8/16 GB), + base+ (NVIDIA 12/16 GB, Mac 24/32 GB), + large (NVIDIA 24 GB, Max);
-ISNet anime without tracking on CPU. The Mac choices are not measured yet.
+SAM 3 character pick on NVIDIA 8 GB and up (not on Fast, not on Mac: not
+measured there); ISNet anime without tracking on CPU. The Mac choices are not
+measured yet.
 
 ## Send To Your Editor
 
@@ -609,7 +629,7 @@ Trim the clip in the mini editor first: the mask session follows the trim
 range. Shots of any length work — beyond 4 s they are tracked window by
 window with bounded memory.
 
-How the engines work (0.5):
+How the engines work (0.5, with the 0.6 character pick):
 
 - **Auto**: the detector (BiRefNet; ISNet anime on CPU) runs on every frame,
   the *main character* (biggest, most central) or *all characters* are picked
@@ -618,6 +638,14 @@ How the engines work (0.5):
   re-seeds itself. Only the detector components belonging to the tracked
   character are kept, so a second character or a house that the detector
   also found does not leak in.
+- **Character pick (SAM 3, NVIDIA)**: before tracking, the detector's matte is
+  kept only near what SAM 3 calls an "anime character" (an aura, a tractor
+  or a pillar the detector found salient is cut); after tracking, the matte
+  is hugged to SAM 3's outline (0.8 % of the frame diagonal), which removes
+  the background between the arms, under the chin and between hair spikes
+  while the detector still draws the hair and the ink line. A frame where SAM
+  3 sees nobody keeps the detector's matte. Off switch: `Character pick with
+  SAM 3` in `Settings > Models`.
 - **Manual**: a click selects the detected character under it (then tracked
   like Auto); a box goes to SAM 2 as before. Without a GPU tier (CPU) clicks
   go to SAM 2 directly.
@@ -636,9 +664,14 @@ Useful settings:
 - `Auto model` / `SAM 2 variant`: *Auto* picks per memory tier (see the tier
   table in `Settings > Models`). `toonout` and `anime` are alternative
   detectors; on real episodes BiRefNet general measured best.
-- `Roto resolution`, `Edge refine at export`, `BG-aware edge cleanup`,
-  `Temporal smoothing`, `RGB decontaminate export`, `Soft-alpha BG cleanup`:
-  unchanged since 0.4 (keep the first four on).
+- `Clean edge colours at export` (on): matte exported as computed + edge
+  colour decontamination. The 0.4/0.5 guided-filter export painted a ring of
+  the old background around hair (background along the outline 4.0 % ->
+  9.2 % on the benchmark's simple shots); switching this off brings it back,
+  together with `Edge refine at export` / `BG-aware edge cleanup`, which only
+  apply then.
+- `Roto resolution`, `Temporal smoothing`, `RGB decontaminate export`,
+  `Soft-alpha BG cleanup`: unchanged since 0.4.
 
 What to expect (23 real shots, see `docs/reports/chantier-roto.md`): calm
 shots, dialogue, several characters, long hair and most fast action are

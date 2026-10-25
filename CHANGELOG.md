@@ -4,7 +4,37 @@ All notable changes to AMV Tools are documented here.
 
 ## 0.5.0-alpha — unreleased
 
-### Mask Mode — roto that holds up on real episodes
+### Mask Mode — background out of the hair (roto 2)
+
+- **New benchmark metric, "background in the matte"**: background kept along
+  the outline (hair gaps, halo; 2 to 8 px outside the reference), background
+  kept inside the silhouette's envelope (between the arms, under the chin),
+  character eaten along the outline, and colour contamination of the
+  semi-transparent edge pixels of the *exported* cutout. Zoomed hair boards
+  (`roto_eval.py zoom`).
+- **The halo came from the export**: the guided-filter upscale used since 0.4
+  painted a ring of the old background around hair and ate the ink line
+  (simple shots: background along the outline 3.6 % -> 8.9 %, character
+  eaten 1.6 % -> 6.5 %). The export now keeps the matte as computed and
+  decontaminates the edge colours with foreground estimation (blur fusion,
+  Germer et al. 2021): ProRes 4444, VP9 and PNG. *Settings > Models > Clean
+  edge colours at export* (on; off = the 0.5 export).
+- **SAM 3 picks the characters** (NVIDIA 8 GB and up, gated weights fetched
+  with the user's own Hugging Face token, SAM License): BiRefNet still draws
+  the outline, SAM 3 (concept "anime character") says where the character
+  is — before tracking (auras, a tractor, a pillar, dark scenery are cut) and
+  after it (the matte is hugged to SAM 3's outline at 0.8 % of the diagonal:
+  background between the arms, under the chin, between hair spikes is cut). A
+  frame where SAM 3 sees nobody keeps BiRefNet's matte; no access / an error
+  = the 0.5 pipeline. Auto on 22 real shots: J 0.853 -> 0.920, failures 7 ->
+  1 of 107, flicker 4.2 -> 2.8 %, background enclosed by the silhouette
+  24.8 -> 7.8 %; Manual: J 0.828 -> 0.879, failures 10 -> 5. Twice as slow
+  (225 -> 435 ms per frame on an RTX 3090). Known loss: objects held by a
+  character (a staff, a bowl) are cut. *Settings > Models > Character pick
+  with SAM 3*.
+- Measured and rejected: SAM 3 alone (image or video: stair-step edges that
+  drop the ink line, losses in the dark), the deepghs anime person detector,
+  BiRefNet HR (2048), ViTMatte on the outline band, colour-solved alpha.
 
 - **Measured on real anime, not synthetic clips**: `tests/eval/roto_eval.py`
   scores Mask Mode on 23 shots from real episodes (calm, dialogue, crowds,
