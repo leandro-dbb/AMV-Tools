@@ -232,11 +232,28 @@ def cmd_propose(args) -> None:
                     gt = (gt | ((a_toon > 0.5) & near))
             for (x0, y0, x1, y1) in fix.get("erase", []):
                 gt[y0:y1, x0:x1] = False
+            for (x0, y0, x1, y1) in fix.get("add", []):
+                gt[y0:y1, x0:x1] = True
             gt = clean_reference(gt)
+            if fix.get("fill"):
+                gt = fill_holes(gt)
             save_alpha(root / "gt" / sid / f"{idx:05d}.png", gt.astype(np.float32))
             rows.append((idx, np.asarray(img), gt))
         review_sheet(root / "review" / f"{sid}.jpg", rows)
         print("ref", sid, flush=True)
+
+
+def fill_holes(m: np.ndarray) -> np.ndarray:
+    """Fill every background region not connected to the frame border."""
+    import cv2
+    inv = (~m).astype(np.uint8)
+    n, lab = cv2.connectedComponents(inv, connectivity=4)
+    border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
+    holes = [i for i in range(1, n) if i not in border]
+    out = m.copy()
+    if holes:
+        out[np.isin(lab, holes)] = True
+    return out
 
 
 def clean_reference(m: np.ndarray, frac: float = 0.0015) -> np.ndarray:
@@ -348,6 +365,8 @@ def method_runner(name: str, args, dev):
         parts = name.split("_")
         det_name, variant, mode = parts[1], parts[2], parts[3]
         nofuse = "nofuse" in parts[4:]
+        import backend.models.auto_roto as ar
+        ar.CORE_MODE = "adaptive" if "adapt" in parts[4:] else "always"  # 0.5 default: adaptive
         m = SAM2Model(dev, variant=variant, idle_offload_seconds=0)
         root = Path(args.root)
 
@@ -375,7 +394,8 @@ def method_runner(name: str, args, dev):
         def prop(imgs, seed_mask):
             proc = InferenceCore(net, cfg=net.cfg, device="cuda")
             out = []
-            mask = torch.from_numpy(seed_mask.astype(np.float32)).cuda()
+            # upstream feeds the PNG mask as read (0..255), not 0..1
+            mask = torch.from_numpy(seed_mask.astype(np.float32) * 255.0).cuda()
             for ti, im in enumerate(imgs):
                 x = torch.from_numpy(im).permute(2, 0, 1).float().cuda() / 255.0
                 if ti == 0:
@@ -557,8 +577,8 @@ def score_method(root: Path, method: str, shots: list[dict]) -> dict:
     for shot in shots:
         sid = shot["id"]
         rd = root / "runs" / method / sid
-        if not (rd / "stats.json").exists():
-            continue
+        if not (rd / "stats.json").exists() or shot.get("excluded"):
+            continue  # excluded: reference found wrong during the visual review
         paths = frame_paths(root, sid)
         js, fs, es, fails = [], [], [], 0
         for idx in scored_frames(root, sid, len(paths)):
