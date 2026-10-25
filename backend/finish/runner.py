@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -593,18 +594,50 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
     frames: list[np.ndarray] = []
     masks: list[np.ndarray] = []
     total = clip.n_frames
-    with _reader_for(ctx, clip) as reader:
-        for i, frame in enumerate(_frames(reader)):
+    # 0.5: the Auto engine's tracker (auto_roto) when the tier has one — the
+    # frames are also written as JPEGs for SAM 2.
+    from ..models.auto_roto import mask_models
+    tracker = mask_models(st).get("tracker") if models_cfg.get("mask_auto_track", True) else None
+    if tracker:
+        import importlib.util
+        tracker = tracker if importlib.util.find_spec("sam2") is not None else None
+    jpg_dir = Path(tempfile.mkdtemp(prefix="amv_cutout_")) if tracker else None
+    jpgs: list[Path] = []
+    try:
+        span = 0.4 if tracker else 0.8
+        with _reader_for(ctx, clip) as reader:
+            for i, frame in enumerate(_frames(reader)):
+                ctx.check_cancel()
+                h, w = frame.shape[:2]
+                s = min(1.0, max_dim / float(max(h, w)))
+                small = cv2.resize(frame, (int(round(w * s)) // 2 * 2, int(round(h * s)) // 2 * 2),
+                                   interpolation=cv2.INTER_AREA) if s < 1.0 else frame.copy()
+                frames.append(small)
+                a = model.mask_image(Image.fromarray(small))
+                masks.append(np.clip(np.rint(a * 255.0), 0, 255).astype(np.uint8) if tracker else a)
+                if jpg_dir is not None:
+                    jpgs.append(jpg_dir / f"{i:05d}.jpg")
+                    Image.fromarray(small).save(jpgs[-1], quality=95)
+                ctx.progress(min(span, span * (i + 1) / total), f"matting {i + 1}/{total}")
+        if not frames:
+            raise RuntimeError("no frames decoded")
+        if tracker:
+            from ..models.auto_roto import auto_track
             ctx.check_cancel()
-            h, w = frame.shape[:2]
-            s = min(1.0, max_dim / float(max(h, w)))
-            small = cv2.resize(frame, (int(round(w * s)) // 2 * 2, int(round(h * s)) // 2 * 2),
-                               interpolation=cv2.INTER_AREA) if s < 1.0 else frame.copy()
-            frames.append(small)
-            masks.append(model.mask_image(Image.fromarray(small)))
-            ctx.progress(min(0.8, 0.8 * (i + 1) / total), f"matting {i + 1}/{total}")
-    if not frames:
-        raise RuntimeError("no frames decoded")
+            sam2 = st.get_sam2(variant=tracker)
+            hh, ww = frames[0].shape[:2]
+            det = np.stack(masks)
+            masks = list(auto_track(
+                jpgs, det, sam2, frames_dir=jpg_dir, frame_size=(ww, hh),
+                mode=p.get("target") or models_cfg.get("mask_auto_target", "all"),
+                frames_small=[cv2.resize(f, (256, max(2, round(256 * hh / ww))), interpolation=cv2.INTER_AREA)
+                              for f in frames],
+                progress_cb=lambda seen, n: ctx.progress(0.4 + 0.4 * seen / max(1, n), f"tracking {seen}/{n}"),
+            ))
+            del det
+    finally:
+        if jpg_dir is not None:
+            shutil.rmtree(jpg_dir, ignore_errors=True)
     stack = postprocess_stack(
         np.stack(masks), frames,
         stabilize=bool(p.get("stabilize", models_cfg.get("mask_temporal_smooth_enabled", True))),

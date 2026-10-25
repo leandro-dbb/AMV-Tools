@@ -265,9 +265,15 @@ def _model_specs(state) -> list[dict[str, Any]]:
     from .models.wd_tagger import weight_files as tagger_weight_files
     from .models.sam2 import VARIANTS as SAM2_VARIANTS
 
-    biref_variant = settings.get("birefnet_variant", "general")
+    biref_variant = settings.get("birefnet_variant", "auto")
+    sam2_variant = settings.get("sam2_variant", "auto")
+    try:  # "auto" = the memory tier's pick (models/auto_roto.py)
+        from .models.auto_roto import resolve_mask_variant
+        biref_variant = resolve_mask_variant(state, "detector", biref_variant)
+        sam2_variant = resolve_mask_variant(state, "tracker", sam2_variant)
+    except Exception:
+        pass
     biref_repo = BIREfNET_VARIANTS.get(biref_variant, BIREfNET_VARIANTS["general"])
-    sam2_variant = settings.get("sam2_variant", "base_plus")
     sam2_repo = SAM2_VARIANTS.get(sam2_variant, SAM2_VARIANTS["base_plus"])
     mask_enabled = bool(settings.get("enable_mask"))
     mask_engine = settings.get("mask_engine", "birefnet")
@@ -293,7 +299,8 @@ def _model_specs(state) -> list[dict[str, Any]]:
             "key": "birefnet",
             "label": f"BiRefNet / Auto ({biref_variant})",
             "repo_id": biref_repo,
-            "files": ["isnetis.onnx"] if biref_variant == "anime" else None,
+            "files": ["isnetis.onnx"] if biref_variant == "anime" else (
+                ["birefnet_finetuned_toonout.pth"] if biref_variant == "toonout" else None),
             "enabled": mask_enabled and mask_engine == "birefnet",
             "loaded": state._birefnet is not None,
         },
@@ -302,7 +309,8 @@ def _model_specs(state) -> list[dict[str, Any]]:
             "label": f"SAM 2 ({sam2_variant})",
             "repo_id": sam2_repo,
             "files": None,
-            "enabled": mask_enabled and mask_engine == "sam2",
+            # SAM 2 is also the Auto engine's tracker since 0.5
+            "enabled": mask_enabled,
             "loaded": state._sam2 is not None,
         },
     ]

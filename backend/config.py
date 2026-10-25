@@ -74,13 +74,14 @@ DEFAULT_SETTINGS = {
         #     heavy clips. Slower (~3× track time) and pulls a 500 MB model on
         #     first use.
         "mask_engine": "birefnet",
-        # Auto-engine checkpoint. "general"/"hr"/"portrait" are BiRefNet
-        # weights; "anime" is SkyTNT's ISNet trained on anime characters
-        # (ONNX, ~170 MB) — usually the best pick on cel-shaded footage.
-        "birefnet_variant": "general",
-        # SAM 2.1 variant — base_plus is the qual/VRAM sweet spot on 8 GB GPUs
-        # once SigLIP/tagger have been offloaded by the model rotation.
-        "sam2_variant": "base_plus",
+        # Auto-engine detector. "auto" (0.5) = the memory tier's pick
+        # (backend/models/auto_roto.py: ToonOut on GPUs). "general"/"hr"/
+        # "portrait" are BiRefNet weights; "anime" is SkyTNT's ISNet (ONNX,
+        # ~170 MB); "toonout" is BiRefNet fine-tuned on anime (885 MB).
+        "birefnet_variant": "auto",
+        # SAM 2.1 variant (Manual engine, and the Auto engine's tracker).
+        # "auto" (0.5) = the memory tier's pick.
+        "sam2_variant": "auto",
         # Max side used when extracting frames for roto. Hair detail is often
         # only a few pixels wide; 1080 is slower than 720 but much less likely
         # to erase anime hair gaps before the model sees them.

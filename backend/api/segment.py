@@ -66,6 +66,9 @@ class Prompt(BaseModel):
     # Optional per-request override. None means "use the engine set in
     # Settings → Models → Mask engine". Valid values: "birefnet" | "sam2".
     engine: Optional[str] = None
+    # Auto engine: "main" (the biggest, most central character) or "all"
+    # (every character). None = Settings (mask_auto_target, default "all").
+    auto_target: Optional[str] = None
 
 
 class KeyframePrompt(BaseModel):
@@ -347,15 +350,30 @@ def preview(scene_id: int, body: Prompt):
             if engine in auto_engines:
                 birefnet = state.get_birefnet()
                 mask = birefnet.mask_image(ref_rgb)
+                if engine == "birefnet":
+                    # show only the character(s) the Auto engine will track
+                    from ..models.auto_roto import select_targets
+                    sel = select_targets(mask, _auto_target(body.auto_target))
+                    if sel.any():
+                        mask = (mask * sel).astype(np.float32)
             else:
-                sam2 = state.get_sam2()
-                mask = sam2.preview_mask(
-                    ref_rgb,
-                    positive_points=body.positive,
-                    negative_points=body.negative,
-                    box=body.box,
-                    soft=True,
-                )
+                mask = None
+                if _click_snap(body.box):
+                    # 0.5: the click picks the detected character under it
+                    from ..models.auto_roto import clicked_targets
+                    det = state.get_birefnet().mask_image(ref_rgb)
+                    sel = clicked_targets(det, body.positive, body.negative)
+                    if sel.any():
+                        mask = (det * sel).astype(np.float32)
+                if mask is None:
+                    sam2 = state.get_sam2()
+                    mask = sam2.preview_mask(
+                        ref_rgb,
+                        positive_points=body.positive,
+                        negative_points=body.negative,
+                        box=body.box,
+                        soft=True,
+                    )
                 session.keyframes[ref_idx] = {
                     "positive": list(body.positive), "negative": list(body.negative), "box": body.box,
                 }
@@ -590,17 +608,7 @@ def track(scene_id: int, body: TrackRequest):
 
     with sess.lock:
         if engine == "birefnet":
-            birefnet = state.get_birefnet()
-            w, h = sess.frame_size
-            masks = np.zeros((n_frames, h, w), dtype=np.float32)
-            for i, fp in enumerate(sess.frame_paths):
-                with Image.open(fp) as im:
-                    masks[i] = birefnet.mask_image(im.convert("RGB"))
-                progress(i + 1, n_frames)
-            # Per-frame inference re-decides the silhouette on every frame:
-            # a flow-aligned temporal median removes the flicker without
-            # ghosting moving edges (see finish/matte.py for the numbers).
-            sess.masks = _postprocess(sess, masks, strength_scale=1.0)
+            sess.masks = _track_auto(sess, body, progress)
         elif engine == "matanyone":
             # Two-stage: BiRefNet for the chosen reference-frame seed (good
             # single-frame silhouette on anime), MatAnyone for temporal
@@ -669,6 +677,16 @@ def track(scene_id: int, body: TrackRequest):
             keyframes += [{"frame_idx": i, "mask": m > 0.5} for i, m in sess.overrides.items()]
             if not keyframes:
                 raise HTTPException(400, "SAM 2 needs at least one positive point or a box")
+            if _click_snap(None) and not any(k.get("box") is not None for k in sess.keyframes.values()):
+                sess.masks = _track_auto(sess, body, progress, clicks={
+                    int(i): (list(k.get("positive") or []), list(k.get("negative") or []))
+                    for i, k in sess.keyframes.items()})
+                sess.last_prompt = Prompt(
+                    positive=body.positive, negative=body.negative,
+                    box=body.box, reference_frame_offset=body.reference_frame_offset,
+                    start_ms=sess.start_ms, end_ms=sess.end_ms, engine=engine,
+                )
+                return _track_response(sess, engine)
             sam2 = state.get_sam2()
             masks = sam2.track_keyframes(
                 keyframes,
@@ -689,10 +707,15 @@ def track(scene_id: int, body: TrackRequest):
             engine=engine,
         )
 
+    return _track_response(sess, engine)
+
+
+def _track_response(sess: SegmentSession, engine: str) -> dict:
+    n_frames = len(sess.frame_paths)
     w, h = sess.frame_size
-    state.publish({"type": "sam2_track", "session_id": sess.session_id,
-                   "percent": 100, "frame_idx": n_frames, "total": n_frames,
-                   "engine": engine})
+    get_state().publish({"type": "sam2_track", "session_id": sess.session_id,
+                         "percent": 100, "frame_idx": n_frames, "total": n_frames,
+                         "engine": engine})
     return {
         "ok": True,
         "session_id": sess.session_id,
@@ -703,6 +726,76 @@ def track(scene_id: int, body: TrackRequest):
         "keyframes": sorted(int(k) for k in sess.keyframes),
         "corrected_frames": sorted(int(k) for k in sess.overrides),
     }
+
+
+def _auto_target(value: Optional[str]) -> str:
+    if value in ("main", "all"):
+        return value
+    v = get_state().settings.get("models", {}).get("mask_auto_target", "all")
+    return v if v in ("main", "all") else "all"
+
+
+def _click_snap(box) -> bool:
+    """Manual engine: clicks pick the character found by the Auto detector
+    (then tracked like Auto) — on by default where the tier has a tracker,
+    never with a box prompt (a box is an explicit SAM 2 request)."""
+    from ..models.auto_roto import mask_models
+    state = get_state()
+    if box is not None or not state.settings.get("models", {}).get("mask_click_snap", True):
+        return False
+    return bool(mask_models(state).get("tracker"))
+
+
+def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Optional[dict] = None) -> np.ndarray:
+    """Auto engine (0.5): the detector runs on every frame, then — when the
+    tier has a tracker and SAM 2 is installed — SAM 2 tracks the selected
+    character(s) from an automatic seed, re-seeds itself where it drifts and
+    at hard cuts, and brush corrections become extra keyframes
+    (backend/models/auto_roto.py). Without a tracker: the 0.4 per-frame path."""
+    from ..models.auto_roto import auto_track, mask_models, resolve_mask_variant
+
+    state = get_state()
+    n_frames = len(sess.frame_paths)
+    w, h = sess.frame_size
+    models_cfg = state.settings.get("models", {})
+    birefnet = state.get_birefnet()
+    det = np.zeros((n_frames, h, w), dtype=np.uint8)  # 4x lighter than float32 on long clips
+    small: list[np.ndarray] = []
+    tracker = mask_models(state).get("tracker")  # None on CPU: no tracking
+    if tracker and models_cfg.get("sam2_variant", "auto") not in (None, "auto"):
+        tracker = resolve_mask_variant(state, "tracker", models_cfg.get("sam2_variant"))
+    use_tracker = bool(tracker) and (clicks is not None or models_cfg.get("mask_auto_track", True)) \
+        and _sam2_available()
+    span = 0.5 if use_tracker else 1.0
+    for i, fp in enumerate(sess.frame_paths):
+        with Image.open(fp) as im:
+            rgb = im.convert("RGB")
+            det[i] = np.clip(np.rint(birefnet.mask_image(rgb) * 255.0), 0, 255).astype(np.uint8)
+            if use_tracker:
+                small.append(np.asarray(rgb.resize((256, max(2, round(256 * h / max(1, w)))))))
+        progress(int((i + 1) * span), n_frames)
+    if not use_tracker:
+        masks = det.astype(np.float32) / 255.0
+        # Per-frame inference re-decides the silhouette on every frame:
+        # a flow-aligned temporal median removes the flicker without
+        # ghosting moving edges (see finish/matte.py for the numbers).
+        return _postprocess(sess, masks, strength_scale=1.0)
+    sam2 = state.get_sam2(variant=tracker)
+    corrections = [{"frame_idx": i, "mask": m > 0.5} for i, m in sess.overrides.items()]
+    masks = auto_track(
+        sess.frame_paths, det, sam2, frames_dir=sess.frames_dir, frame_size=sess.frame_size,
+        mode="click" if clicks is not None else _auto_target(body.auto_target),
+        frames_small=small, extra_keyframes=corrections, clicks=clicks,
+        progress_cb=lambda seen, total: progress(n_frames // 2 + seen // 2, n_frames),
+    )
+    del det
+    # SAM 2's memory already keeps identity stable; a lighter stabilisation
+    # pass only removes residual edge shimmer from the detector.
+    return _postprocess(sess, masks, strength_scale=0.5)
+
+
+def _sam2_available() -> bool:
+    return importlib.util.find_spec("sam2") is not None
 
 
 # ── endpoints: export with alpha ───────────────────────────────────────────
