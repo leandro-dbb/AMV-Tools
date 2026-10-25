@@ -240,6 +240,8 @@ export interface AppSettings {
     mask_rgb_decontaminate_enabled: boolean;
     mask_edge_refine_enabled: boolean;
     mask_bg_aware_cleanup_enabled: boolean;
+    mask_edge_mode?: 'fg' | 'legacy';
+    mask_selector_enabled?: boolean;
     mask_temporal_smooth_enabled: boolean;
     mask_temporal_smooth_strength: number;
     hf_token: string;
@@ -435,7 +437,7 @@ export interface ModelDownloadResult {
 // Model tiers (Settings > Models): models picked for the detected GPU memory,
 // plus the embeddings-only re-index of the primary database.
 export type ModelTierPlatform = 'nvidia' | 'mac' | 'cpu';
-export type ModelTierRole = 'embedding' | 'tagger' | 'upscale' | 'interpolate' | 'depth' | 'mask_detector' | 'mask_tracker';
+export type ModelTierRole = 'embedding' | 'tagger' | 'upscale' | 'interpolate' | 'depth' | 'mask_selector' | 'mask_detector' | 'mask_tracker';
 
 export interface ModelTierModel {
   id: string;

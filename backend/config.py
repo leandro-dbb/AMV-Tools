@@ -118,6 +118,16 @@ DEFAULT_SETTINGS = {
         # background aura" around the character. Skips pixels where FG and BG
         # colours are too close to solve safely; keep on.
         "mask_bg_aware_cleanup_enabled": True,
+        # 0.6 export edges: "fg" = the matte is upscaled as is and the colour
+        # of semi-transparent pixels is decontaminated (foreground
+        # estimation); the guided filter / bg-aware cleanup above only apply
+        # in "legacy" mode (they added background along hair, see
+        # docs/reports/chantier-roto.md).
+        "mask_edge_mode": "fg",
+        # Auto engine: SAM 3 ("anime character") picks what is a character
+        # before the detector's matte is used, when the tier has it and the
+        # gated weights are accessible.
+        "mask_selector_enabled": True,
         # Bidirectional EMA over per-frame (Auto engine) mattes — removes the
         # silhouette flicker of frame-independent inference. Hard cuts and
         # teleport-fast motion reset the history automatically.

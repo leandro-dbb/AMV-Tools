@@ -3,7 +3,7 @@
 import type { ModelTierPlatform, ModelTierRole, ModelTiersInfo, ReembedJob } from './api/types';
 import type { Lang, TFunc } from './i18n';
 
-export const TIER_ROLES: ModelTierRole[] = ['embedding', 'tagger', 'upscale', 'interpolate', 'depth', 'mask_detector', 'mask_tracker'];
+export const TIER_ROLES: ModelTierRole[] = ['embedding', 'tagger', 'upscale', 'interpolate', 'depth', 'mask_selector', 'mask_detector', 'mask_tracker'];
 
 /** 16 → "16", 23.64 → "23.6" (FR: "23,6"). */
 export function formatGb(gb: number, lang: Lang): string {

@@ -780,6 +780,9 @@ def test_alpha_export_failure_leaves_no_file(finish_clip, tmp_path, monkeypatch,
         return rgb, alpha
 
     monkeypatch.setattr(mp, "clean_edges_with_background", boom)
+    # 0.6 default export path (edge colour decontamination)
+    import backend.models.edge_refine as er
+    monkeypatch.setattr(er, "estimate_foreground", lambda rgb, alpha, **kw: boom(rgb, alpha)[0])
     target = tmp_path / "out" / "clip_cutout.mov"
     masks = np.full((8, 72, 128), 0.5, np.float32)
     with pytest.raises(RuntimeError, match="edge cleanup failed"):
@@ -828,6 +831,8 @@ def test_cancelled_cutout_stops_encoding_and_leaves_no_file(finish_clip, tmp_pat
 
     monkeypatch.setattr(state_mod, "get_state", lambda: FakeState())
     monkeypatch.setattr(mp, "clean_edges_with_background", cancel_mid_export)
+    import backend.models.edge_refine as er   # 0.6 default export path
+    monkeypatch.setattr(er, "estimate_foreground", lambda rgb, alpha, **kw: cancel_mid_export(rgb, alpha)[0])
     out_dir = tmp_path / "o"
     with pytest.raises(JobCancelled):
         runner._run_matte(ctx, probe_clip(str(finish_clip)), "clip", out_dir, {"stabilize": False})

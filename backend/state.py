@@ -39,6 +39,7 @@ class AppState:
         self._sam2 = None       # SAM2Model — Manual click engine
         self._birefnet = None   # BiRefNetModel — Auto engine (default for anime)
         self._matanyone = None  # MatAnyoneModel — temporal propagation after BiRefNet seed
+        self._sam3 = None       # Sam3Concept — Auto engine character selector (gated weights)
         self._device = None
         self._sam2_sessions: dict[str, Any] = {}     # session_id → SegmentSession
         self._sam2_sessions_lock = threading.Lock()
@@ -265,6 +266,14 @@ class AppState:
                     try: self._birefnet.offload()
                     except Exception: pass
                 self._birefnet = None
+        if before_models.get("hf_token") != new_models.get("hf_token"):
+            from .models import sam3_concept
+            sam3_concept._ACCESS.clear()   # a new token may open the gated weights
+            with self._models_lock:
+                if self._sam3 is not None:
+                    try: self._sam3.offload()
+                    except Exception: pass
+                self._sam3 = None
         return self._settings
 
     def replace_settings(self, full: dict[str, Any]) -> dict[str, Any]:
@@ -416,7 +425,7 @@ class AppState:
         """Drop every loaded mask engine except ``keep``. Used by ``get_<X>()``
         so only one engine sits in VRAM at a time — fits 8 GB cards once
         SigLIP/tagger are evicted too."""
-        for attr in ("_sam2", "_birefnet", "_matanyone"):
+        for attr in ("_sam2", "_birefnet", "_matanyone", "_sam3"):
             if attr == keep:
                 continue
             m = getattr(self, attr, None)
@@ -471,6 +480,21 @@ class AppState:
                     hf_token=self._settings["models"].get("hf_token") or None,
                 )
             return self._birefnet
+
+    def get_sam3(self):
+        """Lazy SAM 3 concept segmenter (Auto engine character selector), or
+        None when its gated weights are not accessible with the user's token
+        (then the Auto engine runs as in 0.5)."""
+        from .models.sam3_concept import Sam3Concept, weights_accessible
+        token = self._settings["models"].get("hf_token") or None
+        if not weights_accessible(token):
+            return None
+        with self._models_lock:
+            if self._sam3 is None:
+                self._offload_others_for_mask()
+                self._offload_other_mask_engines(keep="_sam3")
+                self._sam3 = Sam3Concept(self.device, hf_token=token)
+            return self._sam3
 
     def get_matanyone(self):
         """Lazy-load MatAnyone (temporal propagation, seeded by BiRefNet/SAM 2).
@@ -654,7 +678,7 @@ class AppState:
         # Offload mask engines before indexing — they're the heaviest of the
         # bunch and not needed for tag/embed phases.
         with self._models_lock:
-            for attr in ("_sam2", "_birefnet", "_matanyone"):
+            for attr in ("_sam2", "_birefnet", "_matanyone", "_sam3"):
                 m = getattr(self, attr, None)
                 if m is not None:
                     try: m.offload()

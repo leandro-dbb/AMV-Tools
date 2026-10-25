@@ -563,6 +563,7 @@ def _encode_scene_with_alpha(
     bg_aware_cleanup: bool = True,
     raw_pipes: bool = False,
     check_cancel=None,
+    edge_mode: str = "fg",
 ) -> str:
     """Encode the clip with the roto masks as the alpha channel.
 
@@ -596,6 +597,18 @@ def _encode_scene_with_alpha(
 
     def finish_frame(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
         alpha = np.clip(mask.astype(np.float32), 0.0, 1.0)
+        if edge_mode == "fg":
+            # 0.6 (chantier roto 2): the guided-filter upscale painted a ring
+            # of the old background around hair (x4 background along the
+            # outline on the benchmark) and ate the ink line; the matte is
+            # now upscaled as is and only the COLOUR of the semi-transparent
+            # pixels is fixed (foreground estimation): no pixel keeps the old
+            # background's colour.
+            from ..models.edge_refine import estimate_foreground
+            if alpha.shape != rgb.shape[:2]:
+                alpha = _resize_alpha(alpha, (rgb.shape[1], rgb.shape[0]))
+            rgb = estimate_foreground(rgb, alpha)
+            return np.dstack([rgb, (alpha * 255.0).round().astype(np.uint8)])
         if alpha.shape != rgb.shape[:2]:
             if edge_refine:
                 alpha = upsample_alpha_guided(alpha, rgb)

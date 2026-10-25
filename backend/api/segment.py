@@ -543,8 +543,8 @@ def drop_keyframe(session_id: str, frame_idx: int):
 @router.get("/api/scene/segment/{session_id}/cutout/{idx}")
 def session_cutout(session_id: str, idx: int):
     """RGBA PNG of frame N cut out exactly as the export will write it
-    (soft-alpha cleanup + colour-only edge cleanup), for checkerboard /
-    solid-colour review."""
+    (soft-alpha cleanup + edge colour decontamination), for checkerboard /
+    solid-colour review and PNG export."""
     sess = _get_session_or_404(session_id)
     if idx < 0 or idx >= len(sess.frame_paths):
         raise HTTPException(404, "frame out of range")
@@ -559,7 +559,11 @@ def session_cutout(session_id: str, idx: int):
     alpha = mask.astype(np.float32)
     if np.issubdtype(mask.dtype, np.floating):
         alpha = _clean_soft_alpha_for_frame(mask, sess.frame_paths[idx], models_cfg)
-    if bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)):
+    if str(models_cfg.get("mask_edge_mode", "fg")) == "fg":
+        # same colour decontamination as the video export
+        from ..models.edge_refine import estimate_foreground
+        rgb = estimate_foreground(rgb, np.clip(alpha, 0, 1))
+    elif bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)):
         from ..models.mask_postprocess import clean_edges_with_background
         rgb, alpha = clean_edges_with_background(rgb, alpha, resolve_alpha=False)
     rgba = np.dstack([rgb, (np.clip(alpha, 0, 1) * 255.0).round().astype(np.uint8)])
@@ -774,8 +778,13 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
             if use_tracker:
                 small.append(np.asarray(rgb.resize((256, max(2, round(256 * h / max(1, w)))))))
         progress(int((i + 1) * span), n_frames)
+    from ..models.auto_roto import tighten
+    sel_masks: list = []
+    det = _select_characters(det, sess.frame_paths, models_cfg,
+                             lambda seen, total: progress(int(n_frames * span * seen / max(1, total)), n_frames),
+                             keep=sel_masks)
     if not use_tracker:
-        masks = det.astype(np.float32) / 255.0
+        masks = tighten(det.astype(np.float32) / 255.0, sel_masks)
         # Per-frame inference re-decides the silhouette on every frame:
         # a flow-aligned temporal median removes the flicker without
         # ghosting moving edges (see finish/matte.py for the numbers).
@@ -789,9 +798,33 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
         progress_cb=lambda seen, total: progress(n_frames // 2 + seen // 2, n_frames),
     )
     del det
+    masks = tighten(masks, sel_masks)
+    del sel_masks
     # SAM 2's memory already keeps identity stable; a lighter stabilisation
     # pass only removes residual edge shimmer from the detector.
     return _postprocess(sess, masks, strength_scale=0.5)
+
+
+def _select_characters(det: np.ndarray, frames, models_cfg: dict, progress=None,
+                       keep: Optional[list] = None) -> np.ndarray:
+    """0.6: the tier's character selector (SAM 3, concept "anime character")
+    keeps the detector's matte only on what it calls a character — auras,
+    props and set pieces the detector found salient are cut. No selector in
+    the tier, the setting off, or the gated weights not accessible: the
+    detector matte as in 0.5. ``keep`` receives SAM 3's masks for
+    :func:`~backend.models.auto_roto.tighten` after tracking."""
+    from ..models.auto_roto import apply_selector, mask_models
+    state = get_state()
+    if not models_cfg.get("mask_selector_enabled", True) or mask_models(state).get("selector") != "sam3":
+        return det
+    sam3 = state.get_sam3()
+    if sam3 is None:
+        return det
+    try:
+        return apply_selector(det, frames, sam3, progress_cb=progress, keep=keep)
+    finally:
+        try: sam3.offload()
+        except Exception: pass
 
 
 def _sam2_available() -> bool:
@@ -873,6 +906,7 @@ def export_alpha(scene_id: int, body: ExportAlphaRequest):
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
         edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
         bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
+        edge_mode=str(models_cfg.get("mask_edge_mode", "fg")),
         # CUDA: raw pipes instead of a PNG round-trip (same pixels, ~5x faster).
         raw_pipes=getattr(get_state().device, "backend", None) == "cuda",
     )
