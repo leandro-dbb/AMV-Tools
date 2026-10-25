@@ -131,7 +131,8 @@ def test_describe_tiers_shape():
     assert [t["id"] for t in out] == list(tiers.NVIDIA_TIERS)
     t8 = out[1]
     assert t8["min_gb"] == 8.0 and out[0]["min_gb"] is None
-    assert set(t8["models"]) == {"embedding", "tagger", "upscale", "interpolate", "depth"}
+    assert set(t8["models"]) == {"embedding", "tagger", "upscale", "interpolate", "depth",
+                                 "mask_detector", "mask_tracker"}
     emb = t8["models"]["embedding"]
     assert set(emb) >= {"id", "label", "size_mb", "license", "patches"}
     assert t8["models"]["depth"]["license"] == "apache-2.0"

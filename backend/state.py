@@ -425,33 +425,48 @@ class AppState:
                 except Exception: pass
                 setattr(self, attr, None)
 
-    def get_sam2(self):
-        """Lazy-load SAM 2 (Manual click engine). Reloading SigLIP/tagger
-        after a mask session is ~2 s — cheaper than running the mask model
-        on a fragmented VRAM heap."""
+    def get_sam2(self, variant: Optional[str] = None):
+        """Lazy-load SAM 2 (Manual click engine, and the tracker of the Auto
+        engine). Reloading SigLIP/tagger after a mask session is ~2 s —
+        cheaper than running the mask model on a fragmented VRAM heap.
+        ``variant`` overrides the setting ("auto" = the memory tier's pick)."""
         from .models import SAM2Model
+        from .models.auto_roto import resolve_mask_variant
+        variant = resolve_mask_variant(self, "tracker", variant or self._settings["models"].get("sam2_variant", "auto"))
         with self._models_lock:
+            if self._sam2 is not None and getattr(self._sam2, "variant", variant) != variant:
+                try: self._sam2.offload()
+                except Exception: pass
+                self._sam2 = None
             if self._sam2 is None:
                 self._offload_others_for_mask()
                 self._offload_other_mask_engines(keep="_sam2")
                 self._sam2 = SAM2Model(
                     self.device,
-                    variant=self._settings["models"].get("sam2_variant", "base_plus"),
+                    variant=variant,
                     idle_offload_seconds=self._settings["models"].get("vram_idle_offload", 30),
                     hf_token=self._settings["models"].get("hf_token") or None,
                 )
             return self._sam2
 
-    def get_birefnet(self):
-        """Lazy-load BiRefNet (Auto engine, default for anime)."""
+    def get_birefnet(self, variant: Optional[str] = None):
+        """Lazy-load the Auto engine's per-frame detector (ToonOut / ISNet
+        anime / BiRefNet). ``variant`` overrides the setting ("auto" = the
+        memory tier's pick)."""
         from .models import BiRefNetModel
+        from .models.auto_roto import resolve_mask_variant
+        variant = resolve_mask_variant(self, "detector", variant or self._settings["models"].get("birefnet_variant", "auto"))
         with self._models_lock:
+            if self._birefnet is not None and getattr(self._birefnet, "variant", variant) != variant:
+                try: self._birefnet.offload()
+                except Exception: pass
+                self._birefnet = None
             if self._birefnet is None:
                 self._offload_others_for_mask()
                 self._offload_other_mask_engines(keep="_birefnet")
                 self._birefnet = BiRefNetModel(
                     self.device,
-                    variant=self._settings["models"].get("birefnet_variant", "general"),
+                    variant=variant,
                     idle_offload_seconds=self._settings["models"].get("vram_idle_offload", 30),
                     hf_token=self._settings["models"].get("hf_token") or None,
                 )

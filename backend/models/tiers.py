@@ -389,5 +389,10 @@ def describe_tiers(platform: str) -> list[dict[str, Any]]:
                 models[fn] = model_info(c[fn])
         if c.get("depth_input_size"):
             models["depth"]["input_size"] = int(c["depth_input_size"])
+        try:  # Mask Mode's Auto engine (table in auto_roto.py)
+            from .auto_roto import describe_mask_models
+            models.update(describe_mask_models(platform, tid))
+        except Exception:
+            pass
         out.append({"id": tid, "min_gb": mins.get(tid), "models": models})
     return out

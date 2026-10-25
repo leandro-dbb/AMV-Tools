@@ -51,7 +51,14 @@ VARIANTS: dict[str, str] = {
     # wd-tagger), ~170 MB. Usually beats the photo-trained checkpoints on
     # cel-shading, flat colors, and low-contrast painted backgrounds.
     "anime":    "skytnt/anime-seg",
+    # ToonOut (MIT weights, CC-BY-4.0 dataset): BiRefNet fine-tuned on anime
+    # characters. Same architecture as "general" — the code comes from the
+    # pinned BiRefNet repo, only the 885 MB state dict is downloaded here.
+    # Best per-frame outline on real episodes (docs/reports/chantier-roto.md).
+    "toonout":  "joelseytre/toonout",
 }
+TOONOUT_FILE = "birefnet_finetuned_toonout.pth"
+TOONOUT_REVISION = "cbf720eca394edcde66b861a8a8c20fbabe9c748"
 DEFAULT_VARIANT = "general"
 # Hub commit each BiRefNet checkpoint is loaded at. ``trust_remote_code``
 # runs the repo's Python in the sidecar: pinning keeps whatever is pushed to
@@ -61,6 +68,8 @@ REVISIONS: dict[str, str] = {
     "general":  "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
     "hr":       "a7a562f6fd16021180f2f4348f4de003a2d3d1e1",
     "portrait": "b6561965a70070d9143fd9e558f6ca3c481510db",
+    # weights-only repo; its code is the pinned "general" revision
+    "toonout":  TOONOUT_REVISION,
 }
 
 
@@ -121,10 +130,13 @@ class BiRefNetModel:
             from transformers import AutoModelForImageSegmentation
 
             log.info("loading BiRefNet (%s)", self.repo_id)
-            model = AutoModelForImageSegmentation.from_pretrained(
-                self.repo_id, trust_remote_code=True, token=self.hf_token,
-                revision=REVISIONS[self.variant], code_revision=REVISIONS[self.variant],
-            )
+            if self.variant == "toonout":
+                model = self._build_toonout()
+            else:
+                model = AutoModelForImageSegmentation.from_pretrained(
+                    self.repo_id, trust_remote_code=True, token=self.hf_token,
+                    revision=REVISIONS[self.variant], code_revision=REVISIONS[self.variant],
+                )
             # The HF checkpoint config sets torch_dtype=fp16, so from_pretrained
             # returns the model in half precision on CUDA-capable cards. We let
             # it stay that way (saves ~440 MB VRAM and matches the upstream
@@ -139,6 +151,25 @@ class BiRefNetModel:
                 transforms.Normalize(_IMAGENET_MEAN, _IMAGENET_STD),
             ])
             self._start_offload_watcher()
+
+    def _build_toonout(self):
+        """BiRefNet architecture from the pinned code (config only, no 445 MB
+        general weights) + the ToonOut fine-tuned state dict."""
+        import torch
+        from transformers import AutoConfig, AutoModelForImageSegmentation
+
+        from ..model_download import download_model_files
+
+        rev = REVISIONS["general"]
+        config = AutoConfig.from_pretrained(VARIANTS["general"], trust_remote_code=True, token=self.hf_token,
+                                            revision=rev, code_revision=rev)
+        model = AutoModelForImageSegmentation.from_config(config, trust_remote_code=True, code_revision=rev)
+        (weights,) = download_model_files(VARIANTS["toonout"], (TOONOUT_FILE,), token=self.hf_token)
+        sd = torch.load(weights, map_location="cpu", weights_only=True)
+        sd = {k.removeprefix("module.").removeprefix("_orig_mod."): v for k, v in sd.items()}
+        model.load_state_dict(sd, strict=True)
+        # half precision on CUDA like the HF "general" checkpoint; fp32 elsewhere
+        return model.half() if self.device.backend == "cuda" else model.float()
 
     def _ensure_loaded_anime(self):
         """Load SkyTNT's ISNet anime-seg checkpoint through onnxruntime.
