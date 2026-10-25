@@ -1,5 +1,313 @@
 # Chantier roto : rendre le détourage (Mask Mode) utilisable sur de vrais épisodes
 
+Ce rapport a deux parties : **la partie 2 (chantier roto 2, SAM 3 et fond dans les cheveux)** en tête,
+puis la partie 1 (chantier roto, 0.5) inchangée, dont elle reprend le banc.
+
+# Partie 2 — SAM 3, détecteur anime, et le fond qui reste dans les cheveux
+
+Date : 25 octobre 2026 (soir). Machine de mesure : RTX 3090 24 Go (Linux, 6 vCPU). Mac injoignable
+(une tentative) : **rien n'a été mesuré sur Mac**.
+
+Problème de départ, en vrai usage : « il y avait tout le temps un morceau du fond dans les cheveux ou
+ailleurs, même dans des scènes simples ». Cible : le fond qui reste dans le détourage (trous entre
+les mèches, fond entre les bras ou sous le menton, liseré autour du contour, couleur de fond qui bave
+dans les pixels semi-transparents), y compris sur les plans calmes.
+
+## 1. Le banc : d'où viennent les références, et ce qu'elles valent dans les cheveux
+
+Même banc que la partie 1 : 23 plans réels (22 notés), 135 masques de référence sur 6 images clés par
+plan, taille de travail 1080 × 608.
+
+**Construction des références (vérifiée dans le code et les fichiers de correction)** : SAM 2.1 large,
+amorcé par les boîtes des composantes de ToonOut (un BiRefNet affiné sur l'anime) ou, pour 14 plans
+sur 23, par des boîtes et des points placés à la main, puis nettoyage des grains. Aucun masque n'est
+pris de BiRefNet ni de ToonOut eux-mêmes (le mode « sam+toon », qui aurait recopié le contour de
+ToonOut, n'est utilisé sur aucun plan). Conséquences :
+
+- **pas de biais pour BiRefNet** (le détourage retenu) ; ToonOut ne sert qu'à cadrer ;
+- **un biais pour la famille SAM** sur le tracé exact du bord : les références sont binaires, en
+  léger escalier, et à ±2 px près. Contrôle à l'œil des zones cheveux (planches zoomées ×3) : sur
+  les mèches épaisses (s06, b1, s02) la référence suit bien le contour ; elle **oublie les mèches
+  fines isolées** (une mèche d'un ou deux pixels au-dessus de la tête dans s01, que BiRefNet garde à
+  raison) et, sur le plan d'aura s13, elle inclut à tort des morceaux de sol entre les jambes.
+  SAM 3 (même famille, mêmes défauts : il retire le trait d'encre et rogne les pointes) est donc
+  avantagé par la mesure du bord ; c'est pourquoi le choix final repose aussi sur les planches.
+
+Correction appliquée à la métrique plutôt qu'aux références (pas le temps de redessiner 135 masques
+au pixel) : les 2 premiers pixels de part et d'autre du contour de référence ne sont pas notés.
+
+## 2. Nouvelle métrique : le fond dans le masque
+
+Sur chaque image clé notée, sur l'alpha **exporté** (après le traitement de l'export) :
+
+- **fond contour** : alpha moyen des pixels de fond situés entre 2 et 8 px **à l'extérieur** du
+  contour de référence (trous entre les mèches, liseré, halo) ;
+- **fond intérieur** : alpha moyen des pixels de fond **enfermés dans l'enveloppe** du personnage
+  (silhouette fermée par un disque de 41 px puis trous remplis) à plus de 8 px du contour : fond
+  entre les bras ou les jambes, sous le menton, grands trous dans les cheveux ;
+- **mangé** : 1 − alpha moyen des pixels du personnage entre 2 et 8 px **à l'intérieur** du contour
+  (vérifie qu'on n'enlève pas le fond en mangeant les cheveux) ;
+- **contamination** : pour chaque pixel semi-transparent du bord (0,05 < α < 0,95), position de sa
+  couleur exportée entre la couleur du personnage F (pixel de référence le plus proche, ≥ 3 px à
+  l'intérieur : le trait d'encre s'il y en a un) et celle du fond B (moyenne locale du fond de
+  référence) : 0 = couleur du personnage, 1 = couleur du fond, moyenne pondérée par α, seulement là
+  où F et B diffèrent visiblement. Les masques binaires n'ont pas de pixel semi-transparent (« – »).
+
+« Plans simples » = les 9 plans calmes, de dialogue, multi-personnages, cheveux et le plan long :
+c'est là que la plainte « même dans des scènes simples » se mesure.
+
+## 3. Première trouvaille : le liseré venait de l'export
+
+L'export alpha de la 0.4/0.5 agrandit le masque avec un **filtre guidé** puis nettoie la couleur du
+bord. Mesuré sur la sortie de l'Auto 0.5 :
+
+| plans simples | fond contour % | fond intérieur % | mangé % | contam. % |
+|---|---|---|---|---|
+| alpha brut (sans traitement) | 3,6 | 8,4 | 1,6 | 33,9 |
+| **export 0.5** (filtre guidé + nettoyage couleur) | 8,9 | 8,6 | 6,5 | 23,7 |
+| export 0.6 (masque tel quel + estimation du premier plan) | 3,6 | 8,4 | 1,6 | 24,6 |
+
+Le filtre guidé **multiplie par 2,5 le fond le long du contour** (par 4 sur les plans « cheveux » :
+2,2 → 9,3 %) et mange le trait d'encre (1,6 → 6,5 %) : sur les planches zoomées, chaque mèche est
+entourée d'un halo flou où bave la couleur du ciel ou de l'aura. C'est très probablement le « morceau
+de fond dans les cheveux » ressenti sur les plans calmes, où le détourage lui-même était bon.
+
+Export 0.6 : le masque est agrandi tel quel (bilinéaire) et seule la **couleur** des pixels
+semi-transparents est corrigée par **estimation du premier plan** (« blur fusion », Germer et al.
+2021, deux passes de flou, quelques ms par image). Variantes essayées : rayons 41/91/181, inversion
+de l'équation de composition, couleur du pixel opaque le plus proche pour les pixels faibles,
+nettoyage couleur 0.5 sans filtre guidé (27,8 %) : aucune ne fait mieux de plus d'un point ; la
+variante publiée est gardée. Lecture honnête de la contamination : par rapport aux couleurs brutes,
+l'estimation retire environ un quart de la couleur de fond (cheveux : 38,9 → 29,7 %) ; l'export 0.5
+affiche un chiffre plus bas sur les cheveux (24,6 %) parce que son halo ajoute une large frange de
+pixels faiblement opaques repeints à la couleur du personnage, qui diluent la moyenne — c'est
+justement la lueur visible.
+
+## 4. Candidats mesurés
+
+Mêmes 22 plans notés, mêmes 107 images clés, tout mesuré **après l'export 0.6**, sauf les deux
+lignes « 0.5 » (export 0.5, ce que l'utilisateur obtenait). Colonnes « fond », « mangé », « contam. »
+en %, plus bas = mieux ; « – » = masque binaire, sans pixel semi-transparent.
+
+### Tous les plans (22)
+
+| méthode | J | F | échecs | scint. % | fond contour | fond intérieur | mangé | contam. |
+|---|---|---|---|---|---|---|---|---|
+| ISNet anime (0.4, conseillé par la doc), export 0.5 | 0,751 | 0,669 | 21/107 | 13,0 | 21,8 | 24,9 | 22,4 | 40,8 |
+| BiRefNet seul (réglage 0.4), export 0.5 | 0,847 | 0,794 | 8/107 | 4,6 | 19,7 | 23,5 | 10,2 | 29,7 |
+| **Auto 0.5**, export 0.5 | 0,853 | 0,793 | 7/107 | 4,2 | 18,6 | 24,8 | 10,6 | 28,4 |
+| Auto 0.5 + export 0.6 | 0,853 | 0,793 | 7/107 | 4,2 | 14,3 | 24,6 | 6,3 | 30,5 |
+| BiRefNet HR (entrée 2048) | 0,848 | 0,784 | 8/107 | 4,6 | 15,5 | 23,1 | 5,6 | 34,7 |
+| SAM 3 image seul (« anime character ») | 0,894 | 0,827 | 9/107 | 4,0 | 5,6 | 5,7 | 5,2 | – |
+| SAM 3 vidéo seul (concept + son propre suivi) | 0,879 | 0,775 | 10/107 | 3,0 | 3,3 | 3,1 | 14,5 | – |
+| SAM 3 vidéo → BiRefNet (filtre large, sans SAM 2) | 0,892 | 0,794 | 2/107 | 3,5 | 13,6 | 19,7 | 8,7 | 32,9 |
+| deepghs (personnes anime) → BiRefNet dans les boîtes | 0,814 | 0,765 | 6/107 | 6,0 | 14,0 | 22,0 | 12,5 | 29,4 |
+| deepghs → BiRefNet → suivi SAM 2 | 0,813 | 0,753 | 6/107 | 6,4 | 13,1 | 21,3 | 13,5 | 30,0 |
+| deepghs → SAM 2.1 large dans les boîtes | 0,807 | 0,747 | 12/107 | 9,7 | 6,5 | 6,9 | 16,4 | – |
+| Auto 0.5 + ViTMatte (trimap ±10 px) | 0,855 | 0,805 | 7/107 | 4,1 | 15,4 | 25,8 | 6,4 | 27,6 |
+| Auto 0.5 + résolution couleur de la bande | 0,844 | 0,798 | 7/107 | 4,6 | 13,1 | 23,8 | 16,9 | 19,0 |
+| SAM 3 → BiRefNet (filtre large) → suivi SAM 2 | 0,908 | 0,818 | 1/107 | 3,2 | 12,8 | 19,9 | 7,1 | 32,9 |
+| idem + contour serré sur SAM 3 à 0,4 % | 0,915 | 0,857 | 2/107 | 2,6 | 6,6 | 5,9 | 7,7 | 28,0 |
+| **Auto 0.6** = idem + contour serré à 0,8 % | **0,920** | **0,862** | **1/107** | **2,8** | 10,6 | **7,8** | 7,6 | 30,9 |
+| Manuel 0.5 (clic), export 0.5 | 0,828 | 0,774 | 10/107 | 3,8 | 16,8 | 20,9 | 14,2 | 28,7 |
+| **Manuel 0.6** (clic → SAM 3 → suivi → contour serré) | **0,879** | **0,823** | **5/107** | 2,9 | 10,0 | 7,8 | 10,8 | 31,2 |
+
+### Plans simples (9 : calmes, dialogue, multi-personnages, cheveux, plan long)
+
+| méthode | J | F | échecs | fond contour | fond intérieur | mangé | contam. |
+|---|---|---|---|---|---|---|---|
+| ISNet anime, export 0.5 | 0,941 | 0,869 | 0/40 | 15,3 | 15,9 | 9,2 | 28,0 |
+| BiRefNet seul, export 0.5 | 0,970 | 0,898 | 0/40 | 11,0 | 10,7 | 6,8 | 25,9 |
+| **Auto 0.5**, export 0.5 | 0,968 | 0,895 | 0/40 | 9,2 | 10,1 | 7,8 | 23,7 |
+| Auto 0.5 + export 0.6 | 0,968 | 0,895 | 0/40 | 4,0 | 9,9 | 3,0 | 24,5 |
+| BiRefNet HR (2048) | 0,972 | 0,900 | 0/40 | 4,9 | 6,5 | 2,4 | 25,6 |
+| SAM 3 image seul | 0,974 | 0,928 | 0/40 | 0,9 | 2,5 | 4,8 | – |
+| SAM 3 vidéo seul | 0,957 | 0,855 | 0/40 | 0,8 | 2,7 | 8,9 | – |
+| deepghs → BiRefNet → suivi | 0,919 | 0,853 | 0/40 | 4,0 | 9,9 | 10,0 | 25,7 |
+| Auto 0.5 + ViTMatte | 0,970 | 0,896 | 0/40 | 4,3 | 10,4 | 3,1 | 24,2 |
+| Auto 0.5 + résolution couleur | 0,957 | 0,898 | 0/40 | 3,1 | 8,4 | 13,7 | 10,5 |
+| contour serré 0,4 % | 0,974 | 0,919 | 0/40 | 1,8 | 2,5 | 3,7 | 23,4 |
+| **Auto 0.6** (contour serré 0,8 %) | **0,974** | 0,911 | 0/40 | **2,7** | **3,0** | 3,4 | 23,9 |
+| Manuel 0.5, export 0.5 | 0,970 | 0,900 | 0/40 | 9,2 | 10,0 | 7,3 | 23,9 |
+| **Manuel 0.6** | 0,974 | 0,909 | 0/40 | 2,7 | 3,0 | 3,4 | 23,9 |
+
+### Auto 0.5 → Auto 0.6 par catégorie
+
+| catégorie | J | échecs | scint. % | fond contour | fond intérieur | mangé |
+|---|---|---|---|---|---|---|
+| calme | 0,987 → 0,989 | 0 → 0 | 0,1 → 0,1 | 5,7 → 1,3 | 3,5 → 0,2 | 4,2 → 0,1 |
+| multi-personnages | 0,948 → 0,963 | 0 → 0 | 0,3 → 0,3 | 10,7 → 2,7 | 15,3 → 1,0 | 8,7 → 4,4 |
+| cheveux | 0,983 → 0,983 | 0 → 0 | 0,8 → 0,8 | 9,3 → 2,0 | 3,7 → 0,2 | 5,6 → 0,3 |
+| action floue | 0,876 → 0,941 | 0 → 0 | 5,5 → 3,6 | 23,3 → 17,1 | 45,4 → 12,8 | 7,8 → 2,7 |
+| effets | 0,732 → 0,795 | 0 → 0 | 14,0 → 7,1 | 20,6 → 9,5 | 28,7 → 4,0 | 26,1 → 28,3 |
+| occlusion | 0,872 → 0,977 | 1 → 0 | 3,0 → 2,8 | 21,3 → 11,8 | 24,1 → 10,2 | 4,6 → 0,8 |
+| sombre | 0,787 → 0,843 | 1 → 1 | 4,1 → 4,1 | 22,1 → 12,3 | 30,5 → 14,4 | 13,1 → 13,3 |
+| fond chargé (tracteur) | 0,337 → 0,872 | 5 → 0 | 0,0 → 0,1 | 48,1 → 37,3 | 11,4 → 11,2 | 4,1 → 0,1 |
+| plan long 11 s | 0,962 → 0,963 | 0 → 0 | 0,9 → 0,8 | 11,3 → 6,8 | 20,9 → 20,0 | 17,2 → 12,8 |
+
+### Lecture
+
+- **Le détecteur était bien le plafond.** SAM 3 avec le seul concept texte « anime character » sait
+  ce qu'est un personnage : il ignore le tracteur (J 0,34 → 0,94 seul), le pilier et les fruits, le
+  décor sombre de *Black Clover*, et surtout le fond enfermé entre les bras et les jambes (fond
+  intérieur 24,6 → 5,7 %). « person » donne le même masque que « anime character » sur les essais
+  (le second est gardé, plus explicite). Mais **seul, il ne suffit pas** : bords binaires en
+  escalier qui retirent le trait d'encre et rognent les pointes de mèches (planches), 9 échecs
+  (il perd Beerus dans le couloir sombre et Goku dans l'aura sur fond noir), et ses bons chiffres de
+  contour viennent en partie de la référence, de la même famille SAM. Son mode vidéo est plus stable
+  (scintillement 3,0 %) mais mange davantage (14,5 %), demande 5,5 Go de VRAM et 10 Go de RAM.
+- **Le bon montage est hybride** : BiRefNet dessine le contour (cheveux, trait d'encre, alpha doux),
+  SAM 3 dit *où est le personnage*. Avant le suivi, le masque BiRefNet n'est gardé qu'à moins de
+  2,5 % de la diagonale de ce que SAM 3 appelle personnage (l'aura, le tracteur, le pilier tombent) ;
+  après le suivi, il est serré à 0,8 % du contour de SAM 3 (le fond entre les bras, sous le menton,
+  entre les pointes tombe). Une image où SAM 3 ne voit personne garde le masque BiRefNet : c'est ce
+  qui évite ses échecs dans le noir. Rayon 0,4 % : chiffres un peu meilleurs (la référence est
+  SAM), mais il rogne les pointes de mèches que SAM 3 sous-segmente (planche s06) ; 0,8 % les garde.
+  Attendre que SAM 3 couvre tout le personnage avant de serrer mesure moins bien (J 0,901).
+- **Détecteur anime deepghs** (YOLOv8, MIT) : il cadre bien les personnages, mais une boîte
+  contient autant de décor qu'un masque BiRefNet et coupe les membres tendus (mangé 12,5 %) ; il ne
+  sépare pas un personnage d'un objet collé à lui. SAM 2.1 large dans ses boîtes (image par image) :
+  12 échecs, scintillement 9,7 %. Rejeté.
+- **SAM 3 vidéo comme sélecteur devant BiRefNet** (sans SAM 2) : J 0,892, 2 échecs, mais le fond
+  enfermé reste à 19,7 % et il coûte 5,5 Go de VRAM ; le mode image image par image, suivi par
+  SAM 2, fait mieux pour moins cher.
+- **BiRefNet HR (2048)** : à peine différent sur des images de travail de 1080 px (J 0,848), 8,1 Go
+  de VRAM, 3 à 4 fois plus lent. Rejeté. (La variante « HR-matting » a été téléchargée mais pas
+  mesurée, faute de temps.)
+- **Affinage des bords** : ViTMatte sur une bande de ±10 px ne baisse pas le fond du contour
+  (15,4 % contre 14,3 %) et triple le temps ; la résolution de l'alpha par la couleur locale
+  (équation de composition) donne la meilleure contamination (19 %) mais **mange le trait d'encre**
+  (mangé 16,9 %, un trait noir n'est ni le ciel ni les cheveux). La suppression des pixels « couleur
+  du fond local » dans la bande ne change rien de mesurable (3,98 % contre 4,04 % sur les plans
+  simples) et mange un peu : rejetée. MatAnyone 2 sur la seule bande de contour n'a pas été retesté,
+  faute de temps. Le vrai gain sur le contour venait de **l'export** (§3) et de **SAM 3** (fond
+  intérieur).
+- **Ce qui reste** : la contamination couleur ne baisse pas avec l'Auto 0.6 (30,9 %) — elle mesure
+  les pixels semi-transparents restants, que l'estimation du premier plan ne corrige qu'en partie ;
+  à l'œil, sur damier et sur couleur vive, plus de liseré coloré visible sur les plans calmes. Le
+  « mangé » monte sur les effets (28 %) : SAM 3 ne compte pas les **objets tenus** comme partie du
+  personnage (bâton et auréole de Whis, bol de Beerus : coupés), et coupe les mains prises dans une
+  aura.
+
+## 5. Vitesse et mémoire (RTX 3090, passe au calme, plan de 84 images à 1080 × 608)
+
+| étape | ms / image | pic VRAM (PyTorch) |
+|---|---|---|
+| BiRefNet (détection, contour) | 119 | 1,6 Go |
+| SAM 3 image, concept « anime character » | 212 | 2,0 Go |
+| suivi SAM 2.1 tiny (+ ré-amorçages) | 101 à 106 | 1,7 Go |
+| contour serré | 4 | – |
+| **Auto 0.5** (BiRefNet + suivi) | **225** | 1,7 Go |
+| **Auto 0.6** (BiRefNet + SAM 3 + suivi + contour serré) | **435** (× 1,9) | 2,0 Go |
+| export : estimation du premier plan, image 1080p, CPU | 206 | – |
+
+Les modèles sont chargés l'un après l'autre (BiRefNet, puis SAM 3, puis SAM 2), le pic de VRAM est
+celui du plus gros : ≈ 2,5 Go avec le contexte CUDA. Le banc complet (tableaux du §4) tournait avec
+3 à 5 calculs en parallèle sur la même carte ; ses temps (Auto 0.6 : 2,8 s/image) ne servent qu'à
+comparer.
+
+## 6. Verdict visuel par plan
+
+Planches de 3 images clés par plan, alpha exporté sur damier (avant = Auto 0.5 avec export 0.5,
+après = Auto 0.6), et zooms ×3 sur la zone de contour la plus découpée (cheveux en général), alpha
+composé sur magenta pour que tout reste de fond saute aux yeux. U = utilisable tel quel,
+R = retouche légère, X = inutilisable.
+
+| plan | contenu | Auto 0.5 | **Auto 0.6** | ce qui change |
+|---|---|---|---|---|
+| s01 | calme, ciel | U | U | plus de halo violet le long des mèches |
+| s02 | calme, gros plan | U | U | idem |
+| s04 | 4 personnages | R | U | fond entre les personnages retiré (fond intérieur 44,9 → 2,8 %) |
+| s05 | Whis et Beerus | U | **R** | **régression** : bâton et auréole de Whis coupés (objets tenus) |
+| b5 | 2 personnages | U | U | — |
+| s06 | cheveux SSJ3 | U | U | halo jaune de l'aura autour des pointes disparu, pointes gardées |
+| b1 | cheveux longs sur ciel | U | U | halo bleu flou autour des cheveux disparu |
+| s09 | action, éclairs | R | R | moins d'éclairs gardés |
+| s10 | action, deux corps | R | R | — |
+| s11 | action, rayon | R | R | rayon d'énergie encore partiellement gardé |
+| s12 | action, flou rouge | U | U | — |
+| b6 | gros plan sombre | X | **R** | le bloc de décor sombre n'est plus pris pour le personnage |
+| s13 | aura + débris | R | **U** | aura et sol entre les jambes retirés |
+| s15 | aura sur fond noir | U | U | — |
+| b2 | forme démon, particules | R | R | un amas de particules reste sur une image |
+| s16 | sort de la fumée | U | U | — |
+| s17 | derrière un mur | U | U | — |
+| s18 | nuit, couloir | U | U | — |
+| s19 | palais sombre | R | R | pilier et fruits retirés, mais le bol tenu par Beerus est coupé |
+| b4 | pluie de nuit | X | X | personnage secondaire toujours perdu en fin de plan |
+| s20 | collé au tracteur | X | **R** | tracteur retiré ; Goten, assis derrière le volant, n'est visible que par la tête (juste) |
+| L1 | plan long 11 s | U | U | — |
+| **total** | | 12 U / 7 R / 3 X | **13 U / 8 R / 1 X** | |
+
+## 7. Intégration (ce qui a changé dans l'application)
+
+- **Auto par défaut, un clic, rien à régler** : BiRefNet → **SAM 3** (concept « anime
+  character ») → suivi SAM 2.1 → **contour serré sur SAM 3** → export décontaminé. Le *Manuel*
+  (clic) passe par le même chemin (le clic choisit le personnage, SAM 3 nettoie) ; la boîte et le
+  pinceau ne changent pas.
+- **Paliers** : SAM 3 sur NVIDIA 8, 12, 16 et 24 Go (pas sur le palier « Rapide », où il double le
+  temps) ; **pas sur Mac** (non mesuré, Mac injoignable) ni sur CPU. Tableau des paliers dans
+  Settings > Models avec la nouvelle ligne « Détourage (sélection des personnages) » et sa licence.
+- **Repli propre** : poids SAM 3 inaccessibles (dépôt à accès contrôlé, pas de jeton approuvé),
+  erreur ou manque de mémoire pendant la passe SAM 3 → l'Auto tourne exactement comme en 0.5 (message
+  dans le journal, jamais d'échec du travail) ; interrupteur « Sélection des personnages par SAM 3 »
+  dans Settings > Models.
+- **Export alpha** (ProRes 4444, VP9, PNG) : masque exporté tel quel + estimation du premier plan ;
+  interrupteur « Couleurs de bord propres à l'export » (désactivé = export 0.5).
+- **Licence SAM 3** (SAM License, Meta) : pas une licence « non commerciale » (l'usage commercial est
+  permis), interdit les usages militaires, nucléaires, ITAR et l'ingénierie inverse ; les poids ne
+  sont jamais redistribués par AMV Tools, ils sont téléchargés par Hugging Face avec le jeton de
+  l'utilisateur après acceptation de la licence sur la page du modèle (3,4 Go). Le détecteur deepghs
+  (MIT) et ViTMatte (Apache-2.0, entraîné sur Composition-1k) n'ont servi qu'au banc.
+
+## 8. Mask Mode Auto activable par défaut ?
+
+**Oui, sur les cartes NVIDIA de 8 Go et plus où SAM 3 est accessible.** Sur 22 plans réels, l'Auto
+0.6 ne perd plus le personnage qu'une fois sur 107 images clés (7 en 0.5), 21 plans sur 22 sont
+exploitables (13 tels quels), et le défaut ressenti en premier — le fond dans les cheveux et autour
+des personnages sur des scènes simples — est divisé par trois à quatre (fond le long du contour 9,2 →
+2,7 %, fond enfermé 10,1 → 3,0 % sur les plans simples), sans manger les cheveux (3,4 % contre
+7,8 %). Restent à connaître : les objets tenus coupés (bâton, bol), les effets lumineux en partie
+gardés, un plan de nuit sous la pluie, et un traitement deux fois plus long qu'en 0.5.
+
+**Non ailleurs** : sans SAM 3 (Mac, CPU, palier Rapide, jeton absent), on retombe sur l'Auto 0.5
+(seul l'export s'améliore), dont le verdict de la partie 1 reste valable ; et rien n'a été mesuré sur
+Mac. Comme l'accès à SAM 3 dépend du jeton Hugging Face personnel de chaque utilisateur, le réglage
+`enable_mask` reste désactivé par défaut dans le code : le basculer pour tous mettrait l'Auto 0.5
+devant ceux qui n'ont pas SAM 3. L'étape suivante naturelle : l'activer automatiquement quand le
+palier NVIDIA a SAM 3 et que le jeton ouvre ses poids.
+
+## 9. Planches
+
+Sur la machine de mesure, dans le dossier des rapports `reports/roto/roto2/` :
+
+- `cheveux-avant-apres/<plan>.jpg` : zooms ×3 sur la zone de contour la plus découpée de 3 images
+  clés — image, référence (contour cyan), Auto 0.5 (export 0.5), Auto 0.6 — sur magenta ;
+- `plans-avant-apres/<plan>.jpg` : images entières, référence / Auto 0.5 / Auto 0.6, sur damier et
+  sur vert ;
+- `verdict/verdict_*.jpg` : planches compactes utilisées pour le verdict du §6.
+
+## Résumé (partie 2)
+
+- **Le liseré venait de l'export** : le filtre guidé de l'export 0.4/0.5 ajoutait un anneau de fond
+  autour des cheveux (×2,5 à ×4). Export 0.6 : masque tel quel + estimation de la couleur du premier
+  plan (ProRes 4444, VP9, PNG).
+- **SAM 3 est le meilleur « détecteur de personnage » mesuré**, mais pas un bon détoureur seul (bords
+  en escalier, échecs dans le noir). **Gagnant : BiRefNet pour le contour + SAM 3 pour savoir où est
+  le personnage + suivi SAM 2 + contour serré à 0,8 %.** Auto : J 0,853 → 0,920, échecs 7 → 1 sur
+  107, scintillement 4,2 → 2,8 %, fond le long du contour 18,6 → 10,6 %, fond enfermé 24,8 → 7,8 %
+  (plans simples : 9,2 → 2,7 % et 10,1 → 3,0 %). Manuel : J 0,828 → 0,879, échecs 10 → 5.
+- Rejetés à la mesure : détecteur anime deepghs, BiRefNet HR, ViTMatte, résolution couleur de
+  l'alpha, SAM 3 seul (image ou vidéo).
+- **Mask Mode Auto activable par défaut : oui sur NVIDIA ≥ 8 Go avec SAM 3, non ailleurs.**
+
+
+
+---
+
+# Partie 1 — chantier roto (0.5)
+
+
 Date : 25 octobre 2026. Machine de mesure : RTX 3090 24 Go (Linux, 6 vCPU, 15 Go de RAM).
 Le Mac M1 Pro 16 Go était injoignable pendant tout le chantier : **rien n'a été mesuré sur Mac**.
 
@@ -340,9 +648,9 @@ avec auras), mesurable tel quel avec ce banc.
 
 ## 9. Planches (hors dépôt, sur la machine de mesure)
 
-- Avant (référence, BiRefNet, ISNet anime, SAM 2.1 tiny au clic) : `/srv/data/amv-tools/reports/roto/avant/<plan>.jpg`
-- Après (référence, BiRefNet 0.4, Auto 0.5, Manuel 0.5) : `/srv/data/amv-tools/reports/roto/apres/<plan>.jpg`
-- Vérité terrain (planches de contrôle image + superposition) : `/srv/data/amv-tools/roto/review/<plan>.jpg`
+- Avant (référence, BiRefNet, ISNet anime, SAM 2.1 tiny au clic) : `reports/roto/avant/<plan>.jpg`
+- Après (référence, BiRefNet 0.4, Auto 0.5, Manuel 0.5) : `reports/roto/apres/<plan>.jpg`
+- Vérité terrain (planches de contrôle image + superposition) : `roto/review/<plan>.jpg`
 
 Chaque planche montre 3 images clés, chacune composée sur damier puis sur fond vert.
 
