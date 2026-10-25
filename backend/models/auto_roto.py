@@ -300,6 +300,11 @@ def auto_track(
             for fi, (pos, neg) in (clicks or {}).items():
                 if a <= int(fi) < b:
                     targets[int(fi) - a] = clicked_targets(det[int(fi)], pos, neg)
+            if not any(t.any() for t in targets) and a > 0 and (out[a - 1] > 0.5).any():
+                # no click in this shot (a flash taken for a cut, or a real
+                # cut): carry the character tracked at the end of the
+                # previous shot over
+                targets[0] = match_targets(det[a], out[a - 1] > 0.5)
         else:
             targets = [select_targets(det[t], mode) for t in range(a, b)]
         areas = np.array([m.sum() for m in targets], dtype=np.float64)

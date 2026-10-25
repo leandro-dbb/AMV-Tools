@@ -214,3 +214,14 @@ def test_auto_target_setting(value, monkeypatch):
     monkeypatch.setattr(segment, "get_state", lambda: St())
     got = segment._auto_target(value)
     assert got == (value if value in ("main", "all") else "main")
+
+
+def test_click_mode_carries_the_character_across_a_cut(tmp_path, monkeypatch):
+    n, h, w = 6, 30, 40
+    paths = _frames(tmp_path, n, w, h)
+    det = np.zeros((n, h, w), np.float32)
+    det[:, 5:25, 5:20] = 1.0
+    monkeypatch.setattr(auto_roto, "split_shots", lambda frames, n: [(0, 3), (3, 6)])
+    out = auto_track(paths, det, FakeSAM2(), tmp_path, (w, h), mode="click",
+                     frames_small=[np.zeros((4, 4, 3), np.uint8)] * n, clicks={1: ([(10, 15)], [])})
+    assert (out[5] > 0.5).any()                      # second shot not left empty
