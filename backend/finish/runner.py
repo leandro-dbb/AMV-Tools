@@ -621,6 +621,15 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                 ctx.progress(min(span, span * (i + 1) / total), f"matting {i + 1}/{total}")
         if not frames:
             raise RuntimeError("no frames decoded")
+        from ..api.segment import _select_characters
+        sel_masks = np.stack(masks)
+        if sel_masks.dtype != np.uint8:
+            sel_masks = np.clip(np.rint(sel_masks * 255.0), 0, 255).astype(np.uint8)
+        selector_masks: list = []
+        gated = _select_characters(sel_masks, frames, models_cfg, keep=selector_masks)
+        if gated is not sel_masks:
+            masks = list(gated) if tracker else [m.astype(np.float32) / 255.0 for m in gated]
+        del sel_masks, gated
         if tracker:
             from ..models.auto_roto import auto_track
             ctx.check_cancel()
@@ -635,6 +644,11 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                 progress_cb=lambda seen, n: ctx.progress(0.4 + 0.4 * seen / max(1, n), f"tracking {seen}/{n}"),
             ))
             del det
+        if selector_masks:
+            from ..models.auto_roto import tighten
+            masks = list(tighten(np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
+                                           for m in masks]), selector_masks))
+        del selector_masks
     finally:
         if jpg_dir is not None:
             shutil.rmtree(jpg_dir, ignore_errors=True)
@@ -653,6 +667,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
         edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
         bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
+        edge_mode=str(models_cfg.get("mask_edge_mode", "fg")),
         raw_pipes=_i420_in_writer(),   # CUDA path, unchanged elsewhere
         check_cancel=ctx.check_cancel,
     )

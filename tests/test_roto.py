@@ -146,7 +146,9 @@ def test_every_tier_has_mask_models_with_allowed_licenses():
             rows = auto_roto.describe_mask_models(platform, tid)
             assert "mask_detector" in rows, (platform, tid)
             for row in rows.values():
-                assert row["license"] in ALLOWED_LICENSES
+                # SAM 3: gated, fetched with the user's own approved token,
+                # license shown in Settings (AMV Tools is not commercial)
+                assert row["license"] in ALLOWED_LICENSES or (row.get("gated") and row["id"] == "facebook/sam3")
 
 
 # ── windowed SAM 2 propagation ──────────────────────────────────────────────
@@ -225,3 +227,135 @@ def test_click_mode_carries_the_character_across_a_cut(tmp_path, monkeypatch):
     out = auto_track(paths, det, FakeSAM2(), tmp_path, (w, h), mode="click",
                      frames_small=[np.zeros((4, 4, 3), np.uint8)] * n, clicks={1: ([(10, 15)], [])})
     assert (out[5] > 0.5).any()                      # second shot not left empty
+
+
+
+# ── 0.6: character selector, export edges ─────────────────────────────────
+def test_gate_alpha_cuts_what_the_selector_does_not_call_a_character():
+    from backend.models.auto_roto import gate_alpha
+    base = _blob(100, 200, 20, 20, 60, 90) + _blob(100, 200, 140, 20, 190, 90)   # character + aura blob
+    sel = _blob(100, 200, 22, 22, 58, 88)                                      # selector: only the character
+    g = gate_alpha(base, sel)
+    assert g[50, 40] == 1.0 and g[21, 21] > 0.9        # outline kept (selector under-segments)
+    assert g[50, 170] == 0.0                            # far blob cut
+    assert not gate_alpha(base, np.zeros_like(sel)).any()
+    assert np.array_equal(gate_alpha(base, np.zeros_like(sel), keep_if_empty=True), base)
+
+
+def test_apply_selector_gates_uint8_and_falls_back_on_failure():
+    from backend.models.auto_roto import apply_selector
+    det = np.stack([(_blob(60, 100, 5, 5, 30, 50) + _blob(60, 100, 70, 5, 95, 50)) * 255] * 3).astype(np.uint8)
+    frames = [np.zeros((60, 100, 3), np.uint8)] * 3
+
+    class Sel:
+        def segment(self, rgb, prompt):
+            return _blob(60, 100, 5, 5, 30, 50)
+
+    out = apply_selector(det, frames, Sel())
+    assert out.dtype == np.uint8 and out[1, 20, 15] == 255 and out[1, 20, 85] == 0
+
+    class Broken:
+        def segment(self, rgb, prompt):
+            raise RuntimeError("CUDA out of memory")
+
+    assert apply_selector(det, frames, Broken()) is det
+
+
+def test_selector_in_gpu_tiers_only_and_listed_in_settings():
+    assert all(c["selector"] is None for c in auto_roto.MASK_TIERS["mac"].values())
+    assert auto_roto.MASK_TIERS["cpu"]["fast"]["selector"] is None
+    assert auto_roto.MASK_TIERS["nvidia"]["8gb"]["selector"] == "sam3"
+    rows = auto_roto.describe_mask_models("nvidia", "24gb")
+    assert rows["mask_selector"]["id"] == "facebook/sam3"
+    assert "mask_selector" not in auto_roto.describe_mask_models("mac", "mac16")
+
+
+def test_select_characters_without_sam3_weights_keeps_the_detector(monkeypatch):
+    from backend.api import segment
+    det = np.zeros((2, 8, 8), np.uint8)
+
+    class St:
+        def model_selection(self):
+            return {"platform": "nvidia", "effective_tier": "24gb"}
+
+        def get_sam3(self):
+            return None   # gated weights not accessible
+
+    monkeypatch.setattr(segment, "get_state", lambda: St())
+    assert segment._select_characters(det, [None, None], {}) is det
+    assert segment._select_characters(det, [None, None], {"mask_selector_enabled": False}) is det
+
+
+def test_sam3_access_is_checked_once(monkeypatch):
+    from backend.models import sam3_concept
+    calls = []
+
+    def fake_download(repo, name, token=None):
+        calls.append(repo)
+        raise OSError("401 gated")
+
+    import huggingface_hub
+    monkeypatch.delenv("AMV_SAM3_PATH", raising=False)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+    sam3_concept._ACCESS.clear()
+    assert not sam3_concept.weights_accessible("tok")
+    assert not sam3_concept.weights_accessible("tok")
+    assert calls == ["facebook/sam3"]
+    sam3_concept._ACCESS.clear()
+
+
+def test_estimate_foreground_removes_background_colour_from_soft_edges():
+    from backend.models.edge_refine import estimate_foreground
+    h, w = 40, 120
+    alpha = np.tile(np.clip((np.arange(w) - 50) / 20.0, 0, 1), (h, 1)).astype(np.float32)[:, ::-1].copy()
+    F = np.array([230, 40, 40], np.float32)     # red character on the left
+    B = np.array([40, 60, 230], np.float32)     # blue sky on the right
+    img = (alpha[..., None] * F + (1 - alpha[..., None]) * B).round().astype(np.uint8)
+    out = estimate_foreground(img, alpha).astype(np.float32)
+    soft = (alpha > 0.1) & (alpha < 0.9)
+    before = np.abs(img[soft].astype(np.float32) - F).mean()
+    after = np.abs(out[soft] - F).mean()
+    assert after < 0.25 * before
+    opaque = alpha >= 0.999
+    assert np.array_equal(out[opaque].astype(np.uint8), img[opaque])
+
+
+def test_export_finish_frame_fg_mode_keeps_the_matte_and_fixes_colour(tmp_path, monkeypatch):
+    """The 0.6 export path: no guided-filter halo (alpha only resized),
+    edge colour decontaminated."""
+    from backend.export import ffmpeg as ff
+    seen = {}
+
+    def fake_raw(src, s, e, masks, out, *, codec, fps, finish_frame, check_cancel=None):
+        h, w = 20, 60
+        alpha_small = np.zeros((10, 30), np.float32)
+        alpha_small[:, :12] = 1.0
+        alpha_small[:, 12] = 0.5
+        rgb = np.zeros((h, w, 3), np.uint8)
+        rgb[:, :25] = (230, 40, 40)
+        rgb[:, 25:] = (40, 60, 230)
+        seen["rgba"] = finish_frame(rgb, alpha_small)
+        return out
+
+    monkeypatch.setattr(ff, "_export_alpha_raw", fake_raw)
+    ff._encode_scene_with_alpha("x.mkv", 0, 1000, np.zeros((1, 10, 30), np.float32), str(tmp_path / "o.mov"),
+                                raw_pipes=True)
+    rgba = seen["rgba"]
+    assert rgba.shape == (20, 60, 4)
+    assert rgba[:, 40:, 3].max() == 0                       # no halo far out in the sky
+    soft = (rgba[..., 3] > 25) & (rgba[..., 3] < 230)
+    assert soft.any() and rgba[soft][:, 2].mean() < 120    # soft edge not blue
+
+
+def test_tighten_cuts_pockets_where_the_selector_sees_someone():
+    from backend.models.auto_roto import tighten
+    h, w = 200, 300
+    body = _blob(h, w, 100, 40, 200, 180)
+    pocket = _blob(h, w, 200, 100, 240, 140)            # background kept next to the body
+    m = np.stack([body + pocket, body + pocket])
+    sel = (body > 0).astype(np.uint8)                   # SAM 3: the body, not the pocket
+    out = tighten(m, [sel, np.zeros_like(sel)], tight_frac=0.01)
+    assert out[0, 120, 150] == 1.0 and out[0, 120, 235] == 0.0   # pocket cut
+    assert out[0, 120, 201] > 0.9                                 # outline kept
+    assert np.array_equal(out[1], m[1])                           # selector saw nobody: unchanged
+    assert tighten(m, []) is m

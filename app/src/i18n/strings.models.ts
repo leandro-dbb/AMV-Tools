@@ -38,6 +38,7 @@ export const modelsStrings: Dict = {
   'models.role.upscale': { en: 'Upscale', fr: 'Upscale' },
   'models.role.interpolate': { en: 'Interpolation', fr: 'Interpolation' },
   'models.role.depth': { en: 'Depth', fr: 'Profondeur' },
+  'models.role.mask_selector': { en: 'Cutout (character pick)', fr: 'Détourage (sélection des personnages)' },
   'models.role.mask_detector': { en: 'Cutout (detection)', fr: 'Détourage (détection)' },
   'models.role.mask_tracker': { en: 'Cutout (tracking)', fr: 'Détourage (suivi)' },
   'models.size.mb': { en: '{n} MB', fr: '{n} Mo' },

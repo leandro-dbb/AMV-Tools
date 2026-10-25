@@ -51,7 +51,10 @@ CORE_MODE = "adaptive"       # "always": fill from the track core on every frame
 
 # Models of the Auto engine per memory tier (backend/models/tiers.py ids).
 # detector: BiRefNetModel variant; tracker: SAM2Model variant, None = no
-# tracking (per-frame detector only — SAM 2 takes 20-40 s per frame on a CPU).
+# tracking (per-frame detector only — SAM 2 takes 20-40 s per frame on a CPU);
+# selector: model that says what a character is before the detector's matte
+# is used ("sam3": SAM 3 concept "anime character", gated weights — skipped
+# when not accessible), None = none.
 # Measured in docs/reports/chantier-roto.md.
 MASK_TIERS: dict[str, dict[str, dict[str, Optional[str]]]] = {
     # BiRefNet "general" is the best per-frame detector measured on real
@@ -59,27 +62,30 @@ MASK_TIERS: dict[str, dict[str, dict[str, Optional[str]]]] = {
     # barely changes the Auto result (it only follows the detector's seed),
     # so small cards take the lighter SAM 2.1.
     "nvidia": {
-        "fast": {"detector": "general", "tracker": "tiny"},
-        "8gb": {"detector": "general", "tracker": "tiny"},
-        "12gb": {"detector": "general", "tracker": "base_plus"},
-        "16gb": {"detector": "general", "tracker": "base_plus"},
-        "24gb": {"detector": "general", "tracker": "large"},
-        "max": {"detector": "general", "tracker": "large"},
+        # "fast": SAM 3 adds ~0.3 s per frame on an RTX 3090
+        "fast": {"detector": "general", "tracker": "tiny", "selector": None},
+        "8gb": {"detector": "general", "tracker": "tiny", "selector": "sam3"},
+        "12gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3"},
+        "16gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3"},
+        "24gb": {"detector": "general", "tracker": "large", "selector": "sam3"},
+        "max": {"detector": "general", "tracker": "large", "selector": "sam3"},
     },
     # Not measured on a Mac (unreachable during the 0.5 work): same detector,
     # lighter trackers.
     "mac": {
-        "fast": {"detector": "general", "tracker": "tiny"},
-        "mac8": {"detector": "general", "tracker": "tiny"},
-        "mac16": {"detector": "general", "tracker": "tiny"},
-        "mac24": {"detector": "general", "tracker": "base_plus"},
-        "mac32": {"detector": "general", "tracker": "base_plus"},
-        "max": {"detector": "general", "tracker": "large"},
+        "fast": {"detector": "general", "tracker": "tiny", "selector": None},
+        "mac8": {"detector": "general", "tracker": "tiny", "selector": None},
+        "mac16": {"detector": "general", "tracker": "tiny", "selector": None},
+        "mac24": {"detector": "general", "tracker": "base_plus", "selector": None},
+        "mac32": {"detector": "general", "tracker": "base_plus", "selector": None},
+        "max": {"detector": "general", "tracker": "large", "selector": None},
     },
     # CPU: BiRefNet takes seconds per frame there, ISNet anime ~0.5 s.
-    "cpu": {"fast": {"detector": "anime", "tracker": None}},
+    "cpu": {"fast": {"detector": "anime", "tracker": None, "selector": None}},
 }
-FALLBACK = {"detector": "anime", "tracker": "base_plus"}
+FALLBACK = {"detector": "anime", "tracker": "base_plus", "selector": None}
+SELECTOR_PROMPT = "anime character"
+TIGHT_FRAC = 0.008           # final matte hugged to SAM 3's outline at this reach (share of the diagonal)
 
 
 # Catalogue for Settings > Models (label, download size, license).
@@ -90,6 +96,9 @@ MASK_MODEL_INFO: dict[str, dict] = {
     "tiny": {"id": "facebook/sam2.1-hiera-tiny", "label": "SAM 2.1 tiny", "size_mb": 156, "license": "apache-2.0"},
     "base_plus": {"id": "facebook/sam2.1-hiera-base-plus", "label": "SAM 2.1 base+", "size_mb": 324, "license": "apache-2.0"},
     "large": {"id": "facebook/sam2.1-hiera-large", "label": "SAM 2.1 large", "size_mb": 898, "license": "apache-2.0"},
+    # gated on Hugging Face: the user's own account must accept the license
+    "sam3": {"id": "facebook/sam3", "label": "SAM 3 (« anime character »)", "size_mb": 3440,
+             "license": "SAM License (Meta)", "gated": True},
 }
 
 
@@ -98,7 +107,7 @@ def describe_mask_models(platform: str, tier: str) -> dict[str, dict]:
     Settings table (no tracker row on CPU)."""
     choice = MASK_TIERS.get(platform, {}).get(tier) or {}
     out = {}
-    for role, key in (("mask_detector", "detector"), ("mask_tracker", "tracker")):
+    for role, key in (("mask_selector", "selector"), ("mask_detector", "detector"), ("mask_tracker", "tracker")):
         v = choice.get(key)
         if v in MASK_MODEL_INFO:
             out[role] = dict(MASK_MODEL_INFO[v])
@@ -397,3 +406,94 @@ def _link_shot(sub_paths: List[Path]):
             shutil.copyfile(p, dst)
         paths.append(dst)
     return tmp, paths, tmp
+
+
+def gate_alpha(base: np.ndarray, selector: np.ndarray, *, box: bool = False,
+               reach_frac: float = GATE_FRAC, keep_if_empty: bool = False,
+               tight_frac: Optional[float] = None, cover_min: float = 0.85) -> np.ndarray:
+    """``base`` matte (fine outline) kept only near what ``selector`` calls a
+    character (SAM 3 concept mask, or filled person boxes when ``box``),
+    with a soft fall-off ``reach_frac`` of the frame diagonal wide: an aura
+    or a prop the selector leaves out is cut, the hair it under-segments is
+    kept. ``keep_if_empty``: a frame where the selector sees nobody keeps
+    the base matte (the selector missed a smeared character) instead of
+    coming out empty.
+
+    ``tight_frac``: when the selector covers at least ``cover_min`` of the
+    base matte (it sees the whole character on this frame), the gate hugs
+    the selector's outline at that reach instead: the background the base
+    matte kept between the arms, under the chin or between hair spikes,
+    which the selector leaves out, is cut. Where the selector misses part of
+    the character (motion blur, darkness) the wide gate is kept."""
+    import cv2
+    s = (selector > 0.5).astype(np.uint8)
+    if not s.any():
+        if keep_if_empty:
+            return np.clip(base.astype(np.float32), 0, 1)
+        return np.zeros_like(base, dtype=np.float32)
+    h, w = s.shape
+    if tight_frac is not None and not box:
+        b = base > 0.5
+        nb = int(b.sum())
+        if nb and float((b & (s > 0)).sum()) >= cover_min * nb:
+            reach_frac = tight_frac
+    r = max(1.0, (0.5 if box else 1.0) * reach_frac * float(np.hypot(h, w)))
+    d_out = cv2.distanceTransform(1 - s, cv2.DIST_L2, 3)
+    gate = np.clip((r - d_out) / (0.5 * r), 0.0, 1.0)
+    return np.clip(base.astype(np.float32) * gate, 0, 1).astype(np.float32)
+
+
+def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str = SELECTOR_PROMPT,
+                   progress_cb: Optional[Callable[[int, int], None]] = None,
+                   keep: Optional[list] = None) -> np.ndarray:
+    """Detector mattes ``(T, H, W)`` (uint8 or float) kept only near what the
+    selector (a :class:`~backend.models.sam3_concept.Sam3Concept`) calls a
+    character on each frame (:func:`gate_alpha`; a frame where it sees nobody
+    keeps the detector's matte). ``frames``: RGB arrays or image paths. Any
+    selector failure returns ``det`` unchanged — the 0.5 pipeline.
+    ``keep``: a list that receives the selector's masks (uint8 0/1, one per
+    frame) for :func:`tighten` after tracking."""
+    from PIL import Image
+    out = np.empty_like(det)
+    T = len(det)
+    try:
+        for t in range(T):
+            f = frames[t]
+            if not isinstance(f, np.ndarray):
+                with Image.open(f) as im:
+                    f = np.asarray(im.convert("RGB"))
+            sel = selector.segment(f, prompt)
+            if keep is not None:
+                keep.append((sel > 0.5).astype(np.uint8))
+            d = det[t].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[t]
+            g = gate_alpha(d, sel, keep_if_empty=True)
+            out[t] = np.clip(np.rint(g * 255.0), 0, 255).astype(np.uint8) if det.dtype == np.uint8 else g
+            if progress_cb is not None:
+                progress_cb(t + 1, T)
+    except Exception as exc:  # OOM, gated weights, ...: keep the 0.5 behaviour
+        log.warning("auto roto: character selector failed (%s), detector matte kept", exc)
+        if keep is not None:
+            keep.clear()
+        return det
+    return out
+
+
+def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac: float = TIGHT_FRAC) -> np.ndarray:
+    """Final mattes ``(T, H, W)`` float hugged to the selector's outline
+    (:func:`gate_alpha` at ``tight_frac`` of the diagonal) on every frame
+    where the selector sees someone: background left between the arms,
+    under the chin or between hair spikes is cut. 0.8 % keeps the hair tips
+    SAM 3 under-segments (0.4 % clipped them, measured in
+    docs/reports/chantier-roto.md); waiting for the selector to cover the
+    whole tracked character first measured worse. Frames where the selector
+    sees nobody are unchanged."""
+    if len(selector_masks) != len(masks):
+        return masks
+    out = np.empty_like(masks)
+    for t in range(len(masks)):
+        sel = selector_masks[t]
+        if sel is None or not np.any(sel):
+            out[t] = masks[t]
+            continue
+        out[t] = gate_alpha(masks[t], sel, keep_if_empty=True, reach_frac=tight_frac)
+    return out
