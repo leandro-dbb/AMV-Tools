@@ -137,6 +137,7 @@ export const finishStrings: Dict = {
   'finish.models.notInstalled': { en: 'Not installed · {size}', fr: 'Non installé · {size}' },
   'finish.models.delete': { en: 'Delete', fr: 'Supprimer' },
   'finish.models.license': { en: 'License: {license}', fr: 'Licence : {license}' },
+  'finish.models.nonCommercial': { en: 'non-commercial use only', fr: 'usage non commercial uniquement' },
   'finish.models.error': { en: 'Download failed: {message}', fr: 'Échec du téléchargement : {message}' },
 
   // Mask Mode corrections

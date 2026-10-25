@@ -440,6 +440,7 @@ export interface ModelTierModel {
   label: string;
   size_mb: number;
   license: string;
+  non_commercial?: boolean;
   patches?: number;
 }
 

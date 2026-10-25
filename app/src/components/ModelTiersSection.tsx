@@ -194,7 +194,10 @@ export default function ModelTiersSection({ settings, patch }: {
                       {role === 'embedding' && model.patches ? <span className="text-[#71717A]"> · {t('models.table.patches', { n: model.patches })}</span> : null}
                     </td>
                     <td className="py-1.5 pr-3 text-right whitespace-nowrap">{formatSizeMb(model.size_mb, t, lang)}</td>
-                    <td className="py-1.5 text-[#A1A1AA]">{model.license}</td>
+                    <td className="py-1.5 text-[#A1A1AA]">
+                      {model.license}
+                      {model.non_commercial && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 whitespace-nowrap">{t('models.table.nonCommercial')}</span>}
+                    </td>
                   </tr>
                 );
               })}
