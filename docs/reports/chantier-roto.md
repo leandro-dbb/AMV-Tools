@@ -166,7 +166,7 @@ Lecture honnête :
 | **Manuel 0.5** | 402 | 2.9 Go | 4.0 Go |
 
 Les temps ont été mesurés pendant que d'autres calculs tournaient sur la même machine (jusqu'à
-trois processus GPU et une autre session) : ils sont gonflés d'un facteur 2 à 4 et ne valent que
+trois processus GPU et une autre session) : ils sont gonflés de façon variable et ne valent que
 pour comparer les méthodes entre elles. VRAM et RAM sont des pics par processus.
 
 Plafond de durée : sur le plan de 11 s, le suivi SAM 2.1 large de la 0.4 (tout le plan dans un seul
