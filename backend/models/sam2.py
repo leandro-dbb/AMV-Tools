@@ -51,6 +51,15 @@ DEFAULT_VARIANT = "base_plus"
 # x2 keeps an anti-aliased edge while matching the true boundary better
 # (Mask Mode benchmark: edge error -13%, flicker -22% vs. hard masks).
 SOFT_LOGIT_SCALE = 2.0
+# Frames per tracking window. SAM 2 holds each frame of its state at 1024²
+# float32 (~12.6 MB) plus memory features: up to 96 frames (4 s at 24 fps,
+# ~1.2 GB) the whole clip is one state, as in 0.4; longer clips are tracked
+# window by window (frames offloaded to the CPU) so memory stays bounded
+# whatever the clip length — this was the old ~4 s ceiling.
+WINDOW_FRAMES = 96
+# User keyframes outside the current window that are carried into it as
+# conditioning frames (the nearest ones first).
+MAX_ANCHORS = 3
 
 # Prompts arrive as (x, y) in the coordinate frame of the rendered preview the
 # user clicked on. We carry them straight through to SAM 2, which expects pixel
@@ -85,6 +94,7 @@ class SAM2Model:
         self.hf_token = hf_token
         self._image_predictor = None
         self._video_predictor = None
+        self._state_cache = None  # ((video_dir, n_frames), SAM 2 inference state)
         self._lock = threading.Lock()
         self._last_used = 0.0
         self._offload_thread: Optional[threading.Thread] = None
@@ -144,6 +154,7 @@ class SAM2Model:
         with self._lock:
             self._image_predictor = None
             self._video_predictor = None
+            self._state_cache = None
         gc.collect()
         empty_device_cache(self.device.backend)
 
@@ -222,8 +233,14 @@ class SAM2Model:
         frame_paths: List[Path],
         frame_size: Tuple[int, int],
         soft: bool = True,
+        window: int = 0,
     ) -> np.ndarray:
         """Track one object through the clip from prompts on several frames.
+
+        ``window`` (frames, default :data:`WINDOW_FRAMES`): clips longer than
+        this are tracked in windows so memory stays bounded whatever the clip
+        length (SAM 2 otherwise keeps every frame at 1024² plus its memory
+        features — the old ~4 s ceiling).
 
         Each keyframe is ``{"frame_idx", "positive", "negative", "box",
         "mask"}``. ``mask`` (H, W) — typically a brush-corrected matte — is
@@ -247,6 +264,7 @@ class SAM2Model:
 
         w, h = frame_size
         n_frames = len(frame_paths)
+        window = int(window or WINDOW_FRAMES)
         if n_frames == 0:
             raise RuntimeError("SAM 2: no frames extracted for this clip")
         kfs = [k for k in keyframes if k.get("mask") is not None or k.get("positive") or k.get("box") is not None]
@@ -269,6 +287,11 @@ class SAM2Model:
 
         out_dtype = np.float32 if soft else bool
         masks_out = np.zeros((n_frames, h, w), dtype=out_dtype)
+        if n_frames > window:
+            # Long clip: bounded memory (see _track_windowed). The short-clip
+            # path below is kept as is — it is what every clip under ~2 s used.
+            return self._track_windowed(kfs, video_dir, n_frames, masks_out, soft=soft,
+                                        window=window, progress_cb=progress_cb)
         seen = 0
 
         def emit(frame_idx: int, mask_logits) -> None:
@@ -286,7 +309,16 @@ class SAM2Model:
                     pass
 
         with torch.inference_mode(), _autocast(self.device):
-            state = self._video_predictor.init_state(video_path=str(video_dir))
+            # Re-tracking the same clip (Auto re-seeding, Manual
+            # re-propagation) reuses the decoded frames of the last state.
+            cached = self._state_cache
+            if cached is not None and cached[0] == (str(video_dir), n_frames):
+                state = cached[1]
+                self._video_predictor.reset_state(state)
+            else:
+                self._state_cache = None
+                state = self._video_predictor.init_state(video_path=str(video_dir))
+                self._state_cache = ((str(video_dir), n_frames), state)
             for kf in sorted(kfs, key=lambda k: int(k["frame_idx"])):
                 idx = max(0, min(n_frames - 1, int(kf["frame_idx"])))
                 if kf.get("mask") is not None:
@@ -319,6 +351,117 @@ class SAM2Model:
                     emit(frame_idx, mask_logits)
             self._video_predictor.reset_state(state)
 
+        return masks_out
+
+    def release_state(self) -> None:
+        """Drop the cached tracking state (decoded frames) of the last clip."""
+        self._state_cache = None
+
+    def _add_prompt(self, state, local_idx: int, kf: dict) -> None:
+        if kf.get("mask") is not None:
+            m = np.asarray(kf["mask"])
+            m = (m > 0.5) if m.dtype != bool else m
+            self._video_predictor.add_new_mask(inference_state=state, frame_idx=local_idx, obj_id=1, mask=m)
+            return
+        coords, labels = _stack_prompts(kf.get("positive") or [], kf.get("negative") or [])
+        kwargs = dict(inference_state=state, frame_idx=local_idx, obj_id=1)
+        if coords is not None:
+            kwargs["points"] = coords
+            kwargs["labels"] = labels
+        if kf.get("box") is not None:
+            kwargs["box"] = np.asarray(kf["box"], dtype=np.float32)
+        self._video_predictor.add_new_points_or_box(**kwargs)
+
+    def _track_windowed(self, kfs: List[dict], video_dir: Path, n_frames: int, masks_out: np.ndarray, *,
+                        soft: bool, window: int,
+                        progress_cb: Optional[Callable[[int, int], None]]) -> np.ndarray:
+        """Streaming propagation for long clips, memory bounded by ``window``.
+
+        The clip is walked forward from the earliest keyframe, then backward
+        from it, ``window`` frames at a time. Each window is a small SAM 2
+        video made of (a) up to :data:`MAX_ANCHORS` user keyframes lying
+        outside the window, with their prompts — SAM 2 attends to
+        conditioning frames regardless of their distance, so a correction
+        still steers the whole clip —, (b) the last frame of the previous
+        window with its mask as a mask prompt (the hand-over), (c) the
+        window's own frames. Only (c) is emitted."""
+        import os
+        import shutil
+        import tempfile
+
+        import torch
+
+        by_idx: dict[int, dict] = {}
+        for kf in kfs:
+            idx = max(0, min(n_frames - 1, int(kf["frame_idx"])))
+            if idx in by_idx and by_idx[idx].get("mask") is not None:
+                continue  # a brush correction wins over clicks on the same frame
+            by_idx[idx] = kf
+        first = min(by_idx)
+        orders = [list(range(first, n_frames))]
+        if first > 0:
+            orders.append(list(range(first, -1, -1)))
+        done = 0
+
+        def jpg(i: int) -> Path:
+            return video_dir / f"{i:05d}.jpg"
+
+        for order in orders:
+            carry: Optional[Tuple[int, np.ndarray]] = None
+            for start in range(0, len(order), window):
+                chunk = order[start:start + window]
+                in_chunk = set(chunk)
+                anchors = sorted((k for k in by_idx if k not in in_chunk),
+                                 key=lambda k: abs(k - chunk[0]))[:MAX_ANCHORS]
+                seq = list(anchors) + ([carry[0]] if carry is not None else []) + chunk
+                tmp = Path(tempfile.mkdtemp(prefix="amv_sam2w_"))
+                try:
+                    for j, i in enumerate(seq):
+                        dst = tmp / f"{j:05d}.jpg"
+                        try:
+                            os.link(jpg(i), dst)
+                        except OSError:
+                            shutil.copyfile(jpg(i), dst)
+                    with torch.inference_mode(), _autocast(self.device):
+                        state = self._video_predictor.init_state(video_path=str(tmp), offload_video_to_cpu=True)
+                        for j, k in enumerate(anchors):
+                            self._add_prompt(state, j, by_idx[k])
+                        off = len(anchors)
+                        if carry is not None:
+                            if carry[1].any():
+                                self._add_prompt(state, off, {"mask": carry[1]})
+                            off += 1
+                        for j, i in enumerate(chunk):
+                            if i in by_idx:
+                                self._add_prompt(state, off + j, by_idx[i])
+                        if not anchors and carry is None and chunk[0] not in by_idx:
+                            raise RuntimeError("SAM 2 window without any prompt")
+                        has_prompt = bool(anchors) or (carry is not None and carry[1].any()) or any(
+                            i in by_idx for i in chunk)
+                        last_logits = None
+                        if has_prompt:
+                            for local, _ids, logits in self._video_predictor.propagate_in_video(state, start_frame_idx=0):
+                                if local < off:
+                                    continue
+                                i = chunk[local - off]
+                                lg = logits[0, 0].float()
+                                if soft:
+                                    masks_out[i] = torch.sigmoid(lg * SOFT_LOGIT_SCALE).cpu().numpy()
+                                else:
+                                    masks_out[i] = (lg > 0.0).cpu().numpy()
+                                if i == chunk[-1]:
+                                    last_logits = (lg > 0.0).cpu().numpy()
+                        self._video_predictor.reset_state(state)
+                        del state
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                carry = (chunk[-1], last_logits if last_logits is not None else np.zeros(masks_out.shape[1:], bool))
+                done += len(chunk) - (1 if (order is not orders[0] and start == 0) else 0)
+                if progress_cb is not None:
+                    try:
+                        progress_cb(min(done, n_frames), n_frames)
+                    except Exception:
+                        pass
         return masks_out
 
 
