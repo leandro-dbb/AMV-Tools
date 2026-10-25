@@ -44,6 +44,8 @@ VARIANTS: dict[str, str] = {
     # Higher-resolution variant — handles 2K+ inputs more cleanly at the cost
     # of ~2× VRAM. Worth it if the user's library is 4K or has fine hair/fur.
     "hr":       "ZhengPeng7/BiRefNet_HR",
+    # HR, trained for soft alpha (matting) rather than a silhouette.
+    "hr_matting": "ZhengPeng7/BiRefNet_HR-matting",
     # Portrait-tuned — better hair/face edges, mediocre on full-body.
     "portrait": "ZhengPeng7/BiRefNet-portrait",
     # NOT a BiRefNet checkpoint: SkyTNT's ISNet trained specifically on anime
@@ -67,6 +69,7 @@ DEFAULT_VARIANT = "general"
 REVISIONS: dict[str, str] = {
     "general":  "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
     "hr":       "a7a562f6fd16021180f2f4348f4de003a2d3d1e1",
+    "hr_matting": "5d6b6f8adcb5b417c871b1d84ceaae9871355b7f",
     "portrait": "b6561965a70070d9143fd9e558f6ca3c481510db",
     # weights-only repo; its code is the pinned "general" revision
     "toonout":  TOONOUT_REVISION,
@@ -83,6 +86,8 @@ def revision_for_repo(repo_id: str) -> Optional[str]:
 # but the official recipes (and the HF model card examples) use 1024×1024 —
 # bigger costs quadratic VRAM and adds little quality on typical anime frames.
 INPUT_SIZE = 1024
+# The HR checkpoints are trained at 2048² (finer hair, ~4x the compute).
+INPUT_SIZES: dict[str, int] = {"hr": 2048, "hr_matting": 2048}
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD  = (0.229, 0.224, 0.225)
 
@@ -104,6 +109,7 @@ class BiRefNetModel:
             variant = DEFAULT_VARIANT
         self.variant = variant
         self.repo_id = VARIANTS[variant]
+        self.input_size = INPUT_SIZES.get(variant, INPUT_SIZE)
         self.idle_offload_seconds = idle_offload_seconds
         self.hf_token = hf_token
         self._model = None
@@ -146,7 +152,7 @@ class BiRefNetModel:
             self._model = model
             self._model_dtype = next(model.parameters()).dtype
             self._transform = transforms.Compose([
-                transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
+                transforms.Resize((self.input_size, self.input_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(_IMAGENET_MEAN, _IMAGENET_STD),
             ])
@@ -268,7 +274,7 @@ class BiRefNetModel:
                 # 1024² was most of the per-frame time on an RTX 3090.
                 x = torch.from_numpy(np.asarray(rgb)).to(self.device.torch_device)
                 x = x.permute(2, 0, 1)[None].float() / 255.0
-                x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode="bilinear",
+                x = F.interpolate(x, size=(self.input_size, self.input_size), mode="bilinear",
                                   align_corners=False, antialias=True)
                 mean = torch.tensor(_IMAGENET_MEAN, device=x.device).view(1, 3, 1, 1)
                 std = torch.tensor(_IMAGENET_STD, device=x.device).view(1, 3, 1, 1)
