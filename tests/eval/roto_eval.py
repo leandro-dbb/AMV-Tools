@@ -26,6 +26,20 @@ Metrics (per key frame, then averaged per shot and per category):
     flicker  flow-compensated temporal change of the alpha, relative to the
              matte area (%) — computed on every frame, no reference needed
     fail     key frames with J < 0.5 (character lost / swapped)
+    bg_band  background kept in the mask along the outline (hair gaps, halo):
+             mean alpha of the reference-background pixels 2 to BAND_PX px
+             from the reference contour (%), on the *exported* alpha (the
+             first 2 px are not scored: the reference is only that precise)
+    bg_in    background kept inside the character's envelope (between the arms,
+             under the chin, big hair holes): mean alpha of the reference-
+             background pixels enclosed by the closed silhouette, farther than
+             BAND_PX from the contour (%)
+    eaten    character eaten along the outline: mean (1 - alpha) of the
+             reference-character pixels 2 to BAND_PX px inside the contour (%)
+    contam   colour contamination of the export: share of background colour
+             left in the semi-transparent edge pixels of the exported RGB
+             (projection on the local background-foreground colour axis,
+             alpha-weighted, %)
     ms/frame wall time per frame after warm-up, peak VRAM (nvidia-smi), peak RSS
 """
 from __future__ import annotations
@@ -427,6 +441,111 @@ def method_runner(name: str, args, dev):
             return res
         run.detector = det_name
         return run
+    if name in ("bhr", "bhrm"):
+        # BiRefNet HR (2048 px input) / HR-matting (soft alpha training)
+        m = BiRefNetModel(dev, variant="hr" if name == "bhr" else "hr_matting", idle_offload_seconds=0)
+        return lambda paths, gt0, k0: run_auto(m, paths)
+    if name.startswith("sam3i-"):
+        # SAM 3 image model, one concept prompt per frame: union of the
+        # detected instances (score >= 0.4), soft mask probabilities
+        prompt = name.split("-", 1)[1].replace("+", " ")
+        from backend.models.sam3_concept import Sam3Concept
+        m = Sam3Concept(dev)
+        return lambda paths, gt0, k0: np.stack([m.segment(read_rgb(p), prompt) for p in paths])
+    if name.startswith("sam3v-"):
+        # SAM 3 video: concept detection + its own tracker over the shot
+        prompt = name.split("-", 1)[1].replace("+", " ")
+        from backend.models.sam3_concept import Sam3Concept
+        m = Sam3Concept(dev)
+        return lambda paths, gt0, k0: m.segment_video([read_rgb(p) for p in paths], prompt)
+    if name.startswith("pdet"):
+        # deepghs anime person detector (YOLO, MIT): filled boxes as a matte
+        from backend.models.anime_person import AnimePersonDetector
+        m = AnimePersonDetector()
+
+        def run(paths, gt0, k0):
+            out = []
+            for p in paths:
+                rgb = read_rgb(p)
+                a = np.zeros(rgb.shape[:2], np.float32)
+                for (x0, y0, x1, y1, _sc) in m.detect(rgb):
+                    a[int(y0):int(y1), int(x0):int(x1)] = 1.0
+                out.append(a)
+            return np.stack(out)
+        return run
+    if name == "pdsam":
+        # deepghs person boxes -> SAM 2.1 large segments inside each box
+        from backend.models.anime_person import AnimePersonDetector
+        det = AnimePersonDetector()
+        sam = SAM2Model(dev, variant="large", idle_offload_seconds=0)
+
+        def run(paths, gt0, k0):
+            out = []
+            for p in paths:
+                img = Image.open(p).convert("RGB")
+                rgb = np.asarray(img)
+                a = np.zeros(rgb.shape[:2], bool)
+                for (x0, y0, x1, y1, _sc) in det.detect(rgb):
+                    a |= sam.preview_mask(img, [], None, box=(x0, y0, x1, y1))
+                out.append(a.astype(np.float32))
+            return np.stack(out)
+        return run
+    if name.startswith("tgate"):
+        # tgate<k>[c<cov>]-<base>-<selector> (or ~-separated when the base
+        # name has dashes): tight gate (k thousandths of the diagonal) where
+        # the selector covers the base matte, wide gate else
+        head, base, sel = name.split("~", 2) if "~" in name else name.split("-", 2)
+        k, _, cov = head[5:].partition("c")
+        from backend.models.auto_roto import gate_alpha
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            out = []
+            for i in range(len(paths)):
+                b = read_alpha(root / "runs" / base / sid / f"{i:05d}.png")
+                g = read_alpha(root / "runs" / sel / sid / f"{i:05d}.png")
+                out.append(gate_alpha(b, g, keep_if_empty=True, tight_frac=int(k) / 1000.0,
+                                      cover_min=int(cov) / 100.0 if cov else 0.85))
+            return np.stack(out)
+        run.detector = [base, sel]
+        return run
+    if name.startswith("gate-") or name.startswith("gatef-"):
+        # gate-<base>-<selector>: the base matte (edges) kept only where the
+        # selector (a detector that knows what a character is) sees one,
+        # softly dilated; reads both runs back
+        _, base, sel = name.split("-", 2)
+        from backend.models.auto_roto import gate_alpha
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            out = []
+            for i in range(len(paths)):
+                b = read_alpha(root / "runs" / base / sid / f"{i:05d}.png")
+                g = read_alpha(root / "runs" / sel / sid / f"{i:05d}.png")
+                out.append(gate_alpha(b, g, box=sel.startswith("pdet"), keep_if_empty=name.startswith("gatef-")))
+            return np.stack(out)
+        run.detector = [base, sel]
+        return run
+    if name.startswith("vm-") or name.startswith("cs-"):
+        # vm-<base>: ViTMatte on a trimap around the base matte's outline;
+        # cs-<base>: local colour solve of the outline band
+        kind, base = name.split("-", 1)
+        from backend.models import edge_refine as er
+        root = Path(args.root)
+        ref = er.EdgeRefiner(dev) if kind == "vm" else None
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            out = []
+            for i, p in enumerate(paths):
+                a = read_alpha(root / "runs" / base / sid / f"{i:05d}.png")
+                rgb = read_rgb(p)
+                out.append(ref.refine(rgb, a) if ref else er.colour_solve(rgb, a))
+            return np.stack(out)
+        run.detector = [base]
+        return run
     raise SystemExit(f"unknown method {name}")
 
 
@@ -455,7 +574,7 @@ def cmd_run(args) -> None:
                 wd.mkdir(parents=True)
                 for p in paths[:3]:
                     shutil.copy(p, wd / p.name)
-                if getattr(fn, "detector", None):
+                if getattr(fn, "detector", None) and isinstance(fn.detector, str):
                     for i in range(3):
                         shutil.copy(root / "runs" / fn.detector / sid / f"{i:05d}.png",
                                     wd / f"det{i:05d}.png")
@@ -477,8 +596,9 @@ def cmd_run(args) -> None:
                 save_alpha(out / f"{i:05d}.png", a)
             ms = 1000 * dt / len(paths)
             det_name = getattr(fn, "detector", None)
-            if det_name:  # the detector pass this method reads back is part of its cost
-                ms += json.loads((root / "runs" / det_name / sid / "stats.json").read_text())["ms_per_frame"]
+            for d_ in ([det_name] if isinstance(det_name, str) else (det_name or [])):
+                # the detector passes this method reads back are part of its cost
+                ms += json.loads((root / "runs" / d_ / sid / "stats.json").read_text())["ms_per_frame"]
             stats = {"ms_per_frame": ms, "n": len(paths),
                      "vram_mb": vram.peak_mb,
                      "rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024}
@@ -572,7 +692,102 @@ def flicker(alphas: list[np.ndarray], flows: dict) -> float:
     return 100.0 * num / den if den > 0 else 0.0
 
 
-def score_method(root: Path, method: str, shots: list[dict]) -> dict:
+BAND_PX = 8          # outline band (hair strands, halo) at the 1080 px working size
+REF_TOL_PX = 2       # the SAM 2.1 reference outline is only right to ~2 px: not scored
+ENVELOPE_PX = 41     # closing that turns the silhouette into its envelope
+
+
+def bg_zones(gt: np.ndarray):
+    """(band_out, band_in, pockets, d_out, d_in) of a binary reference."""
+    import cv2
+    g = gt.astype(np.uint8)
+    d_out = cv2.distanceTransform(1 - g, cv2.DIST_L2, 3)
+    d_in = cv2.distanceTransform(g, cv2.DIST_L2, 3)
+    band_out = (g == 0) & (d_out > REF_TOL_PX) & (d_out <= BAND_PX)
+    band_in = (g == 1) & (d_in > REF_TOL_PX) & (d_in <= BAND_PX)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ENVELOPE_PX, ENVELOPE_PX))
+    env = fill_holes(cv2.morphologyEx(g, cv2.MORPH_CLOSE, k) > 0)
+    pockets = env & (g == 0) & (d_out > BAND_PX)
+    return band_out, band_in, pockets, d_out, d_in
+
+
+def bg_metrics(a: np.ndarray, gt: np.ndarray) -> dict:
+    band_out, band_in, pockets, _, _ = bg_zones(gt)
+    out = {"bg_band": float(a[band_out].mean() * 100) if band_out.sum() >= 50 else float("nan"),
+           "eaten": float((1 - a[band_in]).mean() * 100) if band_in.sum() >= 50 else float("nan"),
+           "bg_in": float(a[pockets].mean() * 100) if pockets.sum() >= 200 else float("nan")}
+    return out
+
+
+def contamination(rgb_out: np.ndarray, rgb_src: np.ndarray, a: np.ndarray, gt: np.ndarray) -> float:
+    """Background colour left in the semi-transparent edge pixels of an
+    export (%). For each such pixel, F = source colour of the nearest
+    reference-character pixel 3 px or more inside the outline (the ink line
+    when there is one), B = mean source colour of the reference background
+    around it, away from the outline; the exported colour C scores
+    c = (C - F).(B - F) / |B - F|^2 in [0, 1] — 0: character colour,
+    1: background colour — weighted by its alpha. Only pixels whose F and B
+    differ (|B - F| >= 40/255) count: elsewhere spill is invisible."""
+    import cv2
+    g = gt > 0.5
+    _, _, _, d_out, d_in = bg_zones(g)
+    src = rgb_src.astype(np.float32) / 255.0
+    col = rgb_out.astype(np.float32) / 255.0
+    core = g & (d_in >= 3)
+    if not core.any():
+        return float("nan")
+    _, lab = cv2.distanceTransformWithLabels((~core).astype(np.uint8), cv2.DIST_L2, 3,
+                                             labelType=cv2.DIST_LABEL_PIXEL)
+    cy, cx = np.nonzero(core)
+    idx = np.clip(lab.astype(np.int64) - 1, 0, len(cy) - 1)
+    F = src[cy[idx], cx[idx]]
+    bgm = (~g & (d_out > 8)).astype(np.float32)
+    wb = cv2.blur(bgm, (21, 21))
+    B = cv2.blur(src * bgm[..., None], (21, 21)) / (wb[..., None] + 1e-6)
+    near = (d_out <= 8) | (d_in <= 8)
+    fb = B - F
+    den = (fb * fb).sum(axis=2)
+    ok = near & (a > 0.05) & (a < 0.95) & (wb > 0.02) & (den >= (40 / 255) ** 2)
+    if ok.sum() < 30:
+        return float("nan")
+    c = np.clip(((col - F) * fb).sum(axis=2) / np.maximum(den, 1e-6), 0, 1)
+    return float((a[ok] * c[ok]).sum() / a[ok].sum() * 100)
+
+
+def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """What the alpha export does to (frame, alpha) at the working size.
+    ``none``: alpha as is, source colours; ``v05``: the 0.5 export (guided
+    filter on the alpha + colour-only background-aware edge cleanup);
+    ``v06``: the 0.6 export (matte as is + foreground estimation of the
+    edge colours, backend/models/mask_postprocess.export_edges); ``fg:...``,
+    ``ce``, ``kb``: variants measured while choosing it."""
+    from backend.models import mask_postprocess as mp
+    if name == "none":
+        return rgb, a
+    if name == "v05":
+        a2 = mp.upsample_alpha_guided(a, rgb)
+        return mp.clean_edges_with_background(rgb, a2, resolve_alpha=False)
+    if name == "v06":
+        return mp.export_edges(rgb, a)
+    if name == "fg":  # foreground estimation only, alpha untouched
+        from backend.models.edge_refine import estimate_foreground
+        return estimate_foreground(rgb, a), a
+    if name.startswith("fg:"):  # fg:r1:r2[:u]
+        from backend.models.edge_refine import estimate_foreground
+        ps = name[3:].split(":")
+        nb = [float(x[1:]) for x in ps[2:] if x.startswith("n")]
+        return estimate_foreground(rgb, a, int(ps[0]), int(ps[1]), unmix="u" in ps,
+                                   nearest_below=nb[0] if nb else 0.0), a
+    if name == "ce":  # 0.5 colour cleanup without the guided filter
+        return mp.clean_edges_with_background(rgb, a, resolve_alpha=False)
+    if name == "kb":  # background kill + foreground estimation
+        from backend.models.edge_refine import estimate_foreground, kill_background
+        a2 = kill_background(rgb, a)
+        return estimate_foreground(rgb, a2), a2
+    raise SystemExit(f"unknown export {name}")
+
+
+def score_method(root: Path, method: str, shots: list[dict], export: str = "v05") -> dict:
     res = {}
     for shot in shots:
         sid = shot["id"]
@@ -581,9 +796,15 @@ def score_method(root: Path, method: str, shots: list[dict]) -> dict:
             continue  # excluded: reference found wrong during the visual review
         paths = frame_paths(root, sid)
         js, fs, es, fails = [], [], [], 0
+        bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": []}
         for idx in scored_frames(root, sid, len(paths)):
             gt = read_alpha(root / "gt" / sid / f"{idx:05d}.png") > 0.5
             a = read_alpha(rd / f"{idx:05d}.png")
+            rgb = read_rgb(paths[idx])
+            rgb_e, a_e = export_post(export, rgb, a)
+            for k_, v_ in bg_metrics(a_e, gt).items():
+                bgs[k_].append(v_)
+            bgs["contam"].append(contamination(rgb_e, rgb, a_e, gt))
             p = a > 0.5
             union = (p | gt).sum()
             j = float((p & gt).sum() / union) if union else 1.0
@@ -599,6 +820,8 @@ def score_method(root: Path, method: str, shots: list[dict]) -> dict:
         res[sid] = {"J": float(np.mean(js)), "F": float(np.mean(fs)),
                     "edge": float(np.mean(es)) if es else float("nan"),
                     "flicker": flicker(alphas, shot_flows(root, sid, sub)), "fail": fails, "n_scored": len(js),
+                    **{k_: float(np.nanmean(v_)) if np.isfinite(v_).any() else float("nan")
+                       for k_, v_ in ((k, np.array(v, float)) for k, v in bgs.items())},
                     **st}
     return res
 
@@ -607,11 +830,14 @@ def cmd_score(args) -> None:
     root = Path(args.root)
     shots = load_shots(root)
     methods = args.methods or sorted(p.name for p in (root / "runs").iterdir() if p.is_dir())
-    prev = json.loads((root / "scores.json").read_text()) if (root / "scores.json").exists() else {}
+    out = Path(args.scores) if args.scores else root / "scores.json"
+    prev = json.loads(out.read_text()) if out.exists() else {}
     for m in methods:
-        prev[m] = score_method(root, m, shots)
+        # "<method>@<export>": the same run scored after another export path
+        name, _, export = m.partition("@")
+        prev[m] = score_method(root, name, shots, export or args.export)
         print("scored", m, flush=True)
-    (root / "scores.json").write_text(json.dumps(prev, indent=1))
+    out.write_text(json.dumps(prev, indent=1))
     print(table(prev, shots))
 
 
@@ -620,19 +846,21 @@ def table(scores: dict, shots: list[dict]) -> str:
     for s in shots:
         if s["cat"] not in cats:
             cats.append(s["cat"])
-    lines = ["| méthode | catégorie | J | F | J&F | bord | scint. % | échecs | ms/img | VRAM Mo |",
-             "|---|---|---|---|---|---|---|---|---|---|"]
+    lines = ["| méthode | catégorie | J | F | J&F | bord | scint. % | échecs | fond contour % | fond intérieur % "
+             "| mangé % | contam. % | ms/img | VRAM Mo |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for m, per in scores.items():
         for cat in cats + ["TOUT"]:
             ids = [s["id"] for s in shots if (cat == "TOUT" or s["cat"] == cat) and s["id"] in per]
             if not ids:
                 continue
-            g = lambda k: float(np.nanmean([per[i][k] for i in ids]))  # noqa: E731
+            g = lambda k: float(np.nanmean([per[i].get(k, np.nan) for i in ids]))  # noqa: E731
             fails = sum(per[i]["fail"] for i in ids)
             nsc = sum(per[i]["n_scored"] for i in ids)
             vram = max(per[i]["vram_mb"] for i in ids)
             lines.append(f"| {m} | {cat} | {g('J'):.3f} | {g('F'):.3f} | {(g('J') + g('F')) / 2:.3f} | "
-                         f"{g('edge'):.1f} | {g('flicker'):.1f} | {fails}/{nsc} | {g('ms_per_frame'):.0f} | {vram} |")
+                         f"{g('edge'):.1f} | {g('flicker'):.1f} | {fails}/{nsc} | {g('bg_band'):.1f} | {g('bg_in'):.1f} | "
+                         f"{g('eaten'):.1f} | {g('contam'):.1f} | {g('ms_per_frame'):.0f} | {vram} |")
     return "\n".join(lines)
 
 
@@ -683,10 +911,81 @@ def cmd_boards(args) -> None:
         print("board", sid, flush=True)
 
 
+def hair_window(gt: np.ndarray, size: tuple[int, int] = (240, 150)) -> tuple[int, int, int, int]:
+    """Crop (x0, y0, x1, y1) where the reference outline is the most
+    convoluted — hair spikes, strands, fingers — favouring the upper half."""
+    import cv2
+    h, w = gt.shape
+    cw, ch = min(size[0], w), min(size[1], h)
+    b = _boundary(gt > 0.5).astype(np.float32)
+    if not b.any():
+        return 0, 0, cw, ch
+    dens = cv2.boxFilter(b, -1, (cw, ch), normalize=False)
+    dens *= np.linspace(1.3, 0.7, h, dtype=np.float32)[:, None]
+    y, x = np.unravel_index(int(np.argmax(dens)), dens.shape)
+    x0 = int(np.clip(x - cw // 2, 0, w - cw))
+    y0 = int(np.clip(y - ch // 2, 0, h - ch))
+    return x0, y0, x0 + cw, y0 + ch
+
+
+def cmd_zoom(args) -> None:
+    """Hair close-ups: per shot, 3 scored key frames cropped where the outline
+    is the most detailed, zoomed x3 (nearest), exported matte composited on
+    magenta (any source-background colour left in the matte stands out).
+    Rows: frame, reference, then each ``method[@export]``."""
+    import cv2
+    root = Path(args.root)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    only = set(args.only or [])
+    for shot in load_shots(root):
+        sid = shot["id"]
+        if (only and sid not in only) or shot.get("excluded"):
+            continue
+        paths = frame_paths(root, sid)
+        idxs = scored_frames(root, sid, len(paths))
+        if not idxs:
+            continue
+        idxs = [idxs[0], idxs[len(idxs) // 2], idxs[-1]]
+        rows = []
+        for m in ["frame", "ref"] + list(args.methods or []):
+            cells = []
+            for idx in idxs:
+                gt = read_alpha(root / "gt" / sid / f"{idx:05d}.png")
+                x0, y0, x1, y1 = hair_window(gt)
+                rgb = read_rgb(paths[idx])
+                if m == "frame":
+                    cell = rgb
+                else:
+                    name, _, export = m.partition("@")
+                    if m == "ref":
+                        a, col = gt, rgb
+                    else:
+                        ap = root / "runs" / name / sid / f"{idx:05d}.png"
+                        a = read_alpha(ap) if ap.exists() else np.zeros(gt.shape, np.float32)
+                        col, a = export_post(export or "v05", rgb, a)
+                    mag = np.zeros_like(rgb, dtype=np.float32)
+                    mag[...] = (255, 0, 255)
+                    cell = composite(col.astype(np.float32), a, mag)
+                    if m == "ref":  # reference outline in cyan
+                        e = _boundary(gt > 0.5)
+                        cell = cell.copy()
+                        cell[e] = (0, 255, 255)
+                crop = cv2.resize(np.ascontiguousarray(cell[y0:y1, x0:x1]), None, fx=3, fy=3,
+                                  interpolation=cv2.INTER_NEAREST)
+                cv2.putText(crop, f"{m} #{idx}", (6, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 3)
+                cv2.putText(crop, f"{m} #{idx}", (6, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+                cells.append(crop)
+            rows.append(np.concatenate(cells, axis=1))
+        board = np.concatenate(rows, axis=0)
+        Image.fromarray(board).save(out_dir / f"{sid}.jpg", quality=90)
+        print("zoom", sid, flush=True)
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("extract", "propose", "run", "score", "boards"):
+    for name in ("extract", "propose", "run", "score", "boards", "zoom"):
         p = sub.add_parser(name)
         p.add_argument("--root", required=True)
         p.add_argument("--only", nargs="*")
@@ -698,14 +997,18 @@ def main(argv=None) -> None:
         if name == "run":
             p.add_argument("--method", required=True)
             p.add_argument("--redo", action="store_true", help="recompute shots already done")
-        if name in ("score", "boards"):
+        if name in ("score", "boards", "zoom"):
             p.add_argument("--methods", nargs="*")
-        if name == "boards":
+        if name == "score":
+            p.add_argument("--export", default="v05", help="none | v05 | v06 (default for methods without @)")
+            p.add_argument("--scores", help="scores file (default <root>/scores.json); one per process "
+                                            "to score methods in parallel")
+        if name in ("boards", "zoom"):
             p.add_argument("--out", required=True)
             p.add_argument("--width", type=int, default=2400)
     args = ap.parse_args(argv)
     {"extract": cmd_extract, "propose": cmd_propose, "run": cmd_run,
-     "score": cmd_score, "boards": cmd_boards}[args.cmd](args)
+     "score": cmd_score, "boards": cmd_boards, "zoom": cmd_zoom}[args.cmd](args)
 
 
 if __name__ == "__main__":
