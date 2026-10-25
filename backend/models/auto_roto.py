@@ -44,6 +44,7 @@ GATE_FRAC = 0.025            # dilation of the track gate, share of the frame di
 CORE_FRAC = 0.012            # erosion of the track core, share of the frame diagonal
 CORE_MISS = 0.7              # adaptive core: fill from the track only when the detector
                              # sees less than this share of the tracked area (motion blur)
+CORE_MIN_SEEN = 0.15         # below this share of the track seen by the detector: hidden
 TRACK_SPILL = 1.4            # track area above this x the usual target area = spill
 CORE_MODE = "adaptive"       # "always": fill from the track core on every frame
 
@@ -234,7 +235,10 @@ def fuse(detector: np.ndarray, track: np.ndarray, ref_area: float = 0.0) -> np.n
     # detector components touching the track only: another character inside
     # the gate must not leak in
     det = detector.astype(np.float32) * match_targets(detector, t > 0)
-    if ref_area > 0 and t.sum() > TRACK_SPILL * ref_area:
+    seen = float((det > 0.5).sum())
+    if (ref_area > 0 and t.sum() > TRACK_SPILL * ref_area) or seen < CORE_MIN_SEEN * t.sum():
+        # spill, or the detector sees (almost) nothing of the character on
+        # this frame — hidden by smoke, not blurred: the detector decides
         return np.clip(det * gate, 0, 1).astype(np.float32)
     if CORE_MODE == "adaptive" and (det > 0.5).sum() >= CORE_MISS * t.sum():
         # the detector saw the character on this frame: trust its outline,
