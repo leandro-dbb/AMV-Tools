@@ -163,9 +163,9 @@ to `<export folder>/finish/`:
 
 | Pass | Model | What you get |
 |---|---|---|
-| **Upscale** x2 / x4 | Real-ESRGAN AnimeVideo v3 (fast, steady) or x4plus anime 6B (sharper) | Upscaled clip with the source audio, using your export codec. Tiled inference keeps VRAM bounded. |
+| **Upscale** x2 / x4 | AnimeJaNai HD V3 UltraCompact (per model tier, non-commercial), Real-ESRGAN AnimeVideo v3 (fast, steady) or x4plus anime 6B (sharper) | Upscaled clip with the source audio, using your export codec. Tiled inference keeps VRAM bounded. |
 | **Slow-mo / 60 fps** | RIFE 4.26 (or 4.26 heavy, per model tier) | x2/x4/x8 slow motion (audio muted or time-stretched) or 48/50/60 fps at the same duration (audio kept). *Don't interpolate across cuts* duplicates frames at hard cuts instead of morphing two shots. |
-| **Depth map** | Video Depth Anything Small (Depth Anything V2 Small on 8 GB Macs and the Mac *Fast* tier) | Grayscale depth (white = near), frame-synchronous with the clip, as a 16-bit PNG sequence, ProRes 422 HQ (10-bit) or H.264. Optional temporal smoothing. Made for parallax / 3D layers in After Effects. |
+| **Depth map** | Video Depth Anything Small (Large in *Max quality* on NVIDIA; Depth Anything V2 Small on 8 GB Macs and the Mac *Fast* tier) | Grayscale depth (white = near), frame-synchronous with the clip, as a 16-bit PNG sequence, ProRes 422 HQ (10-bit) or H.264. Optional temporal smoothing. Made for parallax / 3D layers in After Effects. |
 | **Cutout** | Mask Mode's Auto engine | ProRes 4444 / VP9 alpha in one click (requires Mask Mode). |
 
 Every pass is a background job: queue as many as you like, follow progress and
@@ -183,9 +183,19 @@ checksum-verified, and can be deleted at any time.
 | Real-ESRGAN `realesr-animevideov3` | 2.5 MB | BSD-3-Clause |
 | Real-ESRGAN `RealESRGAN_x4plus_anime_6B` | 18 MB | BSD-3-Clause |
 | `2xHFA2kAVCCompact` by Philip Hofmann ([Phhofm/models](https://github.com/Phhofm/models)) | 4.8 MB | CC-BY-4.0 (attribution: Philip Hofmann) |
+| `2x_AnimeJaNai_HD_V3_UltraCompact` by the-database ([mpv-upscale-2x_animejanai](https://github.com/the-database/mpv-upscale-2x_animejanai), official `ModelsOnly` archive, only this file is kept) | 24.7 MB download, 2.5 MB on disk | **CC-BY-NC-SA-4.0 — non-commercial use only** (attribution: the-database) |
 | RIFE 4.25 / 4.25 lite / 4.26 / 4.26 heavy (Practical-RIFE, mirrored by vs-rife) | 25 MB each | MIT |
 | Depth Anything V2 **Small** | 99 MB | Apache-2.0 (Base/Large are CC-BY-NC and deliberately not offered) |
-| Video Depth Anything **Small** (temporally stable, code vendored in `backend/finish/archs/vda`) | 116 MB | Apache-2.0 (Base/Large are CC-BY-NC and deliberately not offered) |
+| Video Depth Anything **Small** (temporally stable, code vendored in `backend/finish/archs/vda`) | 116 MB | Apache-2.0 |
+| Video Depth Anything **Large** (same code, *Max quality* tier on NVIDIA) | 1.5 GB | **CC-BY-NC-4.0 — non-commercial use only** |
+
+**Non-commercial models.** AMV Tools is a free, non-commercial tool, so it
+also offers models whose license forbids commercial use (marked *non-commercial
+use* in `Settings > Models`). Their weights are never committed or bundled:
+they are downloaded on demand from the official source. If you use AMV Tools
+or its output commercially, pick a tier or model with a permissive license
+(`Custom` + the finishing menu let you choose 2xHFA2kAVCCompact or Video Depth
+Anything Small instead).
 
 Which of them a job uses by default follows the **model tier** (below).
 
@@ -208,17 +218,18 @@ the VRAM (NVIDIA) or the unified memory (Mac); you can force a tier, *Fast*,
 *Max quality* or *Custom* (your own per-model choices). The choices come from
 measurements on three real episodes (hand-judged search and tag sets, x2
 upscale and frame-interpolation references, depth flicker) on an RTX 3090
-and an M1 Pro — see [docs/reports/chantier-4-modeles.md](docs/reports/chantier-4-modeles.md).
+and an M1 Pro — see [docs/reports/chantier-4-modeles.md](docs/reports/chantier-4-modeles.md)
+and, for the non-commercial models, [docs/reports/chantier-4b-modeles-non-commerciaux.md](docs/reports/chantier-4b-modeles-non-commerciaux.md).
 
 | Tier | Search | Tagger | Upscale | Interpolation | Depth |
 |---|---|---|---|---|---|
-| Fast | SigLIP 2 base | wd-vit v3 | animevideov3 | RIFE 4.26 | Video Depth Anything Small, 364 px (Mac: DA V2 Small, 364 px) |
-| NVIDIA 8 / 12 GB | SigLIP 2 so400m | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| NVIDIA 16 / 24 GB | SigLIP 2 so400m | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 518 px |
-| Mac 8 GB | SigLIP 2 base | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | DA V2 Small (Core ML) |
-| Mac 16 GB | SigLIP 2 base | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| Mac 24 / 32 GB+ | SigLIP 2 so400m | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| Max quality | SigLIP 2 so400m, 256 patches | wd-eva02-large v3 (Mac: wd-vit v3) | 2xHFA2kAVCCompact | RIFE 4.26 heavy | Video Depth Anything Small (Mac: 364 px) |
+| Fast | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px (Mac: DA V2 Small, 364 px) |
+| NVIDIA 8 / 12 GB | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
+| NVIDIA 16 / 24 GB | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 518 px |
+| Mac 8 GB | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | DA V2 Small (Core ML) |
+| Mac 16 GB | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
+| Mac 24 / 32 GB+ | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
+| Max quality | SigLIP 2 so400m, 256 patches | wd-eva02-large v3 (Mac: wd-vit v3) | AnimeJaNai V3 UltraCompact | RIFE 4.26 heavy | Video Depth Anything Large, 364 px (Mac: Small, 364 px) |
 | CPU / DirectML / XPU | unchanged defaults | | | | |
 
 Changing the search model asks for an **embeddings-only re-index** (cuts,
@@ -226,7 +237,8 @@ tags and keeps are kept, progress shown, cancellable); until it is done the
 library keeps searching with the model it was indexed with, and every
 library remembers its own model. Models download on demand (10 MB/s,
 checksum-verified) and only after their license has been checked against an
-allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0).
+allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0, and the non-commercial
+CC-BY-NC-4.0 / CC-BY-NC-SA-4.0, flagged in Settings).
 
 | Model | Size | License |
 |---|---|---|
