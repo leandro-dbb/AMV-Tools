@@ -4,10 +4,13 @@ import {
   Library, Pause, Pencil, Play, Rewind, FastForward, SkipBack, SkipForward,
   Star, Trash2, Volume2, VolumeX, X, Loader2, MonitorPlay, ZoomIn, ZoomOut,
 } from 'lucide-react';
-import { api, getBaseUrl } from '../api/client';
-import type { DerushFolder, DerushItem, ProgressEvent, SceneResult, VideoSummary } from '../api/types';
+import { api, getBaseUrl, withToken } from '../api/client';
+import type { DerushFolder, DerushItem, ProgressEvent, SceneResult, TimelineSelection, VideoSummary } from '../api/types';
 import { DERUSH_DEFAULT_KEYS, displayKey } from '../derushKeys';
 import { useT } from '../i18n';
+import TimelineExportDialog from './TimelineExportDialog';
+import { SimilarButton } from './SceneBadges';
+import FinishMenu from './FinishMenu';
 
 /*
  * Derush mode — the AMV-maker dailies workflow.
@@ -186,7 +189,7 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
     setLoadingSrc(true);
     api.videoScenes(v.id, { topOnly: true }).then((r) => setScenes(r.scenes)).catch(() => {});
     api.videoPlayable(v.id)
-      .then((r) => setSrc(`${getBaseUrl()}${r.url}`))
+      .then((r) => setSrc(withToken(`${getBaseUrl()}${r.url}`)))
       .catch((e) => {
         // 410 = the source file is gone (moved/renamed on disk) — a totally
         // different problem than an undecodable codec; don't conflate them.
@@ -204,7 +207,7 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
       setTranscoding(false);
       if (lastEvent.ok && video) {
         setPlayError(null);
-        api.videoPlayable(video.id).then((r) => setSrc(`${getBaseUrl()}${r.url}`)).catch(() => {});
+        api.videoPlayable(video.id).then((r) => setSrc(withToken(`${getBaseUrl()}${r.url}`))).catch(() => {});
       }
     } else {
       setTranscoding(true);
@@ -732,6 +735,7 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
               {keptIds.has(currentScene.id) && <Star size={12} fill="currentColor" />}
               {favIds.has(currentScene.id) && `${t('derush.player.favBadge')} · `}
               {t('derush.player.sceneOf', { n: currentSceneIdx + 1, total: scenes.length })} · {fmt(currentScene.start_ms)}–{fmt(currentScene.end_ms)}
+              <SimilarButton sceneId={currentScene.id} className="ml-1 p-1 rounded-md bg-black/40 hover:bg-[#8B5CF6] text-current" />
             </div>
           )}
         </div>
@@ -928,6 +932,7 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
   const [folderRename, setFolderRename] = useState('');
   const [hoverId, setHoverId] = useState<number | null>(null);
   const [exportDone, setExportDone] = useState<ProgressEvent | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   const exporting = lastEvent?.type === 'derush_export' && !lastEvent.done;
   useEffect(() => {
@@ -961,6 +966,24 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
       setExportDone({ type: 'derush_export', done: true, ok: false, message: (e as Error).message });
     });
   };
+
+  const timelineSelection = useMemo<TimelineSelection>(() => {
+    if (filter === 'all') return { derush_scope: 'all' };
+    if (filter === 'root') return { derush_scope: 'root' };
+    if (filter === 'fav') return { derush_scope: 'favorites' };
+    return { derush_folder_id: filter };
+  }, [filter]);
+  const timelineFolder = typeof filter === 'number' ? folders.find((f) => f.id === filter) : null;
+  const timelineScopeLabel = filter === 'all'
+    ? t('timeline.scope.all')
+    : filter === 'fav'
+      ? t('timeline.scope.favorites')
+      : timelineFolder
+        ? `${t('timeline.scope.folder')} — ${timelineFolder.name}`
+        : t('timeline.scope.all');
+  const timelineDefaultName = filter === 'fav'
+    ? 'AMV favorites'
+    : `AMV ${timelineFolder?.name ?? 'timeline'}`;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -1021,6 +1044,21 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
         )}
 
         <div className="flex-1" />
+
+        <button
+          onClick={() => setTimelineOpen(true)}
+          disabled={filtered.length === 0}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-xl text-sm font-semibold bg-[#18181B] border-2 border-[#8B5CF6]/50 text-[#FAFAFA] hover:bg-[#8B5CF6]/15 disabled:opacity-40"
+        >
+          <Clapperboard size={15} className="text-[#8B5CF6]" />
+          {t('timeline.button')}
+        </button>
+        <FinishMenu
+          sources={filtered.map((it) => ({
+            scene_id: it.scene_id, start_ms: it.start_ms, end_ms: it.end_ms,
+            label: it.custom_name ?? `${it.video_display} #${it.scene_index}`,
+          }))}
+        />
 
         {exporting ? (
           <div className="flex items-center gap-2 text-xs text-[#A1A1AA]">
@@ -1138,6 +1176,7 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
                       onClick={() => api.derushDeleteItem(it.id).then(onChanged).catch(() => {})}
                       className="p-1 text-[#71717A] hover:text-red-400"
                     ><Trash2 size={12} /></button>
+                    <SimilarButton sceneId={it.scene_id} className="p-1 text-[#71717A] hover:text-[#8B5CF6]" />
                   </div>
                 </div>
               </div>
@@ -1145,6 +1184,15 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
           </div>
         )}
       </div>
+
+      {timelineOpen && (
+        <TimelineExportDialog
+          selection={timelineSelection}
+          defaultName={timelineDefaultName}
+          scopeLabel={timelineScopeLabel}
+          onClose={() => setTimelineOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -8,11 +8,13 @@ from typing import Optional
 import io
 
 import numpy as np
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from PIL import Image
 from pydantic import BaseModel
 
 from ..db import queries, schema
+from ..searchplus import characters as sp_chars
+from ..searchplus import filters as sp_filters
 from ..state import get_state
 
 router = APIRouter()
@@ -27,6 +29,7 @@ class SearchRequest(BaseModel):
     threshold: float = 0.25
     sort: str = "relevance"
     tag_boost: Optional[float] = None
+    filters: Optional[sp_filters.SearchFilters] = None
 
 
 @router.post("/api/search")
@@ -35,7 +38,15 @@ def search(req: SearchRequest):
     db_path = state.primary_db
     schema.init_db(db_path)
 
+    has_filters = req.filters is not None and not req.filters.is_empty()
     if not req.query and not req.image_path:
+        if has_filters:
+            # Filter-only browse: "every zoom-in of Gojo", no text needed.
+            with schema.get_conn(db_path) as conn:
+                if req.filters.characters:
+                    sp_chars.ensure_fresh(conn, state.get_search_index(), req.filters.characters)
+                results = sp_filters.browse(conn, req.filters, top_k=req.top_k, sort=req.sort)
+            return {"results": results, "total": len(results)}
         return {"results": [], "total": 0}
 
     # Cheap pre-check: don't bother loading 400 MB of model weights for an empty library.
@@ -94,7 +105,18 @@ def search(req: SearchRequest):
                         coverage = n_matched / n_target
                         boosts[pos] = coverage * boost
 
+    if req.query or has_filters:
+        with schema.get_conn(db_path) as conn:
+            if has_filters and req.filters.characters:
+                sp_chars.ensure_fresh(conn, index, req.filters.characters)
+            char_boost = sp_filters.character_query_boost(conn, req.query, sids) if req.query else None
+            if char_boost is not None:
+                boosts = boosts + char_boost
+            mask = sp_filters.filter_mask(conn, req.filters, sids) if has_filters else None
+
     scores = np.clip(sims + boosts, -1.0, 1.5)
+    if has_filters and mask is not None:
+        scores = np.where(mask, scores, -np.inf)
     candidate_idx = np.where(scores >= req.threshold)[0]
 
     if req.sort == "random":
@@ -129,8 +151,9 @@ def search(req: SearchRequest):
             "proxy_path": True if has_proxy.get(sid) else None,
         })
 
-    if req.query:
-        with schema.get_conn(db_path) as conn:
+    with schema.get_conn(db_path) as conn:
+        sp_filters.enrich(conn, results)
+        if req.query:
             queries.record_search(conn, req.query)
 
     if req.sort == "duration":
@@ -151,7 +174,12 @@ def history():
 @router.post("/api/search/image")
 async def search_image(image: UploadFile = File(...),
                        threshold: float = Form(default=0.25),
-                       top_k: int = Form(default=200)):
+                       top_k: int = Form(default=200),
+                       filters: Optional[str] = Form(default=None)):
+    try:
+        flt = sp_filters.parse_filters(filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"bad filters: {exc}")
     state = get_state()
     db_path = state.primary_db
     schema.init_db(db_path)
@@ -168,6 +196,12 @@ async def search_image(image: UploadFile = File(...),
     sids = index["sids"]
     embeddings = index["embeddings"]
     sims = embeddings @ query_vec.astype(np.float32)
+    if flt is not None and not flt.is_empty():
+        with schema.get_conn(db_path) as conn:
+            if flt.characters:
+                sp_chars.ensure_fresh(conn, index, flt.characters)
+            mask = sp_filters.filter_mask(conn, flt, sids)
+        sims = np.where(mask, sims, -np.inf)
     keep_idx = np.where(sims >= threshold)[0]
     keep_idx = keep_idx[np.argsort(-sims[keep_idx])][:top_k]
 
@@ -189,4 +223,6 @@ async def search_image(image: UploadFile = File(...),
             "score": float(sims[int(i)]), "tags": tags_for.get(sid, [])[:8],
             "proxy_path": True if has_proxy.get(sid) else None,
         })
+    with schema.get_conn(db_path) as conn:
+        sp_filters.enrich(conn, results)
     return {"results": results, "total": len(results)}

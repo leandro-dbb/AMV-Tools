@@ -1,28 +1,42 @@
 import type {
+  AnalysisStatus,
+  AutotuneStatus,
   AppSettings,
+  Character,
   DerushFolder,
   DerushItem,
   IndexQueueItem,
   ProgressEvent,
   SceneResult,
+  SearchFacets,
+  SearchFilters,
   SearchRequest,
   SegmentPreviewResponse,
   SegmentPromptBody,
   SegmentTrackBody,
   SystemStatus,
+  DiagnosticsReport,
+  ModelDownloadResult,
+  ModelTiersInfo, ReembedJob, ReembedStartResult,
   TagSummary,
+  TimelineExportResult,
+  TimelineFormat,
+  TimelinePreview,
+  TimelineSelection,
   VideoSummary,
 } from './types';
 
 declare global {
   interface Window {
     amvBridge?: {
+      apiToken?: string;
       getApiPort: () => Promise<number>;
       getBootstrapState?: () => Promise<{ phase: 'starting' | 'ready' | 'error'; port: number }>;
       cleanReinstall?: () => Promise<{ ok: boolean }>;
       openFileDialog: (opts: { directory?: boolean; multi?: boolean; filters?: { name: string; extensions: string[] }[] }) => Promise<string[]>;
       saveFileDialog: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       reveal: (p: string) => void;
+      openPath?: (p: string) => Promise<string>;
       platform: () => string;
       onBootstrap?: (cb: (e: { line: string; stream: 'stdout' | 'stderr' }) => void) => () => void;
       onBootstrapReady?: (cb: (port: number) => void) => () => void;
@@ -36,10 +50,28 @@ export function getBaseUrl(): string {
   return `http://127.0.0.1:${port}`;
 }
 
+/** Per-launch sidecar token (Electron preload); empty outside Electron. */
+export function getApiToken(): string {
+  return window.amvBridge?.apiToken ?? '';
+}
+
+/** Header carrying the sidecar token, to spread into every fetch to it. */
+export function authHeaders(): Record<string, string> {
+  const token = getApiToken();
+  return token ? { 'X-AMV-Token': token } : {};
+}
+
+/** Sidecar URL for what cannot send headers (<img>/<video> src, WebSocket). */
+export function withToken(url: string): string {
+  const token = getApiToken();
+  if (!token) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getBaseUrl()}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
     const text = await res.text();
@@ -51,6 +83,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   status: () => req<SystemStatus>('/api/status'),
+
+  diagnostics: () => req<DiagnosticsReport>('/api/diagnostics'),
+  autotune: () => req<AutotuneStatus>('/api/autotune'),
+  rerunAutotune: () => req<AutotuneStatus & { started: boolean }>('/api/autotune/run', { method: 'POST' }),
+  downloadModel: (key: string) =>
+    req<ModelDownloadResult>('/api/models/download', {
+      method: 'POST',
+      body: JSON.stringify({ key }),
+    }),
 
   setupGpu: (backend: 'cu130' | 'cu130-trt' | 'cu126' | 'dml' | 'xpu' | 'mps' | 'cpu' | 'rocm') =>
     req<{ ok: boolean; log: string; hint?: string }>('/api/setup/install', {
@@ -64,17 +105,64 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  searchImage: async (file: File, opts: { threshold?: number; top_k?: number } = {}) => {
+  searchImage: async (file: File, opts: { threshold?: number; top_k?: number; filters?: SearchFilters | null } = {}) => {
     const fd = new FormData();
     fd.append('image', file);
     if (opts.threshold != null) fd.append('threshold', String(opts.threshold));
     if (opts.top_k != null) fd.append('top_k', String(opts.top_k));
-    const res = await fetch(`${getBaseUrl()}/api/search/image`, { method: 'POST', body: fd });
+    if (opts.filters) fd.append('filters', JSON.stringify(opts.filters));
+    const res = await fetch(`${getBaseUrl()}/api/search/image`, { method: 'POST', body: fd, headers: authHeaders() });
     if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
     return res.json() as Promise<{ results: SceneResult[]; total: number }>;
   },
 
   recentSearches: () => req<{ queries: string[] }>('/api/search/history'),
+
+  // Search+ (v0.4): similar shots, facets, background analysis, characters
+  similarScenes: (sceneId: number, opts: {
+    top_k?: number; threshold?: number; exclude_same_video?: boolean; same_group?: boolean;
+    sort?: string; filters?: SearchFilters | null;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.top_k != null) qs.set('top_k', String(opts.top_k));
+    if (opts.threshold != null) qs.set('threshold', String(opts.threshold));
+    if (opts.exclude_same_video) qs.set('exclude_same_video', 'true');
+    if (opts.same_group) qs.set('same_group', 'true');
+    if (opts.sort) qs.set('sort', opts.sort);
+    if (opts.filters) qs.set('filters', JSON.stringify(opts.filters));
+    return req<{ results: SceneResult[]; total: number; seed: SceneResult & { group_name: string | null } }>(
+      `/api/search/similar/${sceneId}?${qs.toString()}`,
+    );
+  },
+  searchFacets: () => req<SearchFacets>('/api/searchplus/facets'),
+  analysisStatus: () => req<AnalysisStatus>('/api/searchplus/analysis'),
+  startAnalysis: () => req<AnalysisStatus & { started: boolean }>('/api/searchplus/analyze', { method: 'POST' }),
+  stopAnalysis: () => req<{ stopped: boolean }>('/api/searchplus/analyze/stop', { method: 'POST' }),
+  listCharacters: () => req<{ characters: Character[] }>('/api/characters'),
+  getCharacter: (id: number) => req<Character>(`/api/characters/${id}`),
+  createCharacter: (body: { name: string; group_name?: string | null; examples?: { scene_id: number; polarity?: number; crop?: number[] | null }[] }) =>
+    req<Character>('/api/characters', { method: 'POST', body: JSON.stringify(body) }),
+  patchCharacter: (id: number, body: { name?: string; group_name?: string; clear_group?: boolean; threshold?: number; threshold_auto?: boolean }) =>
+    req<Character>(`/api/characters/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteCharacter: (id: number) => req<{ ok: boolean }>(`/api/characters/${id}`, { method: 'DELETE' }),
+  addCharacterExample: (id: number, body: { scene_id: number; polarity?: number; crop?: number[] | null }) =>
+    req<Character>(`/api/characters/${id}/examples`, { method: 'POST', body: JSON.stringify(body) }),
+  addCharacterImage: async (id: number, file: File, polarity = 1) => {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('polarity', String(polarity));
+    const res = await fetch(`${getBaseUrl()}/api/characters/${id}/examples/image`, { method: 'POST', body: fd, headers: authHeaders() });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<Character>;
+  },
+  deleteCharacterExample: (id: number, exampleId: number) =>
+    req<Character>(`/api/characters/${id}/examples/${exampleId}`, { method: 'DELETE' }),
+  characterFeedback: (id: number, body: { accept?: number[]; reject?: number[]; clear?: number[] }) =>
+    req<Character>(`/api/characters/${id}/feedback`, { method: 'POST', body: JSON.stringify(body) }),
+  characterMatches: (id: number, limit = 300) =>
+    req<{ character: Character; results: SceneResult[]; threshold: number }>(`/api/characters/${id}/matches?limit=${limit}`),
+  characterExampleThumbUrl: (id: number, exampleId: number) =>
+    withToken(`${getBaseUrl()}/api/characters/${id}/examples/${exampleId}/thumbnail`),
 
   allTags: (limit = 500) => req<{ tags: { tag: string; count: number }[] }>(`/api/tags/all?limit=${limit}`),
 
@@ -178,9 +266,9 @@ export const api = {
   stopIndexing: () =>
     req<{ stopped: boolean }>('/api/index/stop', { method: 'POST' }),
 
-  thumbnailUrl: (sceneId: number) => `${getBaseUrl()}/api/scene/${sceneId}/thumbnail`,
-  proxyUrl: (sceneId: number) => `${getBaseUrl()}/api/scene/${sceneId}/proxy`,
-  sourceUrl: (sceneId: number) => `${getBaseUrl()}/api/scene/${sceneId}/source`,
+  thumbnailUrl: (sceneId: number) => withToken(`${getBaseUrl()}/api/scene/${sceneId}/thumbnail`),
+  proxyUrl: (sceneId: number) => withToken(`${getBaseUrl()}/api/scene/${sceneId}/proxy`),
+  sourceUrl: (sceneId: number) => withToken(`${getBaseUrl()}/api/scene/${sceneId}/source`),
 
   // SAM 2 mask / alpha export
   segmentPreview: (sceneId: number, body: SegmentPromptBody) =>
@@ -201,11 +289,25 @@ export const api = {
   segmentDrop: (sessionId: string) =>
     req<{ ok: boolean; dropped: boolean }>(`/api/scene/segment/${sessionId}`, { method: 'DELETE' }),
   segmentFrameUrl: (sessionId: string, idx: number) =>
-    `${getBaseUrl()}/api/scene/segment/${sessionId}/frame/${idx}`,
+    withToken(`${getBaseUrl()}/api/scene/segment/${sessionId}/frame/${idx}`),
   segmentMaskPreviewUrl: (sessionId: string) =>
-    `${getBaseUrl()}/api/scene/segment/${sessionId}/mask_preview`,
+    withToken(`${getBaseUrl()}/api/scene/segment/${sessionId}/mask_preview`),
   segmentMaskUrl: (sessionId: string, idx: number) =>
-    `${getBaseUrl()}/api/scene/segment/${sessionId}/mask/${idx}`,
+    withToken(`${getBaseUrl()}/api/scene/segment/${sessionId}/mask/${idx}`),
+
+  // Timeline export (FCP7 XML / FCPXML / EDL / OTIO)
+  timelineFormats: () =>
+    req<{ formats: TimelineFormat[] }>('/api/timeline/formats'),
+  timelinePreview: (body: TimelineSelection) =>
+    req<TimelinePreview>('/api/timeline/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  timelineExport: (body: TimelineSelection & { format: TimelineFormat['id']; output_path: string }) =>
+    req<TimelineExportResult>('/api/timeline/export', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // Derush (selects) workflow
   derushList: () =>
@@ -265,7 +367,7 @@ export const api = {
   videoTranscode: (videoId: number) =>
     req<{ ok: boolean; ready: boolean; url?: string }>(`/api/videos/${videoId}/transcode`, { method: 'POST' }),
 
-  progressSocket: () => new WebSocket(`${getBaseUrl().replace(/^http/, 'ws')}/ws/progress`),
+  progressSocket: () => new WebSocket(withToken(`${getBaseUrl().replace(/^http/, 'ws')}/ws/progress`)),
 
   revealOutput: (p: string) => window.amvBridge?.reveal(p),
 };
@@ -277,3 +379,12 @@ export function platformIs(plat: 'win32' | 'darwin' | 'linux'): boolean {
   if (plat === 'darwin') return navigator.userAgent.includes('Mac');
   return navigator.userAgent.includes('Linux');
 }
+
+// Model tiers (Settings > Models) and the embeddings-only re-index.
+export const modelTiersApi = {
+  tiers: () => req<ModelTiersInfo>('/api/models/tiers'),
+  reembed: (body: { model?: string; force?: boolean }) =>
+    req<ReembedStartResult>('/api/models/reembed', { method: 'POST', body: JSON.stringify(body) }),
+  reembedCancel: () => req<{ ok: boolean }>('/api/models/reembed/cancel', { method: 'POST' }),
+  reembedStatus: () => req<ReembedJob | { job: ReembedJob | null } | null>('/api/models/reembed'),
+};

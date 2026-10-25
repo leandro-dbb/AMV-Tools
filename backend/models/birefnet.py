@@ -53,6 +53,23 @@ VARIANTS: dict[str, str] = {
     "anime":    "skytnt/anime-seg",
 }
 DEFAULT_VARIANT = "general"
+# Hub commit each BiRefNet checkpoint is loaded at. ``trust_remote_code``
+# runs the repo's Python in the sidecar: pinning keeps whatever is pushed to
+# ``main`` later from being downloaded and executed (bump deliberately, after
+# reading the diff). The anime variant is plain ONNX weights, no code.
+REVISIONS: dict[str, str] = {
+    "general":  "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
+    "hr":       "a7a562f6fd16021180f2f4348f4de003a2d3d1e1",
+    "portrait": "b6561965a70070d9143fd9e558f6ca3c481510db",
+}
+
+
+def revision_for_repo(repo_id: str) -> Optional[str]:
+    """Pinned commit of a BiRefNet repo id (None for repos not pinned here)."""
+    for variant, repo in VARIANTS.items():
+        if repo == repo_id:
+            return REVISIONS.get(variant)
+    return None
 # Standard BiRefNet inference size. The model itself is fully convolutional
 # but the official recipes (and the HF model card examples) use 1024×1024 —
 # bigger costs quadratic VRAM and adds little quality on typical anime frames.
@@ -106,6 +123,7 @@ class BiRefNetModel:
             log.info("loading BiRefNet (%s)", self.repo_id)
             model = AutoModelForImageSegmentation.from_pretrained(
                 self.repo_id, trust_remote_code=True, token=self.hf_token,
+                revision=REVISIONS[self.variant], code_revision=REVISIONS[self.variant],
             )
             # The HF checkpoint config sets torch_dtype=fp16, so from_pretrained
             # returns the model in half precision on CUDA-capable cards. We let
@@ -135,14 +153,16 @@ class BiRefNetModel:
             if self._onnx_session is not None:
                 return
             import onnxruntime as ort
-            from huggingface_hub import hf_hub_download
 
+            from ..model_download import download_model_files
             from .wd_tagger import _register_cuda12_dll_dirs, build_onnx_providers, make_onnx_session
 
             _register_cuda12_dll_dirs(required=(self.device.backend == "cuda"), ort=ort)
 
             log.info("loading anime-seg ISNet (%s)", self.repo_id)
-            model_path = hf_hub_download(self.repo_id, "isnetis.onnx", token=self.hf_token)
+            (model_path,) = download_model_files(
+                self.repo_id, ("isnetis.onnx",), token=self.hf_token,
+            )
 
             providers = build_onnx_providers(self.device.backend, ort)
             self._onnx_session = make_onnx_session(ort, model_path, providers)
@@ -211,11 +231,23 @@ class BiRefNetModel:
         w, h = rgb.size
 
         with torch.inference_mode():
-            tensor = (
-                self._transform(rgb).unsqueeze(0)
-                .to(self.device.torch_device)
-                .to(self._model_dtype)
-            )
+            if self.device.backend == "cuda":
+                # Resize + normalise on the GPU (antialiased bilinear, like
+                # the PIL resize of the CPU transform): the CPU transform at
+                # 1024² was most of the per-frame time on an RTX 3090.
+                x = torch.from_numpy(np.asarray(rgb)).to(self.device.torch_device)
+                x = x.permute(2, 0, 1)[None].float() / 255.0
+                x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode="bilinear",
+                                  align_corners=False, antialias=True)
+                mean = torch.tensor(_IMAGENET_MEAN, device=x.device).view(1, 3, 1, 1)
+                std = torch.tensor(_IMAGENET_STD, device=x.device).view(1, 3, 1, 1)
+                tensor = ((x - mean) / std).to(self._model_dtype)
+            else:
+                tensor = (
+                    self._transform(rgb).unsqueeze(0)
+                    .to(self.device.torch_device)
+                    .to(self._model_dtype)
+                )
             preds = self._model(tensor)[-1].sigmoid()
             pred = F.interpolate(
                 preds.float(),

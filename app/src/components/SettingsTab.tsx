@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Cpu, Zap, Target, Layers, FileVideo, Palette, Download, Settings2, FolderOpen, Loader2, Trash2, Upload, AlertTriangle, Clapperboard, RotateCcw } from 'lucide-react';
+import { Cpu, Zap, Target, Layers, FileVideo, Palette, Download, Settings2, FolderOpen, Loader2, Trash2, Upload, AlertTriangle, Clapperboard, RotateCcw, Activity } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppSettings } from '../api/types';
 import { DERUSH_ACTIONS, DERUSH_DEFAULT_KEYS, displayKey } from '../derushKeys';
 import { useI18n, useT, type Lang } from '../i18n';
+import DiagnosticSection from './DiagnosticSection';
+import FinishModelsSection from './FinishModelsSection';
+import ModelTiersSection from './ModelTiersSection';
 
 const sections = [
   { name: 'Indexing', icon: Cpu },
@@ -14,6 +17,7 @@ const sections = [
   { name: 'Export', icon: FileVideo },
   { name: 'Interface', icon: Palette },
   { name: 'Updates', icon: Download },
+  { name: 'Diagnostic', icon: Activity },
   { name: 'Advanced', icon: Settings2 },
 ] as const;
 
@@ -88,6 +92,7 @@ export default function SettingsTab({ runtimeDevice, gpuName, vramGb }: { runtim
             {activeSection === 'Export' && <ExportSection settings={settings} patch={patch} />}
             {activeSection === 'Interface' && <InterfaceSection settings={settings} patch={patch} />}
             {activeSection === 'Updates' && <UpdatesSection />}
+            {activeSection === 'Diagnostic' && <DiagnosticSection />}
             {activeSection === 'Advanced' && <AdvancedSection settings={settings} setSettings={setSettings} />}
           </div>
         )}
@@ -136,7 +141,20 @@ function Slider({ value, min, max, step, onChange }: { value: number; min: numbe
 // Rough VRAM → batch-size heuristic for SigLIP + wd-tagger inference at the
 // default 128-patch budget. Deliberately conservative: an OOM mid-index costs
 // far more time than a slightly under-filled GPU.
-function recommendedBatch(vramGb: number): number {
+// NVIDIA (measured on an RTX 3090, docs/PERFORMANCE-NVIDIA.md): the default
+// models peak at ~1.1 GB of torch memory even at batch 64, so the CUDA table
+// is about throughput, with headroom for so400m / 256 patches. Thresholds sit
+// below the nominal sizes because drivers report e.g. 23.6 GB for a 24 GB card.
+function recommendedBatchCuda(vramGb: number): number {
+  if (vramGb >= 20) return 64;
+  if (vramGb >= 11) return 32;
+  if (vramGb >= 7) return 16;
+  if (vramGb >= 5) return 8;
+  return 4;
+}
+
+function recommendedBatch(vramGb: number, runtimeDevice?: string): number {
+  if (runtimeDevice === 'cuda') return recommendedBatchCuda(vramGb);
   if (vramGb >= 24) return 32;
   if (vramGb >= 16) return 24;
   if (vramGb >= 12) return 16;
@@ -146,17 +164,30 @@ function recommendedBatch(vramGb: number): number {
   return 4;
 }
 
+// Apple Silicon: `vramGb` is Metal's working-set ceiling (~70 % of unified
+// memory). The batch matters little there — the Core ML wd-tagger runs fixed
+// batches of 8 and SigLIP 2 gains < 10 % from 8 to 64 (M1 Pro) — so the
+// recommendation only scales with how much memory the rest of the Mac keeps.
+function recommendedBatchMps(vramGb: number): number {
+  if (vramGb >= 20) return 32; // 32 GB+ Macs
+  if (vramGb >= 10) return 16; // 16-24 GB
+  return 8; // 8 GB
+}
+
 function IndexingSection({ settings, patch, runtimeDevice, gpuName, vramGb }: { settings: AppSettings; patch: Patch; runtimeDevice?: string; gpuName?: string; vramGb?: number | null }) {
   const t = useT();
   const s = settings.indexing;
   const isCpu = s.device === 'cpu';
   const cpuRuntime = isCpu || runtimeDevice === 'cpu';
-  const rec = !cpuRuntime && typeof vramGb === 'number' && vramGb > 0 ? recommendedBatch(vramGb) : null;
+  const mps = runtimeDevice === 'mps';
+  const rec = !cpuRuntime && typeof vramGb === 'number' && vramGb > 0
+    ? (mps ? recommendedBatchMps(vramGb) : recommendedBatch(vramGb, runtimeDevice))
+    : null;
   const batchHint = `${t('settings.batch.hint')} ${
     cpuRuntime
       ? t('settings.batch.rec.cpu')
       : rec !== null
-        ? t('settings.batch.rec', { gpu: gpuName ?? 'GPU', vram: vramGb!, rec })
+        ? t(mps ? 'settings.batch.rec.mps' : 'settings.batch.rec', { gpu: gpuName ?? 'GPU', vram: vramGb!, rec })
         : ''
   }`.trim();
   return (
@@ -245,23 +276,25 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
   const t = useT();
   const s = settings.models;
   const sam2Available = runtimeDevice !== 'dml';
+  const tierLocked = s.tier !== undefined && s.tier !== 'custom';
   return (
     <>
+      <ModelTiersSection settings={settings} patch={patch} />
       <Row label={t('settings.models.wd.label')} hint={t('settings.models.wd.hint')}>
-        <select value={s.wd_tagger_variant} onChange={(e) => patch('models', { wd_tagger_variant: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+        <select value={s.wd_tagger_variant} onChange={(e) => patch('models', { wd_tagger_variant: e.target.value, tier: 'custom' })} disabled={tierLocked} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6] disabled:opacity-40">
           <option value="SmilingWolf/wd-vit-tagger-v3">{t('settings.models.wd.opt.default')}</option>
           <option value="SmilingWolf/wd-vit-large-tagger-v3">{t('settings.models.wd.opt.better')}</option>
           <option value="SmilingWolf/wd-eva02-large-tagger-v3">{t('settings.models.wd.opt.best')}</option>
         </select>
       </Row>
       <Row label={t('settings.models.siglip.label')} hint={t('settings.models.siglip.hint')}>
-        <select value={s.siglip_variant} onChange={(e) => patch('models', { siglip_variant: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+        <select value={s.siglip_variant} onChange={(e) => patch('models', { siglip_variant: e.target.value, tier: 'custom' })} disabled={tierLocked} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6] disabled:opacity-40">
           <option value="google/siglip2-base-patch16-naflex">{t('settings.models.siglip.opt.base')}</option>
           <option value="google/siglip2-so400m-patch16-naflex">{t('settings.models.siglip.opt.so400m')}</option>
         </select>
       </Row>
       <Row label={t('settings.models.patches.label')} hint={t('settings.models.patches.hint')}>
-        <select value={s.siglip_max_num_patches} onChange={(e) => patch('models', { siglip_max_num_patches: Number(e.target.value) })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+        <select value={s.siglip_max_num_patches} onChange={(e) => patch('models', { siglip_max_num_patches: Number(e.target.value), tier: 'custom' })} disabled={tierLocked} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6] disabled:opacity-40">
           <option value={64}>{t('settings.models.patches.opt.64')}</option>
           <option value={128}>{t('settings.models.patches.opt.128')}</option>
           <option value={192}>192</option>
@@ -415,6 +448,7 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           className="bg-[#0F0F11] border-2 border-[#27272A] rounded-lg px-4 py-2.5 text-[#FAFAFA] text-sm font-mono focus:outline-none focus:border-[#8B5CF6] w-72"
         />
       </Row>
+      <FinishModelsSection />
     </>
   );
 }
@@ -437,6 +471,9 @@ function SearchSection({ settings, patch }: { settings: AppSettings; patch: Patc
       </Row>
       <Row label={t('settings.search.tagBoost.label')} hint={t('settings.search.tagBoost.hint')}>
         <Slider value={Math.round(s.tag_boost * 100)} min={0} max={30} step={1} onChange={(v) => patch('search', { tag_boost: v / 100 })} />
+      </Row>
+      <Row label={t('sp.settings.autoAnalyze.label')} hint={t('sp.settings.autoAnalyze.hint')}>
+        <Toggle on={settings.searchplus?.auto_analyze ?? true} onChange={(v) => patch('searchplus', { auto_analyze: v })} />
       </Row>
     </>
   );
@@ -539,6 +576,7 @@ function ExportSection({ settings, patch }: { settings: AppSettings; patch: Patc
     <>
       <Row label={t('settings.export.codec.label')} hint={t('settings.export.codec.hint')}>
         <select value={s.codec} onChange={(e) => patch('export', { codec: e.target.value })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+          <option value="auto">{t('settings.export.codec.opt.auto')}</option>
           <option value="h264_nvenc">{t('settings.export.codec.opt.nvenc')}</option>
           <option value="libx264">H.264 (CPU, CRF)</option>
           <option value="libx265">H.265 / HEVC</option>

@@ -1,0 +1,54 @@
+diff --git a/backend/models/siglip2.py b/backend/models/siglip2.py
+index b8d9f82..12849ec 100644
+--- a/backend/models/siglip2.py
++++ b/backend/models/siglip2.py
+@@ -108,6 +108,16 @@ class SigLIP2Model:
+                 self._model = None
+             empty_device_cache(self.device.backend)
+ 
++    def _to_device(self, inputs) -> dict:
++        """Move processor outputs to the model device. Asynchronous copies
++        only on CUDA: on MPS a ``non_blocking`` copy from pageable memory
++        races with the source tensors being freed as soon as this dict
++        replaces the processor's — measured on an M1 Pro, 30/30 batches
++        reached the GPU corrupted (garbage embeddings, or "Height of resized
++        positional embeddings must be positive" from NaFlex)."""
++        non_blocking = self.device.backend == "cuda"
++        return {k: v.to(self.device.torch_device, non_blocking=non_blocking) for k, v in inputs.items()}
++
+     def embed_images(self, images: List[Image.Image], max_num_patches: Optional[int] = None) -> np.ndarray:
+         if max_num_patches is None:
+             max_num_patches = self.max_num_patches
+@@ -120,7 +130,7 @@ class SigLIP2Model:
+             inputs = self._processor(images=images, **kwargs)
+         except TypeError:
+             inputs = self._processor(images=images, return_tensors="pt")
+-        inputs = {k: v.to(self.device.torch_device, non_blocking=True) for k, v in inputs.items()}
++        inputs = self._to_device(inputs)
+         try:
+             with torch.inference_mode():
+                 out = self._model.get_image_features(**inputs)
+@@ -156,7 +166,7 @@ class SigLIP2Model:
+             max_length=64,
+             return_tensors="pt",
+         )
+-        inputs = {k: v.to(self.device.torch_device, non_blocking=True) for k, v in inputs.items()}
++        inputs = self._to_device(inputs)
+         with torch.inference_mode():
+             out = self._model.get_text_features(**inputs)
+             feats = out.pooler_output if hasattr(out, "pooler_output") else out
+diff --git a/backend/models/wd_tagger.py b/backend/models/wd_tagger.py
+index 7d65206..5d3bcae 100644
+--- a/backend/models/wd_tagger.py
++++ b/backend/models/wd_tagger.py
+@@ -232,7 +232,9 @@ class WDTaggerModel:
+                 token=self.hf_token,
+             )
+ 
+-            providers = build_onnx_providers(self.device_backend, ort)
++            # bench workaround (Apple Silicon): Core ML aborts the process on the
++            # first batch at this commit, so the tagger is forced onto the CPU EP.
++            providers = build_onnx_providers("cpu" if self.device_backend == "mps" else self.device_backend, ort)
+             self._session = make_onnx_session(ort, model_path, providers)
+             self._active_providers = list(self._session.get_providers())
+             input_meta = self._session.get_inputs()[0]

@@ -30,6 +30,17 @@ def empty_device_cache(backend: str) -> None:
         pass
 
 
+def simulated_vram_gb() -> Optional[float]:
+    """``AMV_VRAM_LIMIT_GB``: run as if the GPU had this much memory (tier
+    measurements of smaller cards on a big one). Unset in normal use."""
+    import os
+    try:
+        v = float(os.environ.get("AMV_VRAM_LIMIT_GB") or 0)
+    except ValueError:
+        return None
+    return v if v > 0 else None
+
+
 def detect_device(forced: Optional[str] = None) -> DeviceInfo:
     import torch
 
@@ -45,6 +56,12 @@ def detect_device(forced: Optional[str] = None) -> DeviceInfo:
             vram = round(torch.cuda.get_device_properties(0).total_memory / 2**30, 1)
         except Exception:
             vram = None
+        limit = simulated_vram_gb()
+        if limit and vram:
+            # Measurement aid: behave like a smaller card (allocator cap +
+            # the VRAM every size decision reads).
+            torch.cuda.set_per_process_memory_fraction(min(1.0, limit / vram))
+            vram = limit
         return DeviceInfo("cuda", torch.cuda.get_device_name(), torch.device("cuda"), dtype, vram_gb=vram)
 
     def xpu_vram() -> Optional[float]:
@@ -63,6 +80,9 @@ def detect_device(forced: Optional[str] = None) -> DeviceInfo:
             mem = round(torch.mps.recommended_max_memory() / 2**30, 1)
         except Exception:
             mem = None
+        if simulated_vram_gb():
+            # Pair with PYTORCH_MPS_HIGH_WATERMARK_RATIO to cap the allocator.
+            mem = simulated_vram_gb()
         return DeviceInfo("mps", "Apple Silicon GPU (MPS)", torch.device("mps"),
                           torch.float16, vram_gb=mem)
 

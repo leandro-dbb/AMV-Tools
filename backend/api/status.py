@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from ..diagnostics import fallback_reason
 from ..paths import user_data_dir
 from ..state import get_state, python_version_string
 
@@ -22,6 +23,8 @@ def status():
             "python_version": python_version_string(),
             "tagger_provider": None,
             "warnings": [],
+            "requested_device": "not_configured",
+            "device_fallback": None,
         }
 
     try:
@@ -35,6 +38,8 @@ def status():
         device_vram = None
 
     runtime = state.runtime_status()
+    requested = str(state.settings.get("indexing", {}).get("device", "auto"))
+    fallback = fallback_reason(requested, device_backend, {})
     return {
         "ready": not setup_required,
         "setup_required": setup_required,
@@ -45,4 +50,6 @@ def status():
         "python_version": python_version_string(),
         "tagger_provider": runtime["tagger_provider"],
         "warnings": runtime["warnings"],
+        "requested_device": requested,
+        "device_fallback": fallback,
     }

@@ -1,14 +1,37 @@
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..db import queries, schema
-from ..db.merge import merge_databases
+from ..db.merge import MERGE_LOCK, merge_databases, merge_running
 from ..state import get_state
 
 router = APIRouter()
+
+
+def busy_reason(state) -> str | None:
+    """Why the libraries can't be switched / merged / cleaned right now."""
+    t = getattr(state, "_index_thread", None)
+    if t is not None and t.is_alive():
+        return "Indexing is running: wait for it to finish (or stop it) before changing libraries."
+    from ..indexing import reembed
+    if reembed.is_running():
+        return "Re-embedding is running: wait for it to finish before changing libraries."
+    from ..searchplus import jobs as sp_jobs
+    job = getattr(sp_jobs, "_job", None)
+    if job is not None and job.running:
+        return "Search+ analysis is running: wait for it to finish (or stop it) before changing libraries."
+    if merge_running():
+        return "A library merge is running: wait for it to finish."
+    return None
+
+
+def _refuse_if_busy(state) -> None:
+    reason = busy_reason(state)
+    if reason:
+        raise HTTPException(409, reason)
 
 
 @router.get("/api/databases")
@@ -34,6 +57,8 @@ class PrimaryBody(BaseModel):
 @router.post("/api/databases/primary")
 def set_primary(body: PrimaryBody):
     state = get_state()
+    if body.path != state.primary_db:
+        _refuse_if_busy(state)
     schema.init_db(body.path)
     new_active = state.settings["databases"]["active"]
     if body.path not in new_active:
@@ -62,6 +87,7 @@ def remove_database(path: str):
     actives = [p for p in state.settings["databases"]["active"] if p != path]
     primary = state.settings["databases"]["primary"]
     if primary == path:
+        _refuse_if_busy(state)
         primary = actives[0] if actives else ""
     state.update_settings({"databases": {"active": actives, "primary": primary}})
     return {"ok": True}
@@ -70,7 +96,10 @@ def remove_database(path: str):
 @router.post("/api/databases/cleanup")
 def cleanup(body: AddBody):
     """Remove video rows whose filepath no longer exists on disk."""
+    _refuse_if_busy(get_state())
     removed = queries.cleanup_orphans(body.path)
+    if removed:
+        get_state().invalidate_search_cache()
     return {"removed": removed}
 
 
@@ -176,5 +205,17 @@ class MergeBody(BaseModel):
 @router.post("/api/databases/merge")
 def merge(body: MergeBody):
     state = get_state()
-    stats = merge_databases(body.target, body.sources, progress_cb=lambda m: state.publish({"type": "merge", "message": m}))
+    from ..indexing.reembed import merge_conflict
+    conflict = merge_conflict(body.target, body.sources)
+    if conflict:  # two embedding spaces must never share one library
+        raise HTTPException(409, conflict)
+    _refuse_if_busy(state)
+    if not MERGE_LOCK.acquire(blocking=False):
+        raise HTTPException(409, "A library merge is running: wait for it to finish.")
+    try:
+        stats = merge_databases(body.target, body.sources,
+                                progress_cb=lambda m: state.publish({"type": "merge", "message": m}))
+    finally:
+        MERGE_LOCK.release()
+    state.invalidate_search_cache()
     return stats

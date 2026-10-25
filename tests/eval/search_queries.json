@@ -1,0 +1,30 @@
+{
+  "about": "Chantier 4 search evaluation queries over DBS Beerus 01-02 + Black Clover S02E04. Grades in search_judgments.json: 2 = clearly relevant, 1 = partially relevant, 0 = not relevant.",
+  "queries": [
+    {"id": "goku", "text": "goku", "type": "character", "lang": "en"},
+    {"id": "beerus", "text": "beerus", "type": "character", "lang": "en"},
+    {"id": "whis", "text": "whis", "type": "character", "lang": "en"},
+    {"id": "vegeta", "text": "vegeta", "type": "character", "lang": "en"},
+    {"id": "bulma", "text": "bulma", "type": "character", "lang": "en"},
+    {"id": "asta", "text": "asta from black clover", "type": "character", "lang": "en"},
+    {"id": "fight", "text": "two characters fighting", "type": "action", "lang": "en"},
+    {"id": "eating", "text": "someone eating food", "type": "action", "lang": "en"},
+    {"id": "flying", "text": "a character flying through the sky", "type": "action", "lang": "en"},
+    {"id": "laughing", "text": "a character laughing", "type": "action", "lang": "en"},
+    {"id": "explosion", "text": "explosion", "type": "action", "lang": "en"},
+    {"id": "closeup", "text": "close-up of a face", "type": "shot", "lang": "en"},
+    {"id": "wide", "text": "wide shot of a landscape", "type": "shot", "lang": "en"},
+    {"id": "crowd", "text": "a crowd of people", "type": "shot", "lang": "en"},
+    {"id": "night", "text": "night scene", "type": "ambience", "lang": "en"},
+    {"id": "sunset", "text": "sunset sky", "type": "color", "lang": "en"},
+    {"id": "purple", "text": "purple", "type": "color", "lang": "en"},
+    {"id": "dark", "text": "dark ominous atmosphere", "type": "ambience", "lang": "en"},
+    {"id": "fr_combat", "text": "deux personnages qui se battent", "type": "action", "lang": "fr"},
+    {"id": "fr_visage", "text": "gros plan sur un visage", "type": "shot", "lang": "fr"},
+    {"id": "fr_mange", "text": "quelqu'un qui mange", "type": "action", "lang": "fr"},
+    {"id": "fr_ciel", "text": "ciel bleu avec des nuages", "type": "color", "lang": "fr"},
+    {"id": "fr_colere", "text": "personnage en colère qui crie", "type": "ambience", "lang": "fr"},
+    {"id": "fr_epee", "text": "un garçon avec une épée", "type": "character", "lang": "fr"},
+    {"id": "fr_maison", "text": "une maison à la campagne", "type": "shot", "lang": "fr"}
+  ]
+}

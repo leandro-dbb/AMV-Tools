@@ -1,0 +1,155 @@
+import type { Dict } from './index';
+
+// Strings for search+ (v0.4): filters panel, scene badges, similar shots,
+// Characters tab, background scene analysis.
+export const searchPlusStrings: Dict = {
+  // ── filters panel ──────────────────────────────────────────────────────
+  'sp.filters.title': { en: 'Filters', fr: 'Filtres' },
+  'sp.filters.active': { en: '{count} active', fr: '{count} actif(s)' },
+  'sp.filters.reset': { en: 'Reset', fr: 'Réinitialiser' },
+  'sp.filters.apply': { en: 'Show matching scenes', fr: 'Afficher les scènes correspondantes' },
+  'sp.filters.applyHint': {
+    en: 'Filters also work without a text query.',
+    fr: 'Les filtres fonctionnent aussi sans requête texte.',
+  },
+  'sp.filters.characters': { en: 'Characters', fr: 'Personnages' },
+  'sp.filters.charactersNone': {
+    en: 'No characters yet — create one in the Characters tab.',
+    fr: 'Aucun personnage — créez-en un dans l\'onglet Personnages.',
+  },
+  'sp.filters.charMode.any': { en: 'any of them', fr: 'au moins un' },
+  'sp.filters.charMode.all': { en: 'all together', fr: 'tous ensemble' },
+  'sp.filters.motion': { en: 'Camera motion', fr: 'Mouvement de caméra' },
+  'sp.filters.intensity': { en: 'Intensity', fr: 'Intensité' },
+  'sp.filters.duration': { en: 'Duration (s)', fr: 'Durée (s)' },
+  'sp.filters.min': { en: 'min', fr: 'min' },
+  'sp.filters.max': { en: 'max', fr: 'max' },
+  'sp.filters.color': { en: 'Dominant colour', fr: 'Couleur dominante' },
+  'sp.filters.groups': { en: 'Series / import group', fr: 'Série / groupe d\'import' },
+  'sp.filters.noGroup': { en: 'Ungrouped', fr: 'Sans groupe' },
+  'sp.filters.favorites': { en: 'Favorites only', fr: 'Favoris uniquement' },
+  'sp.filters.needsAnalysis': {
+    en: 'Motion, intensity and colour filters only match analysed scenes.',
+    fr: 'Les filtres mouvement, intensité et couleur ne trouvent que les scènes analysées.',
+  },
+
+  // ── motion types ───────────────────────────────────────────────────────
+  'sp.motion.static': { en: 'Static', fr: 'Fixe' },
+  'sp.motion.pan_left': { en: 'Pan left', fr: 'Pano gauche' },
+  'sp.motion.pan_right': { en: 'Pan right', fr: 'Pano droite' },
+  'sp.motion.tilt_up': { en: 'Tilt up', fr: 'Tilt haut' },
+  'sp.motion.tilt_down': { en: 'Tilt down', fr: 'Tilt bas' },
+  'sp.motion.zoom_in': { en: 'Zoom in', fr: 'Zoom avant' },
+  'sp.motion.zoom_out': { en: 'Zoom out', fr: 'Zoom arrière' },
+  'sp.motion.shake': { en: 'Shake', fr: 'Tremblement' },
+  'sp.motion.unknown': { en: 'Unknown', fr: 'Inconnu' },
+
+  // ── colours ────────────────────────────────────────────────────────────
+  'sp.color.red': { en: 'Red', fr: 'Rouge' },
+  'sp.color.orange': { en: 'Orange', fr: 'Orange' },
+  'sp.color.yellow': { en: 'Yellow', fr: 'Jaune' },
+  'sp.color.green': { en: 'Green', fr: 'Vert' },
+  'sp.color.cyan': { en: 'Cyan', fr: 'Cyan' },
+  'sp.color.blue': { en: 'Blue', fr: 'Bleu' },
+  'sp.color.purple': { en: 'Purple', fr: 'Violet' },
+  'sp.color.pink': { en: 'Pink', fr: 'Rose' },
+  'sp.color.brown': { en: 'Brown', fr: 'Marron' },
+  'sp.color.white': { en: 'White', fr: 'Blanc' },
+  'sp.color.gray': { en: 'Gray', fr: 'Gris' },
+  'sp.color.black': { en: 'Black', fr: 'Noir' },
+
+  // ── badges / card actions ──────────────────────────────────────────────
+  'sp.badge.intensity': { en: 'Intensity {value}%', fr: 'Intensité {value} %' },
+  'sp.badge.motion': { en: '{motion} · {value}%', fr: '{motion} · {value} %' },
+  'sp.action.similar': { en: 'Similar shots', fr: 'Plans similaires' },
+  'sp.action.similarTitle': { en: 'Find other shots like this one', fr: 'Trouver d\'autres plans comme celui-ci' },
+  'sp.action.addToCharacter': { en: 'Add to a character', fr: 'Ajouter à un personnage' },
+  'sp.action.newCharacter': { en: 'New character…', fr: 'Nouveau personnage…' },
+  'sp.action.newCharacterPrompt': { en: 'Character name', fr: 'Nom du personnage' },
+  'sp.action.added': { en: 'Added to {name}', fr: 'Ajouté à {name}' },
+
+  // ── similar mode in Search ─────────────────────────────────────────────
+  'sp.similar.title': { en: 'Shots similar to', fr: 'Plans similaires à' },
+  'sp.similar.excludeSameVideo': { en: 'Exclude this episode', fr: 'Exclure cet épisode' },
+  'sp.similar.sameGroup': { en: 'Same series only', fr: 'Même série uniquement' },
+  'sp.similar.clear': { en: 'Back to search', fr: 'Retour à la recherche' },
+  'sp.similar.none': { en: 'No similar shot found.', fr: 'Aucun plan similaire trouvé.' },
+  'sp.similar.characterFilter': { en: 'Character: {name}', fr: 'Personnage : {name}' },
+
+  // ── background analysis ────────────────────────────────────────────────
+  'sp.analysis.coverage': {
+    en: '{analyzed} / {total} scenes analysed',
+    fr: '{analyzed} / {total} scènes analysées',
+  },
+  'sp.analysis.start': { en: 'Analyse existing scenes', fr: 'Analyser les scènes existantes' },
+  'sp.analysis.stop': { en: 'Stop', fr: 'Arrêter' },
+  'sp.analysis.running': { en: 'Analysing {video}… {percent}%', fr: 'Analyse de {video}… {percent} %' },
+  'sp.analysis.statusbar': { en: 'Analysing scenes', fr: 'Analyse des scènes' },
+  'sp.analysis.skipped': {
+    en: '{count} video(s) skipped (file missing)',
+    fr: '{count} vidéo(s) ignorée(s) (fichier introuvable)',
+  },
+  'sp.settings.autoAnalyze.label': {
+    en: 'Automatically analyse existing scenes',
+    fr: 'Analyser automatiquement les scènes existantes',
+  },
+  'sp.settings.autoAnalyze.hint': {
+    en: 'Shortly after launch, computes camera motion, intensity and colours for scenes indexed before 0.4 (in the background, pauses during indexing). When off, run it from Search > Filters.',
+    fr: 'Peu après le lancement, calcule mouvement de caméra, intensité et couleurs des scènes indexées avant la 0.4 (en arrière-plan, en pause pendant l\'indexation). Désactivé : lancez-la depuis Recherche > Filtres.',
+  },
+
+  // ── Characters tab ─────────────────────────────────────────────────────
+  'sp.tab.characters': { en: 'Characters', fr: 'Personnages' },
+  'sp.chars.title': { en: 'Characters', fr: 'Personnages' },
+  'sp.chars.new': { en: 'New character', fr: 'Nouveau personnage' },
+  'sp.chars.name': { en: 'Name', fr: 'Nom' },
+  'sp.chars.namePlaceholder': { en: 'e.g. Gojo', fr: 'ex. Gojo' },
+  'sp.chars.group': { en: 'Series (import group)', fr: 'Série (groupe d\'import)' },
+  'sp.chars.allLibrary': { en: 'Whole library', fr: 'Toute la bibliothèque' },
+  'sp.chars.create': { en: 'Create', fr: 'Créer' },
+  'sp.chars.cancel': { en: 'Cancel', fr: 'Annuler' },
+  'sp.chars.delete': { en: 'Delete character', fr: 'Supprimer le personnage' },
+  'sp.chars.deleteConfirm': { en: 'Delete "{name}" and its examples?', fr: 'Supprimer « {name} » et ses exemples ?' },
+  'sp.chars.empty': {
+    en: 'Create a character, then give it a few example scenes: AMV Tools finds every other shot of them in the series.',
+    fr: 'Créez un personnage puis donnez-lui quelques scènes exemples : AMV Tools retrouve tous ses autres plans dans la série.',
+  },
+  'sp.chars.pick': { en: 'Select a character on the left.', fr: 'Sélectionnez un personnage à gauche.' },
+  'sp.chars.stats': {
+    en: '{matches} scenes · {pos} examples · {neg} rejected',
+    fr: '{matches} scènes · {pos} exemples · {neg} rejetés',
+  },
+  'sp.chars.examples': { en: 'Examples', fr: 'Exemples' },
+  'sp.chars.examplesHint': {
+    en: 'Add scenes from the search below, from Search results, or drop reference images here. Click an example to crop it on the character.',
+    fr: 'Ajoutez des scènes via la recherche ci-dessous, depuis les résultats de Recherche, ou déposez des images de référence ici. Cliquez sur un exemple pour le recadrer sur le personnage.',
+  },
+  'sp.chars.dropImage': { en: 'Drop reference images', fr: 'Déposez des images de référence' },
+  'sp.chars.addImage': { en: 'Add image', fr: 'Ajouter une image' },
+  'sp.chars.findExamples': { en: 'Find example scenes…', fr: 'Trouver des scènes exemples…' },
+  'sp.chars.findPlaceholder': { en: 'Describe the character (e.g. white hair blindfold)', fr: 'Décrivez le personnage (ex. cheveux blancs bandeau)' },
+  'sp.chars.addAsExample': { en: 'Add as example', fr: 'Ajouter comme exemple' },
+  'sp.chars.removeExample': { en: 'Remove example', fr: 'Retirer l\'exemple' },
+  'sp.chars.negative': { en: 'rejected', fr: 'rejeté' },
+  'sp.chars.crop': { en: 'Crop on the character', fr: 'Recadrer sur le personnage' },
+  'sp.chars.cropHint': { en: 'Drag a box around the character, then save.', fr: 'Tracez un cadre autour du personnage puis enregistrez.' },
+  'sp.chars.cropSave': { en: 'Save crop', fr: 'Enregistrer le recadrage' },
+  'sp.chars.matches': { en: 'Matching scenes', fr: 'Scènes trouvées' },
+  'sp.chars.threshold': { en: 'Threshold', fr: 'Seuil' },
+  'sp.chars.thresholdAuto': { en: 'auto', fr: 'auto' },
+  'sp.chars.showBorderline': { en: 'Show borderline', fr: 'Afficher les cas limites' },
+  'sp.chars.accept': { en: 'It\'s them', fr: 'C\'est bien lui/elle' },
+  'sp.chars.reject': { en: 'Not them', fr: 'Ce n\'est pas lui/elle' },
+  'sp.chars.undo': { en: 'Undo', fr: 'Annuler' },
+  'sp.chars.searchWith': { en: 'Use in Search', fr: 'Utiliser dans Recherche' },
+  'sp.chars.noMatches': {
+    en: 'No scene above the threshold yet — add examples or lower the threshold.',
+    fr: 'Aucune scène au-dessus du seuil — ajoutez des exemples ou baissez le seuil.',
+  },
+  'sp.chars.needsModel': {
+    en: 'Crops and dropped images need the SigLIP 2 model (downloaded on first use).',
+    fr: 'Les recadrages et images déposées utilisent le modèle SigLIP 2 (téléchargé à la première utilisation).',
+  },
+  'sp.chars.rename': { en: 'Rename', fr: 'Renommer' },
+  'sp.chars.working': { en: 'Re-scoring…', fr: 'Recalcul…' },
+};

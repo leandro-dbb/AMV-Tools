@@ -46,6 +46,11 @@ VARIANTS: dict[str, str] = {
     "large":     "facebook/sam2.1-hiera-large",
 }
 DEFAULT_VARIANT = "base_plus"
+# Soft alpha = sigmoid(SOFT_LOGIT_SCALE * logits). SAM 2's logits come from a
+# 256² decoder upsampled to the frame, so a plain sigmoid gives a ~3 px blur;
+# x2 keeps an anti-aliased edge while matching the true boundary better
+# (Mask Mode benchmark: edge error -13%, flicker -22% vs. hard masks).
+SOFT_LOGIT_SCALE = 2.0
 
 # Prompts arrive as (x, y) in the coordinate frame of the rendered preview the
 # user clicked on. We carry them straight through to SAM 2, which expects pixel
@@ -149,8 +154,11 @@ class SAM2Model:
         positive_points: List[Tuple[int, int]],
         negative_points: Optional[List[Tuple[int, int]]] = None,
         box: Optional[Tuple[int, int, int, int]] = None,
+        *,
+        soft: bool = False,
     ) -> np.ndarray:
-        """Run SAM 2 on a single frame and return a boolean mask (H, W).
+        """Run SAM 2 on a single frame and return a boolean mask (H, W)
+        (``soft=True``: float32 sigmoid alpha).
 
         ``positive_points`` and ``negative_points`` are pixel coordinates in the
         same frame's resolution. ``box`` is (x0, y0, x1, y1). Returns the
@@ -173,9 +181,13 @@ class SAM2Model:
                 point_labels=labels if labels is not None else None,
                 box=box_arr,
                 multimask_output=True,
+                return_logits=soft,
             )
         # Pick the highest-score proposal among the multimask output.
         best_idx = int(np.argmax(scores))
+        if soft:
+            logits = masks[best_idx].astype(np.float32) * SOFT_LOGIT_SCALE
+            return (1.0 / (1.0 + np.exp(-logits))).astype(np.float32)
         return masks[best_idx].astype(bool)
 
     # ── full clip tracking ──────────────────────────────────────────────────
@@ -190,13 +202,42 @@ class SAM2Model:
         frames_dir: Path,
         frame_paths: List[Path],
         frame_size: Tuple[int, int],
+        soft: bool = True,
     ) -> np.ndarray:
-        """Track a single object across an already-extracted JPG frame sequence.
+        """Single-keyframe convenience wrapper around :meth:`track_keyframes`."""
+        n = len(frame_paths)
+        ref = n // 2 if reference_frame_offset is None else reference_frame_offset
+        return self.track_keyframes(
+            [{"frame_idx": ref, "positive": positive_points, "negative": negative_points or [], "box": box}],
+            progress_cb=progress_cb, frames_dir=frames_dir, frame_paths=frame_paths,
+            frame_size=frame_size, soft=soft,
+        )
 
-        The caller (``/segment/track``) is the owner of ``frames_dir``: it was
-        produced by ``/segment/preview`` via :func:`extract_clip_frames` and
-        gets cleaned up by the DELETE endpoint. We do NOT re-extract here —
-        that used to be a ~3 s + tempdir-leak per track.
+    def track_keyframes(
+        self,
+        keyframes: List[dict],
+        progress_cb: Optional[Callable[[int, int], None]] = None,
+        *,
+        frames_dir: Path,
+        frame_paths: List[Path],
+        frame_size: Tuple[int, int],
+        soft: bool = True,
+    ) -> np.ndarray:
+        """Track one object through the clip from prompts on several frames.
+
+        Each keyframe is ``{"frame_idx", "positive", "negative", "box",
+        "mask"}``. ``mask`` (H, W) — typically a brush-corrected matte — is
+        fed as a SAM 2 mask prompt and wins over points on that frame. All
+        keyframes are conditioning memory for every frame, so a correction
+        on frame 40 also repairs frames 30-50 on re-propagation.
+
+        Propagation runs forward from the earliest keyframe to the end, then
+        backward from the earliest keyframe to frame 0 (the old code only
+        went forward, so every frame before the reference stayed empty).
+
+        ``soft=True`` returns ``sigmoid(2 * logits)`` float32 alpha (1-2 px of
+        real falloff on edges instead of a staircase); ``False`` returns the
+        legacy boolean masks.
         """
         import torch
 
@@ -208,11 +249,13 @@ class SAM2Model:
         n_frames = len(frame_paths)
         if n_frames == 0:
             raise RuntimeError("SAM 2: no frames extracted for this clip")
+        kfs = [k for k in keyframes if k.get("mask") is not None or k.get("positive") or k.get("box") is not None]
+        if not kfs:
+            raise ValueError("SAM 2 needs at least one keyframe with a click, a box or a mask")
 
         # SAM 2's init_state only accepts MP4s or folders of JPEG frames.
         # Session frames are PNG (lossless for the matting models), so mirror
-        # them once into a JPEG subdir for the propagation pass. quality=95
-        # matches the old direct-JPEG extraction quality.
+        # them once into a JPEG subdir for the propagation pass.
         video_dir = frames_dir
         if frame_paths[0].suffix.lower() == ".png":
             jpeg_dir = frames_dir / "sam2_jpeg"
@@ -224,40 +267,57 @@ class SAM2Model:
                         im.convert("RGB").save(jpeg_dir / f"{i:05d}.jpg", quality=95)
             video_dir = jpeg_dir
 
-        if reference_frame_offset is None:
-            reference_frame_offset = n_frames // 2
-        reference_frame_offset = max(0, min(n_frames - 1, reference_frame_offset))
+        out_dtype = np.float32 if soft else bool
+        masks_out = np.zeros((n_frames, h, w), dtype=out_dtype)
+        seen = 0
 
-        coords, labels = _stack_prompts(positive_points, negative_points)
-        box_arr = np.asarray(box, dtype=np.float32) if box else None
+        def emit(frame_idx: int, mask_logits) -> None:
+            nonlocal seen
+            logits = mask_logits[0, 0].float()
+            if soft:
+                masks_out[frame_idx] = torch.sigmoid(logits * SOFT_LOGIT_SCALE).cpu().numpy()
+            else:
+                masks_out[frame_idx] = (logits > 0.0).cpu().numpy()
+            seen += 1
+            if progress_cb is not None:
+                try:
+                    progress_cb(min(seen, n_frames), n_frames)
+                except Exception:
+                    pass
 
         with torch.inference_mode(), _autocast(self.device):
             state = self._video_predictor.init_state(video_path=str(video_dir))
-            kwargs = dict(
-                inference_state=state,
-                frame_idx=reference_frame_offset,
-                obj_id=1,
-            )
-            if coords is not None:
-                kwargs["points"] = coords
-                kwargs["labels"] = labels
-            if box_arr is not None:
-                kwargs["box"] = box_arr
-            self._video_predictor.add_new_points_or_box(**kwargs)
+            for kf in sorted(kfs, key=lambda k: int(k["frame_idx"])):
+                idx = max(0, min(n_frames - 1, int(kf["frame_idx"])))
+                if kf.get("mask") is not None:
+                    m = np.asarray(kf["mask"])
+                    m = (m > 0.5) if m.dtype != bool else m
+                    self._video_predictor.add_new_mask(
+                        inference_state=state, frame_idx=idx, obj_id=1, mask=m,
+                    )
+                    continue
+                coords, labels = _stack_prompts(kf.get("positive") or [], kf.get("negative") or [])
+                kwargs = dict(inference_state=state, frame_idx=idx, obj_id=1)
+                if coords is not None:
+                    kwargs["points"] = coords
+                    kwargs["labels"] = labels
+                if kf.get("box") is not None:
+                    kwargs["box"] = np.asarray(kf["box"], dtype=np.float32)
+                self._video_predictor.add_new_points_or_box(**kwargs)
 
-            masks_out = np.zeros((n_frames, h, w), dtype=bool)
-            seen = 0
-            for frame_idx, _obj_ids, mask_logits in self._video_predictor.propagate_in_video(state):
-                # mask_logits is (N_obj, 1, H, W) on device — threshold at 0,
-                # take the first (and only) object, drop to CPU as bool.
-                m = (mask_logits[0, 0] > 0.0).cpu().numpy()
-                masks_out[frame_idx] = m
-                seen += 1
-                if progress_cb is not None:
-                    try:
-                        progress_cb(seen, n_frames)
-                    except Exception:
-                        pass
+            first = min(max(0, min(n_frames - 1, int(k["frame_idx"]))) for k in kfs)
+            for frame_idx, _obj_ids, mask_logits in self._video_predictor.propagate_in_video(
+                state, start_frame_idx=first,
+            ):
+                emit(frame_idx, mask_logits)
+            if first > 0:
+                for frame_idx, _obj_ids, mask_logits in self._video_predictor.propagate_in_video(
+                    state, start_frame_idx=first, reverse=True,
+                ):
+                    if frame_idx == first:
+                        continue  # already emitted by the forward pass
+                    emit(frame_idx, mask_logits)
+            self._video_predictor.reset_state(state)
 
         return masks_out
 

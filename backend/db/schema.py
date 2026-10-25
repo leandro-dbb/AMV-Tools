@@ -10,6 +10,8 @@ Layout:
     search_history       -- new: persisted recent queries
     derush_folders       -- v5: user folders organising kept scenes
     derush_items         -- v5: scenes kept during a derush pass (one per scene)
+    scene_metrics        -- v9: camera motion, intensity, palette per scene
+    characters (+ character_examples, character_matches) -- v9: user characters
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 V4_SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -121,7 +123,12 @@ def current_version(db_path: str | Path) -> int:
 def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
     cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     if column not in cols:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        except sqlite3.OperationalError as exc:
+            # two init_db() racing at startup on an old library
+            if "duplicate column" not in str(exc).lower():
+                raise
 
 
 def _apply_v6(conn: sqlite3.Connection) -> None:
@@ -160,12 +167,94 @@ def _apply_v8(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "videos", "derushed", "INTEGER NOT NULL DEFAULT 0")
 
 
+V9_SCHEMA = """
+CREATE TABLE IF NOT EXISTS scene_metrics (
+    scene_id INTEGER PRIMARY KEY REFERENCES scenes(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    motion_type TEXT,
+    motion_magnitude REAL,
+    motion_dx REAL,
+    motion_dy REAL,
+    motion_zoom REAL,
+    activity REAL,
+    intensity REAL,
+    cut_rate REAL,
+    flash_count INTEGER,
+    brightness REAL,
+    dominant_color TEXT,
+    accent_color TEXT,
+    palette TEXT,
+    computed_at REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scene_metrics_motion ON scene_metrics(motion_type, motion_magnitude);
+CREATE INDEX IF NOT EXISTS idx_scene_metrics_intensity ON scene_metrics(intensity);
+CREATE INDEX IF NOT EXISTS idx_scene_metrics_dominant ON scene_metrics(dominant_color);
+CREATE INDEX IF NOT EXISTS idx_scene_metrics_accent ON scene_metrics(accent_color);
+CREATE INDEX IF NOT EXISTS idx_scenes_duration ON scenes((end_ms - start_ms));
+CREATE INDEX IF NOT EXISTS idx_videos_group ON videos(group_name);
+
+CREATE TABLE IF NOT EXISTS characters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    group_name TEXT,
+    threshold REAL NOT NULL DEFAULT 0.75,
+    threshold_auto INTEGER NOT NULL DEFAULT 1,
+    prototype BLOB,
+    scored_signature TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS character_examples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    scene_id INTEGER REFERENCES scenes(id) ON DELETE SET NULL,
+    polarity INTEGER NOT NULL DEFAULT 1,
+    crop TEXT,
+    embedding BLOB NOT NULL,
+    thumbnail BLOB,
+    source TEXT NOT NULL DEFAULT 'scene',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_character_examples_char ON character_examples(character_id);
+CREATE INDEX IF NOT EXISTS idx_character_examples_scene ON character_examples(scene_id);
+
+CREATE TABLE IF NOT EXISTS character_matches (
+    character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    score REAL NOT NULL,
+    PRIMARY KEY (character_id, scene_id)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_character_matches_score ON character_matches(character_id, score DESC);
+CREATE INDEX IF NOT EXISTS idx_character_matches_scene ON character_matches(scene_id);
+"""
+
+
+def _apply_v9(conn: sqlite3.Connection) -> None:
+    """v9 (search+): per-scene camera motion / intensity / palette metrics,
+    user-defined characters (examples → SigLIP prototype → scored matches).
+    Purely additive and IF NOT EXISTS everywhere, so it is idempotent and
+    v8 builds can still open a v9 file. Metrics for existing scenes are
+    filled in later by the background analyzer, not here."""
+    conn.executescript(V9_SCHEMA)
+
+
 def init_db(db_path: str | Path) -> None:
     """Apply schema and migrations. Idempotent."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with get_conn(db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version >= SCHEMA_VERSION:
+            if version > SCHEMA_VERSION:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "%s has schema v%d, newer than this app (v%d): opened as is",
+                    Path(db_path).name, version, SCHEMA_VERSION)
             return
         if version == 0:
             conn.executescript(V4_SCHEMA)
@@ -178,6 +267,7 @@ def init_db(db_path: str | Path) -> None:
         _apply_v6(conn)
         _apply_v7(conn)
         _apply_v8(conn)
+        _apply_v9(conn)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

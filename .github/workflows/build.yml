@@ -1,7 +1,13 @@
-# Builds unsigned installers for Windows and macOS.
+# Builds installers for Windows, macOS and Linux.
 # macOS builds can only be produced on macOS, hence this workflow: trigger it
-# manually from the Actions tab, or push a v* tag. Artifacts are attached to
-# the run; publish them through GitHub Releases.
+# manually from the Actions tab, or push a v* tag. On a v* tag the artifacts are
+# attached to a DRAFT GitHub Release (never published automatically).
+#
+# Signing is optional:
+#   - Windows: set CSC_LINK + CSC_KEY_PASSWORD repository secrets.
+#   - macOS:   set CSC_LINK + CSC_KEY_PASSWORD plus APPLE_ID,
+#              APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID for notarization.
+# With no secrets the workflow still succeeds and produces unsigned builds.
 name: build
 
 on:
@@ -9,28 +15,32 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
       # The app bundles the uv binary (resources/.uv/) and uses it at runtime
       # to provision the Python sidecar environment on the user's machine.
-      - name: Fetch uv binary (macOS)
-        if: runner.os == 'macOS'
+      - name: Fetch uv binary (macOS / Linux)
+        if: runner.os != 'Windows'
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           mkdir -p .uv
           cp "$HOME/.local/bin/uv" .uv/uv
+          chmod +x .uv/uv
 
       - name: Fetch uv binary (Windows)
         if: runner.os == 'Windows'
@@ -48,18 +58,48 @@ jobs:
         working-directory: app
         run: npm run build
 
-      - name: Package (unsigned)
+      # electron-builder signs automatically when CSC_LINK/CSC_KEY_PASSWORD are
+      # present. When they are absent, CSC_IDENTITY_AUTO_DISCOVERY=false keeps
+      # the build unsigned instead of failing on a missing certificate.
+      - name: Package
         working-directory: app
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
         run: npx electron-builder --publish never
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: amv-tools-${{ runner.os }}
           path: |
             app/release/*.exe
             app/release/*.dmg
             app/release/*.zip
+            app/release/*.AppImage
+            app/release/*.deb
             app/release/*.blockmap
+            app/release/*.yml
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create draft release with installers
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: artifacts/**

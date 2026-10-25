@@ -61,6 +61,11 @@ def _extract_frames_via_ffmpeg_hw(
 
     seek_ms = max(0, targets[0] - _SEEK_SAFETY_MS)
     seek_seconds = seek_ms / 1000.0
+    # Accurate input seeking makes the first output frame the first one at or
+    # after the seek point, i.e. on the source's frame grid — not at seek_ms.
+    # Counting from seek_ms put some targets one frame late (sometimes the
+    # first frame of the next shot).
+    first_idx = int(np.ceil(seek_seconds * fps_safe - 1e-6))
 
     w, h = _GPU_FRAME_W, _GPU_FRAME_H
     frame_bytes = w * h * 3  # RGB
@@ -79,7 +84,7 @@ def _extract_frames_via_ffmpeg_hw(
     cmd += [
         "-i", path,
         "-an", "-sn",
-        "-vf", profile["scale_vf"].format(w=w, h=h) + ",format=rgb24",
+        "-vf", profile.get("scale_vf_rgb", profile["scale_vf"]).format(w=w, h=h) + ",format=rgb24",
         "-fps_mode", "cfr",
         "-f", "rawvideo",
         "-pix_fmt", "rgb24",
@@ -108,7 +113,7 @@ def _extract_frames_via_ffmpeg_hw(
                 # Short read = end of stream; pad to avoid reshape crash, then exit.
                 buf = buf + bytes(frame_bytes - len(buf))
             frame_idx += 1
-            now_ms = seek_ms + int((frame_idx / fps_safe) * 1000)
+            now_ms = int(((first_idx + frame_idx) / fps_safe) * 1000)
 
             # Decode the frame to PIL ONLY when we're about to yield it — saves
             # a lot of np.frombuffer / Image.fromarray cycles on frames we skip.
@@ -167,7 +172,7 @@ def _extract_frames_via_pyav(
         if seek_us > 0:
             try:
                 container.seek(seek_us)
-            except (av.AVError, OSError):
+            except (cuts._AV_ERROR, OSError):
                 pass
 
         target_idx = 0
@@ -193,7 +198,7 @@ def extract_frames_at(path: str, timestamps_ms: list[int]) -> Iterator[Tuple[int
     if not timestamps_ms:
         return
 
-    profile = cuts._ffmpeg_hw_profile()
+    profile = cuts._decode_profile(path)
     if profile is not None:
         # We can't easily resume a generator if the subprocess fails mid-way
         # (we've already yielded some frames). Strategy: collect targets, run

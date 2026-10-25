@@ -75,7 +75,7 @@ def _uv_exe() -> str:
 
 
 def _install_flags(backend: str) -> list[str]:
-    flags = ["--locked", "--extra", backend]
+    flags = ["--locked", "--no-dev", "--extra", backend]
     if backend == "dml":
         flags += ["--python", "3.12"]
     if backend in _TORCH_BACKENDS:

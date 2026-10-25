@@ -9,12 +9,16 @@ import MiniEditor from './components/MiniEditor';
 import OnboardingScreen from './components/OnboardingScreen';
 import BootstrapScreen from './components/BootstrapScreen';
 import TutorialOverlay from './components/TutorialOverlay';
+import CharactersTab from './components/CharactersTab';
+import { SEARCHPLUS_EVENT } from './searchplus';
+import type { SearchPlusRequest } from './searchplus';
+import FinishQueue from './components/FinishQueue';
 import { api } from './api/client';
 import { useT } from './i18n';
 import type { TFunc } from './i18n';
 import type { AppSettings, ProgressEvent, SceneResult, SystemStatus } from './api/types';
 
-type Tab = 'library' | 'search' | 'tags' | 'derush' | 'settings';
+type Tab = 'library' | 'search' | 'tags' | 'derush' | 'characters' | 'settings';
 
 interface BootstrapLine { line: string; stream: 'stdout' | 'stderr' }
 
@@ -37,6 +41,19 @@ export default function App() {
   const [bootstrapLines, setBootstrapLines] = useState<BootstrapLine[]>([]);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const checkedEmptyRef = useRef(false);
+  const [searchRequest, setSearchRequest] = useState<{ req: SearchPlusRequest; nonce: number } | null>(null);
+
+  // search+: "similar shots" / "search this character" from any tab.
+  useEffect(() => {
+    const onReq = (e: Event) => {
+      const req = (e as CustomEvent<SearchPlusRequest>).detail;
+      setEditor(null);
+      setActiveTab('search');
+      setSearchRequest({ req, nonce: Date.now() });
+    };
+    window.addEventListener(SEARCHPLUS_EVENT, onReq);
+    return () => window.removeEventListener(SEARCHPLUS_EVENT, onReq);
+  }, []);
 
   // Wire the IPC bridge that streams sidecar stdout/stderr until the backend
   // port is open, then flip into the regular status-polling flow.
@@ -188,6 +205,7 @@ export default function App() {
           { id: 'search', label: t('app.tab.search'), color: 'from-[#8B5CF6] to-[#EC4899]' },
           { id: 'tags', label: t('app.tab.tags'), color: 'from-[#EC4899] to-[#8B5CF6]' },
           { id: 'derush', label: t('app.tab.derush'), color: 'from-[#EC4899] to-[#F59E0B]' },
+          { id: 'characters', label: t('sp.tab.characters'), color: 'from-[#EC4899] to-[#6366F1]' },
           { id: 'settings', label: t('app.tab.settings'), color: 'from-[#8B5CF6] to-[#6366F1]' },
         ] as { id: Tab; label: string; color: string }[]).map((tab) => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`relative px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === tab.id ? 'text-[#FAFAFA]' : 'text-[#71717A] hover:text-[#A1A1AA] hover:bg-[#27272A]'}`}>
@@ -202,16 +220,38 @@ export default function App() {
         ))}
       </div>
 
+      {status?.device_fallback && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2.5 flex items-center gap-3 text-amber-200 text-sm">
+          <AlertTriangle size={15} className="flex-shrink-0" />
+          <span className="flex-1">
+            {t('app.fallback.banner', {
+              requested: status.requested_device ?? status.device,
+              active: status.device,
+              reason: status.device_fallback,
+            })}
+          </span>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className="flex-shrink-0 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg px-3 py-1 text-xs font-semibold"
+          >
+            {t('app.fallback.openSettings')}
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden relative">
         {activeTab === 'library' && <LibraryTab />}
         {activeTab === 'search' && (
-          <SearchTab hoverDelayMs={hoverDelay} onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
+          <SearchTab hoverDelayMs={hoverDelay} request={searchRequest} onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
         )}
         {activeTab === 'tags' && (
           <TagsTab hoverDelayMs={hoverDelay} onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
         )}
         {activeTab === 'derush' && (
           <DerushTab onOpenScene={(list, idx) => setEditor({ scenes: list, index: idx })} />
+        )}
+        {activeTab === 'characters' && (
+          <CharactersTab onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
         )}
         {activeTab === 'settings' && <SettingsTab runtimeDevice={status?.device} gpuName={status?.gpu_name} vramGb={status?.vram_gb ?? null} />}
       </div>
@@ -230,6 +270,8 @@ export default function App() {
                     onJumpTo={(scenes, idx) => setEditor({ scenes, index: idx })}
                     onClose={() => setEditor(null)} />
       )}
+
+      <FinishQueue />
 
       {showTutorial && (
         <TutorialOverlay onDone={() => { localStorage.setItem(TUTORIAL_KEY, '1'); setShowTutorial(false); }} />
@@ -262,6 +304,7 @@ function StatusBar({
   const t = useT();
   const isIndexing = progress?.type === 'indexing';
   const isProxy = progress?.type === 'proxy';
+  const isAnalysis = progress?.type === 'analysis' && !progress.done;
   const percent = progress?.percent ?? (progress?.current && progress?.total ? Math.round((progress.current / progress.total) * 100) : 0);
   return (
     <div className="bg-gradient-to-r from-[#18181B] via-[#0F0F11] to-[#18181B] border-t-2 border-[#27272A] px-6 py-3 backdrop-blur-sm">
@@ -280,6 +323,16 @@ function StatusBar({
               </div>
               <span className="text-[#8B5CF6] font-mono font-bold text-xs">{percent}%</span>
               <button onClick={() => api.stopIndexing()} title={t('app.statusbar.stopIndexing')} className="ml-2 p-1 rounded-md text-[#71717A] hover:text-red-400 hover:bg-[#27272A]">
+                <Square size={12} fill="currentColor" />
+              </button>
+            </>
+          ) : isAnalysis ? (
+            <>
+              <div className="w-3 h-3 bg-[#6366F1] rounded-full animate-pulse"></div>
+              <span className="text-[#A1A1AA]">{t('sp.analysis.statusbar')}</span>
+              <span className="text-[#FAFAFA] font-semibold truncate max-w-[280px]">{progress?.video ?? '...'}</span>
+              <span className="text-[#6366F1] font-mono font-bold text-xs">{percent}%</span>
+              <button onClick={() => api.stopAnalysis()} title={t('sp.analysis.stop')} className="ml-2 p-1 rounded-md text-[#71717A] hover:text-red-400 hover:bg-[#27272A]">
                 <Square size={12} fill="currentColor" />
               </button>
             </>

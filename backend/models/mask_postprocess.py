@@ -281,6 +281,7 @@ def clean_edges_with_background(
     band_hi: float = 0.98,
     min_fb_dist: float = 12.0,
     max_distance_px: int = 48,
+    resolve_alpha: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Background-aware edge cleanup: re-solve the matte's soft band against
     the *actual* local background instead of trusting the model's falloff.
@@ -365,6 +366,11 @@ def clean_edges_with_background(
 
     a_color = np.clip(((c_col - b_col) * fb).sum(axis=1) / np.maximum(denom, 1e-6), 0.0, 1.0)
     a_new = np.where(reliable, a_color, a_model).astype(np.float32)
+    if not resolve_alpha:
+        # Colour-only mode: keep the model's alpha (the colour solve erodes
+        # cel-shaded interiors next to ink lines) and only unpremultiply the
+        # edge RGB against the local background to kill the halo.
+        a_new = a_model.astype(np.float32)
 
     # Spill-free edge colour: unpremultiply against the known background.
     # Below ~0.15 alpha the division amplifies noise, so fall back to the
