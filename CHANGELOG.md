@@ -2,6 +2,38 @@
 
 All notable changes to AMV Tools are documented here.
 
+## 0.5.0-alpha — unreleased
+
+### Mask Mode — roto that holds up on real episodes
+
+- **Measured on real anime, not synthetic clips**: `tests/eval/roto_eval.py`
+  scores Mask Mode on 23 shots from real episodes (calm, dialogue, crowds,
+  hair, motion-blurred action, auras/particles, occlusion, night, a cluttered
+  background, an 11 s shot) against 135 reference masks checked by eye — J,
+  boundary F, edge error, flow-compensated flicker, failures, speed, memory.
+  The 0.4 numbers did not survive: ISNet anime (the engine the docs
+  recommended) J 0.75 with 21 failures out of 107 scored key frames, SAM 2.1
+  tiny from a click J 0.60 with 41 failures. Full report:
+  `docs/reports/chantier-roto.md`.
+- **Auto = detect, then track**: BiRefNet finds the characters on every frame
+  (best detector measured: J 0.85; ISNet anime 0.75, ToonOut 0.72), the main / all characters are picked
+  automatically, SAM 2.1 tracks them from that mask, re-seeds itself after a
+  hard cut or when it drifts, and the detector's outline is kept inside the
+  tracked region. New *Main character / All characters* switch. Brush
+  corrections are keyframes for the tracker. The Cutout finishing job uses the
+  same pipeline.
+- **Manual: a click picks the whole character**: J 0.60 -> 0.76, failures
+  41 -> 18 (a box still goes straight to SAM 2).
+- **No more ~4 s ceiling**: shots longer than 96 frames are tracked window by
+  window with the user keyframes carried along (11 s shot: 9.0 -> 2.1 GB of
+  VRAM, 4.6 -> 3.2 GB of RAM).
+- **Models per memory tier**, shown with their licenses in
+  `Settings > Models`: BiRefNet general + SAM 2.1 tiny (8 GB), base+ (12/16
+  GB), large (24 GB); ISNet anime without tracking on CPU. ToonOut (BiRefNet
+  fine-tuned on anime, MIT) is available as a detector variant. Both mask
+  model settings now default to *Auto*.
+- Mask Mode stays **off by default** (see the report's verdict).
+
 ## 0.4.0-alpha — 2026-10-25
 
 Four tracks land together: a tested and diagnosable app (Reliability), timeline

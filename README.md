@@ -137,21 +137,33 @@ pulls, not full timeline editing.
 
 ![Mini editor trim workflow](assets/screenshots/mini-editor.png)
 
-### 8. Experiment With Alpha Cutouts (beta, off by default)
+### 8. Alpha Cutouts (Mask Mode, beta, off by default)
 
-Mask Mode runs a local roto workflow for short clips. **Still disabled by
-default** — enable it from `Settings > Models`. BiRefNet / ISNet anime can
-auto-detect the foreground subject, SAM 2 helps with manual selection, and the
-exporter can write alpha formats such as ProRes 4444 or VP9 with transparency.
-Since 0.4 you can click on any frame (each one becomes a keyframe), paint
-corrections with an add/remove brush, re-propagate, and review the cutout on a
-checkerboard or a solid colour. Measured matte quality is good on clean shots
-but still poor on motion-blurred action — see [Rotoscope Notes](#rotoscope-notes).
-BiRefNet (MIT) and SAM 2 (Apache-2.0) download on demand; BiRefNet is pinned
-to a fixed upstream revision. **MatAnyone is not shipped**: its S-Lab 1.0
-license is **non-commercial**, so if you install it yourself (see
-`pyproject.toml`), Mask Mode's Auto engine uses it and your cutouts fall
-under that license.
+Mask Mode cuts characters out of a clip and exports them with transparency
+(ProRes 4444 or VP9 alpha) for After Effects. **Still disabled
+by default** — enable it from `Settings > Models`.
+
+- **Auto** (no click): a detector finds the characters on every frame, the
+  *main character* or *all characters* are picked automatically, and SAM 2.1
+  tracks them through the clip — re-detecting them after a hard cut or when
+  the track drifts. Brush corrections become keyframes and are re-propagated.
+- **Manual**: click a character and it is the whole detected character that
+  is tracked (not just the colour patch under the click); a box prompt still
+  goes straight to SAM 2. Clicks on several frames are keyframes.
+- Long shots are tracked window by window, so a 10 s+ shot no longer runs out
+  of memory (11 s shot: 2.1 GB of VRAM instead of 9.0 GB).
+
+Measured on 23 real episode shots (see [Rotoscope Notes](#rotoscope-notes)
+and [the report](docs/reports/chantier-roto.md)): calm shots, dialogue,
+crowds and most action shots come out usable; auras, smoke and
+characters glued to a background object still need the brush.
+Models download on demand and are chosen per memory tier: BiRefNet (MIT,
+pinned revision) and SAM 2.1 (Apache-2.0); ISNet anime (Apache-2.0) and
+ToonOut (MIT weights, CC-BY-4.0 dataset) are available as alternative
+detectors. **MatAnyone is not shipped**: its S-Lab 1.0 license is
+**non-commercial**, so if you install it yourself (see `pyproject.toml`),
+Mask Mode's MatAnyone engine uses it and your cutouts fall under that
+license.
 
 ![Mask mode alpha export](assets/screenshots/mask-mode.png)
 
@@ -232,6 +244,13 @@ allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0).
 |---|---|---|
 | SigLIP 2 base / so400m NaFlex (google) | 1.5 / 4.5 GB | Apache-2.0 |
 | wd-vit / wd-eva02-large tagger v3 (SmilingWolf) | 0.4 / 1.3 GB | Apache-2.0 |
+| Mask Mode detector: BiRefNet general (ZhengPeng7) | 445 MB | MIT |
+| Mask Mode tracker: SAM 2.1 tiny / base+ / large (Meta) | 156 / 324 / 898 MB | Apache-2.0 |
+| Mask Mode alternatives: ISNet anime-seg (SkyTNT) / ToonOut (joelseytre) | 176 / 885 MB | Apache-2.0 / MIT (dataset CC-BY-4.0) |
+
+Mask Mode per tier: BiRefNet general + SAM 2.1 tiny (Fast, NVIDIA 8 GB, Mac
+8/16 GB), + base+ (NVIDIA 12/16 GB, Mac 24/32 GB), + large (NVIDIA 24 GB, Max);
+ISNet anime without tracking on CPU. The Mac choices are not measured yet.
 
 ## Send To Your Editor
 
@@ -586,57 +605,52 @@ runs the backend/frontend test suites on every push and pull request.
 > The roto workflow is **beta and disabled by default.** Enable it under
 > `Settings > Models`.
 
-The roto workflow is designed for short clips. Use the mini editor trim handles
-before opening Mask Mode; the mask session follows the selected trim range.
+Trim the clip in the mini editor first: the mask session follows the trim
+range. Shots of any length work — beyond 4 s they are tracked window by
+window with bounded memory.
+
+How the engines work (0.5):
+
+- **Auto**: the detector (BiRefNet; ISNet anime on CPU) runs on every frame,
+  the *main character* (biggest, most central) or *all characters* are picked
+  on the clearest frame of each shot, and SAM 2.1 tracks them. Where the
+  track drifts away from what the detector sees, or after a hard cut, it
+  re-seeds itself. Only the detector components belonging to the tracked
+  character are kept, so a second character or a house that the detector
+  also found does not leak in.
+- **Manual**: a click selects the detected character under it (then tracked
+  like Auto); a box goes to SAM 2 as before. Without a GPU tier (CPU) clicks
+  go to SAM 2 directly.
 
 Correcting a matte:
 
-- Scrub to any frame before tracking and click there — every clicked frame is
-  a keyframe for SAM 2, which now propagates both forward and backward.
 - `Brush +` / `Brush −` paint the matte of the current frame. The corrected
-  frame is pinned, and with the Manual engine it is fed back to SAM 2 as a
-  mask prompt: **Re-propagate** repairs the neighbouring frames too.
+  frame is pinned and becomes a keyframe of the tracker: **Re-propagate**
+  repairs the neighbouring frames too.
+- Scrub to any frame and click there — every clicked frame is a keyframe.
 - `Checkerboard` / `Color` show the actual cutout (with the export cleanup)
   instead of the darkened overlay, which is how edge halos are judged.
 
 Useful settings:
 
-- `Roto resolution`: raises the frame size sent to the roto models. Higher
-  values preserve hair detail but are slower.
-- `Auto model`: `anime` (ISNet anime-seg) is trained specifically on anime
-  characters and is usually the best pick on cel-shaded footage; `HR` can help
-  on fine outlines and hair, at a VRAM cost.
-- `Edge refine at export`: guided-filter upsampling that snaps the matte edge
-  onto full-resolution line work. Nearly free; keep it on.
-- `BG-aware edge cleanup`: removes the old-background colour from the
-  semi-transparent edge pixels (colour only since 0.4 — the matte itself is no
-  longer re-solved, which used to eat cel-shaded interiors). Keep it on.
-- `Temporal smoothing`: flow-aligned temporal median over ±2 frames; removes
-  per-frame flicker without dragging ghosts behind moving edges. Hard cuts
-  reset it automatically.
-- `RGB decontaminate export`: slower export path that reduces old-background
-  color under semi-transparent edges.
-- `Soft-alpha BG cleanup`: use lightly; aggressive cleanup can remove real
-  hair or clothing detail.
+- `Auto model` / `SAM 2 variant`: *Auto* picks per memory tier (see the tier
+  table in `Settings > Models`). `toonout` and `anime` are alternative
+  detectors; on real episodes BiRefNet general measured best.
+- `Roto resolution`, `Edge refine at export`, `BG-aware edge cleanup`,
+  `Temporal smoothing`, `RGB decontaminate export`, `Soft-alpha BG cleanup`:
+  unchanged since 0.4 (keep the first four on).
 
-Automatic roto will not match hand-drawn masks on every anime shot. Fine hair,
-motion blur, and low-contrast backgrounds can still need manual cleanup in a
-compositor.
+What to expect (23 real shots, see `docs/reports/chantier-roto.md`): calm
+shots, dialogue, several characters, long hair and most fast action are
+usable as is or with a few brush strokes. Still weak: auras and energy
+effects (the detector keeps the glow), characters coming out of smoke, and a
+character glued to a background object (a tractor) — fix those with the
+brush or a box in Manual.
 
-Why Mask Mode is still off by default (0.4): on synthetic clips with exact
-ground truth, the Auto engine (ISNet anime) now keeps ~0.98 IoU with low
-flicker on walking, low-contrast and hard-cut shots — the 0.3 post-processing
-was what degraded it (see CHANGELOG) — but motion-blurred action stays poor
-(0.67 IoU), the default BiRefNet checkpoint could not be benchmarked on a
-CPU-only machine, and SAM 2 (Manual) takes ~20-40 s per frame on CPU. It should
-be turned on by default once the benchmark has been run on real annotated
-footage with a GPU.
-
-Measuring it: `uv run python -m backend.finish.bench_mask --models-dir <dir
-with isnetis.onnx / sam2.1_hiera_tiny.pt> --sprite <transparent character PNG>`
-renders synthetic clips with exact ground-truth alpha (walk, motion-blurred
-action, low contrast, hard cut) and reports IoU, edge error, temporal flicker
-(dtSSD) and composite error for the 0.3 and 0.4 pipelines.
+Measuring it: `uv run python -m tests.eval.roto_eval --help` (extract shots,
+build and review reference masks, run a method, score, render boards). The
+synthetic benchmark of 0.4 is still there: `uv run python -m
+backend.finish.bench_mask`.
 
 ## Repository Layout
 
