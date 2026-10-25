@@ -10,6 +10,7 @@ export const settingsStrings: Dict = {
   'settings.batch.label': { en: 'Batch size', fr: 'Taille de batch' },
   'settings.batch.hint': { en: 'Frames processed per inference pass. Higher = faster indexing but more VRAM; lower it if you hit out-of-memory errors.', fr: 'Nombre d\'images traitées par passe d\'inférence. Plus haut = indexation plus rapide mais plus de VRAM ; à baisser en cas d\'erreur mémoire.' },
   'settings.batch.rec': { en: 'Detected: {gpu} ({vram} GB) → recommended ≈ {rec}', fr: 'Détecté : {gpu} ({vram} Go) → recommandé ≈ {rec}' },
+  'settings.batch.rec.mps': { en: 'Detected: {gpu}, unified memory ({vram} GB usable by the GPU) → recommended ≈ {rec}. On Apple Silicon a bigger batch gains little (< 10 %).', fr: 'Détecté : {gpu}, mémoire unifiée ({vram} Go utilisables par le GPU) → recommandé ≈ {rec}. Sur Apple Silicon, un batch plus grand gagne peu (< 10 %).' },
   'settings.batch.rec.cpu': { en: 'CPU mode: batch size has little effect; 4-8 is fine.', fr: 'Mode CPU : la taille de batch a peu d\'effet ; 4-8 suffit.' },
   'settings.batch.apply': { en: 'Apply', fr: 'Appliquer' },
 
@@ -158,6 +159,7 @@ export const settingsStrings: Dict = {
   // Export section
   'settings.export.codec.label': { en: 'Codec', fr: 'Codec' },
   'settings.export.codec.hint': { en: 'Video codec for exported clips. Hardware H.264 = Premiere-style \'Match Source — Adaptive High Bitrate\': NVENC on NVIDIA, VideoToolbox on Mac, VBR 1-pass targeting ~15 Mbps at 1080p23.976 (scales with resolution/fps), Rec.709.', fr: 'Codec vidéo des clips exportés. H.264 matériel = préréglage façon Premiere « Match Source — Adaptive High Bitrate » : NVENC sur NVIDIA, VideoToolbox sur Mac, VBR 1 passe visant ~15 Mbps en 1080p23.976 (s\'adapte à la résolution/fps), Rec.709.' },
+  'settings.export.codec.opt.auto': { en: 'Automatic — hardware H.264 when available, otherwise H.264 CPU (CRF)', fr: 'Automatique — H.264 matériel si disponible, sinon H.264 CPU (CRF)' },
   'settings.export.codec.opt.nvenc': { en: 'H.264 Hardware (NVENC / VideoToolbox) — Match source, high bitrate', fr: 'H.264 matériel (NVENC / VideoToolbox) — Fidèle à la source, bitrate élevé' },
   'settings.export.crf.label': { en: 'CRF', fr: 'CRF' },
   'settings.export.crf.hint': { en: 'Lower = better quality, larger files. Not used by the hardware match-source preset (it targets a bitrate instead).', fr: 'Plus bas = meilleure qualité, fichiers plus gros. Non utilisé par le préréglage matériel match-source (il vise un bitrate à la place).' },

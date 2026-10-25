@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 type BootstrapState = { phase: 'starting' | 'ready' | 'error'; port: number };
 
+const apiToken = String(ipcRenderer.sendSync('amv:get-token') ?? '');
+
 const bridge = {
+  apiToken,
   getApiPort: () => ipcRenderer.invoke('amv:get-port'),
   getBootstrapState: () => ipcRenderer.invoke('amv:bootstrap-state') as Promise<BootstrapState>,
   cleanReinstall: () => ipcRenderer.invoke('amv:clean-reinstall') as Promise<{ ok: boolean }>,
@@ -11,6 +14,7 @@ const bridge = {
   saveFileDialog: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) =>
     ipcRenderer.invoke('amv:save-dialog', opts) as Promise<string | null>,
   reveal: (p: string) => ipcRenderer.invoke('amv:reveal', p),
+  openPath: (p: string) => ipcRenderer.invoke('amv:open-path', p) as Promise<string>,
   platform: () => process.platform,
   onProgress: (cb: (e: any) => void) => {
     const listener = (_: unknown, payload: any) => cb(payload);

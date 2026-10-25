@@ -33,6 +33,7 @@ class SigLIP2Model:
         self.max_num_patches = int(max_num_patches) if max_num_patches else 128
         self._model = None
         self._processor = None
+        self._processor_on_device = True
         self._lock = threading.Lock()
         self._last_used = 0.0
         self._offload_thread: Optional[threading.Thread] = None
@@ -46,6 +47,10 @@ class SigLIP2Model:
                 return
             import torch
             from transformers import AutoProcessor, Siglip2Model
+
+            from ..model_download import ensure_license_allowed
+            # first download only (cached models: no network call)
+            ensure_license_allowed(self.checkpoint, token=self.hf_token)
 
             if self.device.backend == "cuda" and hasattr(torch, "set_float32_matmul_precision"):
                 torch.set_float32_matmul_precision("high")
@@ -108,6 +113,16 @@ class SigLIP2Model:
                 self._model = None
             empty_device_cache(self.device.backend)
 
+    def _to_device(self, inputs) -> dict:
+        """Move processor outputs to the model device. Asynchronous copies
+        only on CUDA: on MPS a ``non_blocking`` copy from pageable memory
+        races with the source tensors being freed as soon as this dict
+        replaces the processor's — measured on an M1 Pro, 30/30 batches
+        reached the GPU corrupted (garbage embeddings, or "Height of resized
+        positional embeddings must be positive" from NaFlex)."""
+        non_blocking = self.device.backend == "cuda"
+        return {k: v.to(self.device.torch_device, non_blocking=non_blocking) for k, v in inputs.items()}
+
     def embed_images(self, images: List[Image.Image], max_num_patches: Optional[int] = None) -> np.ndarray:
         if max_num_patches is None:
             max_num_patches = self.max_num_patches
@@ -115,12 +130,22 @@ class SigLIP2Model:
         self._ensure_loaded()
         self._touch()
         kwargs = {"return_tensors": "pt"}
+        if self.device.backend in ("cuda", "mps") and self._processor_on_device:
+            # The torchvision-backed processor resizes/patchifies on the GPU
+            # when given a device — on CUDA that, not the model, was the
+            # embed pass's bottleneck (GPU ~2 % busy at batch 8). On MPS the
+            # processor's own copy to the device is a blocking one.
+            kwargs["device"] = self.device.torch_device
         try:
             kwargs["max_num_patches"] = max_num_patches
             inputs = self._processor(images=images, **kwargs)
-        except TypeError:
+        except (TypeError, ValueError):
+            if "device" in kwargs:
+                # Older/slow (PIL) processor: no device kwarg, stay on CPU.
+                self._processor_on_device = False
+                return self.embed_images(images, max_num_patches=max_num_patches)
             inputs = self._processor(images=images, return_tensors="pt")
-        inputs = {k: v.to(self.device.torch_device, non_blocking=True) for k, v in inputs.items()}
+        inputs = self._to_device(inputs)
         try:
             with torch.inference_mode():
                 out = self._model.get_image_features(**inputs)
@@ -156,7 +181,7 @@ class SigLIP2Model:
             max_length=64,
             return_tensors="pt",
         )
-        inputs = {k: v.to(self.device.torch_device, non_blocking=True) for k, v in inputs.items()}
+        inputs = self._to_device(inputs)
         with torch.inference_mode():
             out = self._model.get_text_features(**inputs)
             feats = out.pooler_output if hasattr(out, "pooler_output") else out

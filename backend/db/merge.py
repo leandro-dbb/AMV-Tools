@@ -7,10 +7,20 @@ different machines.
 from __future__ import annotations
 
 import sqlite3
+import threading
+from contextlib import closing
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from .schema import get_conn, init_db
+
+# Held for the whole merge: indexing / re-embedding refuse to start meanwhile
+# (they would fight the merge for the library's write lock).
+MERGE_LOCK = threading.Lock()
+
+
+def merge_running() -> bool:
+    return MERGE_LOCK.locked()
 
 
 def merge_databases(target_db: str, sources: List[str],
@@ -29,8 +39,11 @@ def merge_databases(target_db: str, sources: List[str],
                 progress_cb(f"Merging {i+1}/{len(safe)}: {Path(src).name}")
             try:
                 init_db(src)
-                src_uri = f"file:{Path(src).as_posix()}?mode=ro"
-                with sqlite3.connect(src_uri, uri=True, timeout=10.0) as src_conn:
+                # as_uri() percent-encodes '#', '?', '%'…; closing() releases
+                # the file (``with connect()`` alone only commits — Windows
+                # kept the source locked)
+                src_uri = Path(src).resolve().as_uri() + "?mode=ro"
+                with closing(sqlite3.connect(src_uri, uri=True, timeout=10.0)) as src_conn:
                     sc = src_conn.cursor()
                     sc.execute("""SELECT id, filepath, display_name, duration_ms, fps, resolution,
                                           modified_at, model_version, status FROM videos""")

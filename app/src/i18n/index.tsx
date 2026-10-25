@@ -12,12 +12,18 @@ import { libraryStrings } from './strings.library';
 import { editorStrings } from './strings.editor';
 import { maskStrings } from './strings.mask';
 import { onboardingStrings } from './strings.onboarding';
+import { reliabilityStrings } from './strings.reliability';
+import { timelineStrings } from './strings.timeline';
+import { searchPlusStrings } from './strings.searchplus';
+import { finishStrings } from './strings.finish';
+import { modelsStrings } from './strings.models';
+import { autotuneStrings } from './strings.autotune';
 
 export type Lang = 'en' | 'fr';
 export type Entry = { en: string; fr: string };
 export type Dict = Record<string, Entry>;
 
-const DICT: Dict = {
+export const DICT: Dict = {
   ...commonStrings,
   ...appStrings,
   ...settingsStrings,
@@ -28,6 +34,12 @@ const DICT: Dict = {
   ...editorStrings,
   ...maskStrings,
   ...onboardingStrings,
+  ...reliabilityStrings,
+  ...timelineStrings,
+  ...searchPlusStrings,
+  ...finishStrings,
+  ...modelsStrings,
+  ...autotuneStrings,
 };
 
 const LANG_KEY = 'amv-lang';

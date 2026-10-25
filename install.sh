@@ -23,10 +23,10 @@ if [ "$(uname -s)" = "Darwin" ]; then
   # macOS: the mps extra is the full-featured baseline (torch with Metal/MPS,
   # onnxruntime with the Core ML EP, SAM 2 for the roto feature).
   echo "Syncing Apple Silicon (MPS) baseline..."
-  "$UV_EXE" sync --extra mps
+  "$UV_EXE" sync --no-dev --extra mps
 else
   echo "Syncing CPU-only baseline (GPU backend installs in-app)..."
-  "$UV_EXE" sync --extra cpu
+  "$UV_EXE" sync --no-dev --extra cpu
 fi
 
 if ! command -v npm >/dev/null 2>&1; then

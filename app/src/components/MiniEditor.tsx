@@ -4,6 +4,8 @@ import { api } from '../api/client';
 import type { AppSettings, SceneResult, TagSummary, VideoSummary } from '../api/types';
 import { useT } from '../i18n';
 import MaskMode from './MaskMode';
+import { SimilarButton } from './SceneBadges';
+import FinishMenu from './FinishMenu';
 
 interface MiniEditorProps {
   scenes: SceneResult[];
@@ -344,6 +346,14 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                 {t('editor.mask')}
               </button>
             )}
+            <SimilarButton sceneId={scene.id} label
+                           className="ml-3 px-4 py-2.5 rounded-xl text-sm font-semibold bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] hover:text-[#FAFAFA] border-2 border-[#8B5CF6]/40 hover:border-[#8B5CF6] whitespace-nowrap" />
+            {/* Finishing passes (upscale / slow-mo / depth / cutout) on the
+                trimmed window. */}
+            <FinishMenu
+              className="ml-3"
+              sources={[{ scene_id: scene.id, start_ms: trimStart, end_ms: trimEnd, label: `${scene.video_display} #${scene.scene_index}` }]}
+            />
             {/* Export button lives in the header so it stays visible regardless
                 of window size or how busy the bottom bar gets. */}
             <button

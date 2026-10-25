@@ -393,8 +393,15 @@ function DbRow({ db, onChange, onRelink }: { db: { path: string; scenes: number;
   const [maintMsg, setMaintMsg] = useState<string | null>(null);
 
   async function setPrimary() {
-    await api.setPrimaryDatabase(db.path);
-    onChange();
+    setMaintMsg(null);
+    try {
+      await api.setPrimaryDatabase(db.path);
+      onChange();
+    } catch (e) {
+      // 409 while indexing / re-embedding: show the sidecar's reason
+      const m = /"detail":\s*"([^"]*)"/.exec((e as Error).message);
+      setMaintMsg(t('common.error', { message: m ? m[1] : (e as Error).message }));
+    }
   }
 
   async function cleanup() {
@@ -420,8 +427,13 @@ function DbRow({ db, onChange, onRelink }: { db: { path: string; scenes: number;
 
   async function remove() {
     if (!confirm(t('settings.db.row.confirmRemove', { path: db.path }))) return;
-    await api.removeDatabase(db.path);
-    onChange();
+    try {
+      await api.removeDatabase(db.path);
+      onChange();
+    } catch (e) {
+      const m = /"detail":\s*"([^"]*)"/.exec((e as Error).message);
+      setMaintMsg(t('common.error', { message: m ? m[1] : (e as Error).message }));
+    }
   }
 
   return (

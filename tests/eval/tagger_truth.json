@@ -1,0 +1,594 @@
+{
+ "about": "Hand annotation (chantier 4) of 60 scenes (20 per episode, evenly spaced, scenes >= 1 s) of DBS Beerus 01-02 and Black Clover S02E04: which characters are visible and which of 21 visual tags apply. Black Clover's new characters could not be named reliably by the annotator and are left unannotated (no character truth for that episode).",
+ "general_threshold": 0.35,
+ "character_threshold": 0.85,
+ "character_map": {
+  "goku": [
+   "son_goku"
+  ],
+  "beerus": [
+   "beerus"
+  ],
+  "whis": [
+   "whis",
+   "whis_(dragon_ball)"
+  ],
+  "vegeta": [
+   "vegeta"
+  ],
+  "mr_satan": [
+   "mr._satan",
+   "mr._satan_(dragon_ball)"
+  ],
+  "king_kai": [
+   "north_kaiou",
+   "kaiou_(dragon_ball)",
+   "king_kai"
+  ],
+  "frieza": [
+   "frieza"
+  ],
+  "cell": [
+   "cell_(dragon_ball)"
+  ]
+ },
+ "tag_map": {
+  "outdoors": [
+   "outdoors"
+  ],
+  "indoors": [
+   "indoors"
+  ],
+  "sky": [
+   "sky",
+   "blue_sky"
+  ],
+  "cloud": [
+   "cloud",
+   "cloudy_sky"
+  ],
+  "tree": [
+   "tree"
+  ],
+  "night": [
+   "night",
+   "night_sky"
+  ],
+  "space": [
+   "space",
+   "starry_sky",
+   "star_(sky)",
+   "planet"
+  ],
+  "multiple_boys": [
+   "multiple_boys"
+  ],
+  "1boy": [
+   "1boy"
+  ],
+  "1girl": [
+   "1girl"
+  ],
+  "smile": [
+   "smile",
+   "grin"
+  ],
+  "open_mouth": [
+   "open_mouth"
+  ],
+  "closed_eyes": [
+   "closed_eyes"
+  ],
+  "food": [
+   "food",
+   "meat"
+  ],
+  "building": [
+   "building",
+   "architecture"
+  ],
+  "water": [
+   "water",
+   "ocean"
+  ],
+  "black_hair": [
+   "black_hair"
+  ],
+  "blonde_hair": [
+   "blonde_hair"
+  ],
+  "aura": [
+   "aura",
+   "glowing"
+  ],
+  "weapon": [
+   "weapon",
+   "sword"
+  ],
+  "no_humans": [
+   "no_humans"
+  ]
+ },
+ "scenes": {
+  "v1_0015598_0025734": {
+   "characters": [],
+   "tags": [
+    "space",
+    "no_humans"
+   ]
+  },
+  "v1_0077535_0078912": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "aura",
+    "1boy"
+   ]
+  },
+  "v1_0127460_0134801": {
+   "characters": [],
+   "tags": [
+    "space",
+    "no_humans"
+   ]
+  },
+  "v1_0194402_0196738": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "sky",
+    "outdoors",
+    "black_hair",
+    "1boy"
+   ]
+  },
+  "v1_0227143_0235902": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "blonde_hair",
+    "aura",
+    "1boy"
+   ]
+  },
+  "v1_0276359_0278695": {
+   "characters": [
+    "cell"
+   ],
+   "tags": [
+    "aura",
+    "1boy"
+   ]
+  },
+  "v1_0320903_0322363": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "blonde_hair",
+    "aura",
+    "1boy"
+   ]
+  },
+  "v1_0360151_0363071": {
+   "characters": [],
+   "tags": [
+    "multiple_boys",
+    "aura"
+   ]
+  },
+  "v1_0428886_0431055": {
+   "characters": [
+    "beerus"
+   ],
+   "tags": [
+    "1boy"
+   ]
+  },
+  "v1_0554428_0555638": {
+   "characters": [
+    "mr_satan"
+   ],
+   "tags": [
+    "black_hair",
+    "1boy",
+    "sky",
+    "cloud",
+    "outdoors"
+   ]
+  },
+  "v1_0663954_0672254": {
+   "characters": [
+    "king_kai"
+   ],
+   "tags": [
+    "1boy",
+    "open_mouth"
+   ]
+  },
+  "v1_0731480_0733524": {
+   "characters": [],
+   "tags": [
+    "indoors",
+    "1boy"
+   ]
+  },
+  "v1_0843592_0855479": {
+   "characters": [
+    "vegeta"
+   ],
+   "tags": [
+    "1boy",
+    "indoors"
+   ]
+  },
+  "v1_0928594_0932806": {
+   "characters": [],
+   "tags": [
+    "food",
+    "tree",
+    "outdoors"
+   ]
+  },
+  "v1_0976600_0984650": {
+   "characters": [
+    "whis"
+   ],
+   "tags": [
+    "outdoors"
+   ]
+  },
+  "v1_1079828_1089379": {
+   "characters": [
+    "beerus"
+   ],
+   "tags": [
+    "aura",
+    "1boy"
+   ]
+  },
+  "v1_1119660_1120786": {
+   "characters": [
+    "beerus"
+   ],
+   "tags": [
+    "1boy",
+    "smile"
+   ]
+  },
+  "v1_1195152_1201992": {
+   "characters": [
+    "beerus",
+    "whis"
+   ],
+   "tags": [
+    "multiple_boys"
+   ]
+  },
+  "v1_1256004_1257589": {
+   "characters": [],
+   "tags": [
+    "no_humans"
+   ]
+  },
+  "v1_1334875_1336376": {
+   "characters": [],
+   "tags": [
+    "aura"
+   ]
+  },
+  "v2_0013221_0014556": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "1boy"
+   ]
+  },
+  "v2_0072614_0073782": {
+   "characters": [
+    "frieza"
+   ],
+   "tags": []
+  },
+  "v2_0100600_0106439": {
+   "characters": [],
+   "tags": [
+    "tree",
+    "outdoors",
+    "no_humans"
+   ]
+  },
+  "v2_0193610_0195945": {
+   "characters": [
+    "beerus",
+    "whis"
+   ],
+   "tags": [
+    "indoors",
+    "multiple_boys"
+   ]
+  },
+  "v2_0286661_0321529": {
+   "characters": [],
+   "tags": [
+    "space",
+    "no_humans"
+   ]
+  },
+  "v2_0385426_0393226": {
+   "characters": [],
+   "tags": [
+    "aura",
+    "outdoors",
+    "1boy"
+   ]
+  },
+  "v2_0461669_0463296": {
+   "characters": [],
+   "tags": [
+    "1boy"
+   ]
+  },
+  "v2_0502251_0505838": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "black_hair",
+    "1boy",
+    "open_mouth"
+   ]
+  },
+  "v2_0581914_0587628": {
+   "characters": [
+    "whis",
+    "beerus"
+   ],
+   "tags": [
+    "sky",
+    "cloud",
+    "outdoors",
+    "multiple_boys"
+   ]
+  },
+  "v2_0669794_0680346": {
+   "characters": [
+    "king_kai",
+    "goku",
+    "whis",
+    "beerus"
+   ],
+   "tags": [
+    "sky",
+    "cloud",
+    "outdoors",
+    "multiple_boys",
+    "black_hair"
+   ]
+  },
+  "v2_0746245_0754712": {
+   "characters": [
+    "king_kai",
+    "goku",
+    "whis",
+    "beerus"
+   ],
+   "tags": [
+    "sky",
+    "cloud",
+    "outdoors",
+    "multiple_boys"
+   ]
+  },
+  "v2_0864822_0867491": {
+   "characters": [],
+   "tags": [
+    "sky",
+    "cloud",
+    "outdoors",
+    "no_humans"
+   ]
+  },
+  "v2_0915873_0916874": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "blonde_hair",
+    "closed_eyes",
+    "1boy"
+   ]
+  },
+  "v2_0962795_0963879": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "blonde_hair",
+    "sky",
+    "outdoors",
+    "aura",
+    "1boy"
+   ]
+  },
+  "v2_1022521_1024231": {
+   "characters": [
+    "beerus"
+   ],
+   "tags": []
+  },
+  "v2_1081747_1082748": {
+   "characters": [],
+   "tags": [
+    "cloud",
+    "sky",
+    "outdoors",
+    "no_humans"
+   ]
+  },
+  "v2_1145936_1148272": {
+   "characters": [
+    "goku",
+    "beerus"
+   ],
+   "tags": [
+    "blonde_hair",
+    "sky",
+    "cloud",
+    "outdoors",
+    "multiple_boys"
+   ]
+  },
+  "v2_1188353_1192566": {
+   "characters": [
+    "goku"
+   ],
+   "tags": [
+    "blonde_hair",
+    "sky",
+    "cloud",
+    "outdoors",
+    "1boy"
+   ]
+  },
+  "v2_1276942_1278944": {
+   "characters": [
+    "beerus"
+   ],
+   "tags": []
+  },
+  "v2_1316773_1330662": {
+   "characters": [],
+   "tags": [
+    "space",
+    "night",
+    "no_humans"
+   ]
+  },
+  "v3_0016391_0032991": {
+   "characters": [],
+   "tags": [
+    "smile"
+   ]
+  },
+  "v3_0088254_0090590": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_0130004_0136010": {
+   "characters": [],
+   "tags": [
+    "no_humans"
+   ]
+  },
+  "v3_0168626_0170628": {
+   "characters": [],
+   "tags": [
+    "no_humans"
+   ]
+  },
+  "v3_0197238_0199991": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_0261177_0299299": {
+   "characters": [],
+   "tags": [
+    "outdoors",
+    "building",
+    "black_hair",
+    "blonde_hair"
+   ]
+  },
+  "v3_0410827_0418084": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_0604353_0635760": {
+   "characters": [],
+   "tags": [
+    "black_hair",
+    "blonde_hair",
+    "multiple_boys",
+    "open_mouth"
+   ]
+  },
+  "v3_0791749_0794752": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_0840047_0841674": {
+   "characters": [],
+   "tags": [
+    "black_hair",
+    "1boy",
+    "smile",
+    "closed_eyes",
+    "open_mouth"
+   ]
+  },
+  "v3_0863153_0868659": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_0915164_0918167": {
+   "characters": [],
+   "tags": [
+    "no_humans"
+   ]
+  },
+  "v3_0976809_0978978": {
+   "characters": [],
+   "tags": [
+    "black_hair"
+   ]
+  },
+  "v3_1070152_1086794": {
+   "characters": [],
+   "tags": [
+    "black_hair"
+   ]
+  },
+  "v3_1135175_1136343": {
+   "characters": [],
+   "tags": [
+    "no_humans"
+   ]
+  },
+  "v3_1161493_1163745": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_1193567_1197613": {
+   "characters": [],
+   "tags": []
+  },
+  "v3_1272604_1274606": {
+   "characters": [],
+   "tags": [
+    "night",
+    "building",
+    "tree",
+    "outdoors",
+    "no_humans"
+   ]
+  },
+  "v3_1299089_1301091": {
+   "characters": [],
+   "tags": [
+    "smile"
+   ]
+  },
+  "v3_1377918_1383340": {
+   "characters": [],
+   "tags": [
+    "weapon",
+    "no_humans"
+   ]
+  }
+ }
+}

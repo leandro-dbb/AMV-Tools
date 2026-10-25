@@ -1,8 +1,10 @@
-import { ChevronDown, MoreVertical, Film, Tag, ArrowUpDown, Loader2, Check, Layers, Download, Search } from 'lucide-react';
+import { ChevronDown, Copy, Film, Tag, ArrowUpDown, Loader2, Check, Layers, Download, Search, Clapperboard } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useT } from '../i18n';
+import { requestSimilar } from '../searchplus';
 import type { SceneResult, TagSummary, VideoSummary } from '../api/types';
+import TimelineExportDialog from './TimelineExportDialog';
 
 interface Props {
   onOpenScene: (scene: SceneResult, allScenes: SceneResult[], index: number) => void;
@@ -28,6 +30,7 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportSummary, setExportSummary] = useState<{ text: string; isError: boolean } | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   useEffect(() => {
     api.listVideos().then((r) => {
@@ -265,6 +268,10 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
         </div>
         <div className="flex items-center gap-3">
           {exportSummary && <span className={`text-xs font-mono ${exportSummary.isError ? 'text-red-400' : 'text-[#8B5CF6]'}`}>{exportSummary.text}</span>}
+          <button disabled={selected.size === 0} onClick={() => setTimelineOpen(true)} className="border-2 border-[#8B5CF6]/50 bg-[#18181B] text-[#FAFAFA] px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-[#8B5CF6]/15 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2">
+            <Clapperboard size={14} className="text-[#8B5CF6]" />
+            {t('timeline.button')}
+          </button>
           <button disabled={selected.size === 0 || exporting} onClick={bulkExport} className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-6 py-2.5 rounded-xl text-sm font-semibold hover:shadow-lg hover:shadow-[#8B5CF6]/50 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2">
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             {selected.size > 0 ? t('tags.exportSelectedCount', { count: selected.size }) : t('tags.exportSelected')}
@@ -300,6 +307,15 @@ export default function TagsTab({ onOpenScene, hoverDelayMs }: Props) {
           );
         })}
       </div>
+
+      {timelineOpen && (
+        <TimelineExportDialog
+          selection={{ scene_ids: Array.from(selected) }}
+          defaultName="AMV selection"
+          scopeLabel={t('timeline.scope.selection')}
+          onClose={() => setTimelineOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -338,8 +354,8 @@ function TagRow({ occ, isSelected, onToggle, onOpen, hoverDelayMs, showVideo }:
       <div className="bg-gradient-to-br from-[#8B5CF6]/20 to-[#EC4899]/20 text-[#FAFAFA] px-4 py-2 rounded-lg font-mono font-bold border border-[#8B5CF6]/30 backdrop-blur-sm">
         {Math.round((occ.confidence ?? occ.score) * 100)}
       </div>
-      <button onClick={(e) => e.stopPropagation()} className="text-[#71717A] hover:text-[#8B5CF6] transition-colors p-2 hover:bg-[#27272A] rounded-lg">
-        <MoreVertical size={20} />
+      <button onClick={(e) => { e.stopPropagation(); requestSimilar(occ.id); }} title={t('sp.action.similarTitle')} className="text-[#71717A] hover:text-[#8B5CF6] transition-colors p-2 hover:bg-[#27272A] rounded-lg">
+        <Copy size={20} />
       </button>
     </div>
   );

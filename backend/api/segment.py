@@ -15,6 +15,14 @@ Workflow exposed to the MiniEditor MaskMode:
      ProRes 4444 alpha .mov (or VP9 alpha .webm).
   6. ``DELETE /api/scene/segment/{session}`` — clean the tempdir.
 
+Corrections (0.4): every preview with clicks on frame N stores a *keyframe*;
+``/track`` conditions SAM 2 on all keyframes and propagates both ways.
+``POST /segment/{session}/brush`` paints add/remove strokes on frame N; the
+corrected matte is pinned for that frame and, with the Manual engine, fed
+back to SAM 2 as a mask keyframe on the next ``/track`` (re-propagation).
+``GET /segment/{session}/cutout/{idx}`` returns the frame cut out with the
+export-grade alpha, for checkerboard / solid-colour review.
+
 Sessions live in process memory (cleared by the Danger Zone reinstall). For a
 single-user desktop app this is fine; if you ever multi-tenant, swap to a real
 KV store with TTL.
@@ -60,8 +68,30 @@ class Prompt(BaseModel):
     engine: Optional[str] = None
 
 
+class KeyframePrompt(BaseModel):
+    frame_idx: int
+    positive: List[Tuple[int, int]] = Field(default_factory=list)
+    negative: List[Tuple[int, int]] = Field(default_factory=list)
+    box: Optional[Tuple[int, int, int, int]] = None
+
+
 class TrackRequest(Prompt):
     session_id: str
+    # Extra click keyframes (Manual engine). Merged with the keyframes the
+    # session already recorded from /preview calls.
+    keyframes: Optional[List[KeyframePrompt]] = None
+
+
+class BrushStroke(BaseModel):
+    points: List[Tuple[float, float]] = Field(max_length=20_000)
+    radius: float = Field(default=12.0, ge=1, le=512)
+    mode: str = "add"  # "add" | "remove"
+
+
+class BrushRequest(BaseModel):
+    frame_idx: int
+    strokes: List[BrushStroke] = Field(default_factory=list)
+    reset: bool = False   # drop the correction pinned on this frame
 
 
 class ExportAlphaRequest(BaseModel):
@@ -92,6 +122,10 @@ class SegmentSession:
     reference_frame_offset: int = 0
     reference_mask: Optional[np.ndarray] = None        # (H, W) bool or float32 alpha, preview only
     last_prompt: Optional[Prompt] = None
+    # frame_idx -> {"positive", "negative", "box"} (Manual engine clicks)
+    keyframes: dict = field(default_factory=dict)
+    # frame_idx -> (H, W) float32 brush-corrected matte, pinned on re-track
+    overrides: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -289,6 +323,9 @@ def preview(scene_id: int, body: Prompt):
     if ref_idx is None:
         ref_idx = session.reference_frame_offset
     ref_idx = max(0, min(len(session.frame_paths) - 1, int(ref_idx)))
+    if ref_idx != session.reference_frame_offset:
+        # Moved to another frame: never show the previous frame's matte here.
+        session.reference_mask = session.overrides.get(ref_idx)
     session.reference_frame_offset = ref_idx
 
     engine = _resolve_engine(body.engine)
@@ -317,7 +354,13 @@ def preview(scene_id: int, body: Prompt):
                     positive_points=body.positive,
                     negative_points=body.negative,
                     box=body.box,
+                    soft=True,
                 )
+                session.keyframes[ref_idx] = {
+                    "positive": list(body.positive), "negative": list(body.negative), "box": body.box,
+                }
+            if ref_idx in session.overrides:
+                mask = session.overrides[ref_idx]
             session.reference_mask = mask
             session.last_prompt = body
 
@@ -331,9 +374,13 @@ def preview(scene_id: int, body: Prompt):
         "frame_h": h,
         "reference_frame_offset": ref_idx,
         "engine": engine,
-        "has_mask": run_mask,
+        "has_mask": session.reference_mask is not None,
         "frame_url": f"/api/scene/segment/{session.session_id}/frame/{ref_idx}",
-        "mask_url": f"/api/scene/segment/{session.session_id}/mask_preview" if run_mask else None,
+        "mask_url": (f"/api/scene/segment/{session.session_id}/mask_preview"
+                     if session.reference_mask is not None else None),
+        "keyframes": sorted(int(k) for k in session.keyframes),
+        "corrected_frames": sorted(int(k) for k in session.overrides),
+        "tracked": session.masks is not None,
     }
 
 
@@ -383,6 +430,126 @@ def session_mask_at(session_id: str, idx: int):
                     headers={"Cache-Control": "no-cache"})
 
 
+def _load_rgb(path: Path) -> np.ndarray:
+    with Image.open(path) as im:
+        return np.asarray(im.convert("RGB"))
+
+
+def _apply_overrides(sess: SegmentSession, masks: np.ndarray) -> np.ndarray:
+    """Brush-corrected frames are authoritative: pin them after any model
+    pass (the user painted exactly what they want there)."""
+    if not sess.overrides:
+        return masks
+    out = masks.astype(np.float32, copy=True)
+    for i, m in sess.overrides.items():
+        if 0 <= i < out.shape[0] and m.shape == out.shape[1:]:
+            out[i] = m
+    return out
+
+
+def _postprocess(sess: SegmentSession, masks: np.ndarray, *, strength_scale: float) -> np.ndarray:
+    from ..finish.matte import postprocess_stack
+
+    models_cfg = get_state().settings.get("models", {})
+    stabilize = bool(models_cfg.get("mask_temporal_smooth_enabled", True)) and masks.shape[0] >= 2
+    strength = float(models_cfg.get("mask_temporal_smooth_strength", 0.5)) * strength_scale
+    frames = [_load_rgb(p) for p in sess.frame_paths]
+    out = postprocess_stack(masks.astype(np.float32), frames, stabilize=stabilize, strength=strength)
+    return _apply_overrides(sess, out)
+
+
+def _paint(mask: np.ndarray, strokes: List[BrushStroke]) -> np.ndarray:
+    import cv2
+
+    out = np.clip(mask.astype(np.float32), 0.0, 1.0).copy()
+    h, w = out.shape
+    for st in strokes:
+        if not st.points:
+            continue
+        layer = np.zeros((h, w), np.uint8)
+        r = max(1, int(round(st.radius)))
+        pts = [(int(round(x)), int(round(y))) for x, y in st.points]
+        for a, b in zip(pts, pts[1:] or pts):
+            cv2.line(layer, a, b, 255, thickness=2 * r, lineType=cv2.LINE_AA)
+        cv2.circle(layer, pts[0], r, 255, -1, lineType=cv2.LINE_AA)
+        cov = layer.astype(np.float32) / 255.0
+        if st.mode == "remove":
+            out = out * (1.0 - cov)
+        else:
+            out = np.maximum(out, cov)
+    return out
+
+
+# ── endpoints: corrections ─────────────────────────────────────────────────
+@router.post("/api/scene/segment/{session_id}/brush")
+def brush(session_id: str, body: BrushRequest):
+    """Paint add/remove strokes (frame-pixel coordinates) on frame N's matte.
+    The result is pinned for that frame; with the Manual engine it is also a
+    SAM 2 mask keyframe on the next /track (re-propagation)."""
+    sess = _get_session_or_404(session_id)
+    idx = int(body.frame_idx)
+    if idx < 0 or idx >= len(sess.frame_paths):
+        raise HTTPException(404, "frame out of range")
+    with sess.lock:
+        if body.reset:
+            sess.overrides.pop(idx, None)
+        else:
+            if idx in sess.overrides:
+                base = sess.overrides[idx]
+            elif sess.masks is not None:
+                base = sess.masks[idx]
+            elif idx == sess.reference_frame_offset and sess.reference_mask is not None:
+                base = sess.reference_mask
+            else:
+                w, h = sess.frame_size
+                base = np.zeros((h, w), np.float32)
+            sess.overrides[idx] = _paint(base, body.strokes)
+        if sess.masks is not None:
+            if idx in sess.overrides:
+                if not np.issubdtype(sess.masks.dtype, np.floating):
+                    sess.masks = sess.masks.astype(np.float32)
+                sess.masks[idx] = sess.overrides[idx]
+        if idx == sess.reference_frame_offset and idx in sess.overrides:
+            sess.reference_mask = sess.overrides[idx]
+    return {"ok": True, "frame_idx": idx, "corrected_frames": sorted(int(k) for k in sess.overrides)}
+
+
+@router.delete("/api/scene/segment/{session_id}/keyframes/{frame_idx}")
+def drop_keyframe(session_id: str, frame_idx: int):
+    sess = _get_session_or_404(session_id)
+    with sess.lock:
+        removed = sess.keyframes.pop(int(frame_idx), None) is not None
+    return {"ok": True, "removed": removed, "keyframes": sorted(int(k) for k in sess.keyframes)}
+
+
+@router.get("/api/scene/segment/{session_id}/cutout/{idx}")
+def session_cutout(session_id: str, idx: int):
+    """RGBA PNG of frame N cut out exactly as the export will write it
+    (soft-alpha cleanup + colour-only edge cleanup), for checkerboard /
+    solid-colour review."""
+    sess = _get_session_or_404(session_id)
+    if idx < 0 or idx >= len(sess.frame_paths):
+        raise HTTPException(404, "frame out of range")
+    if sess.masks is not None:
+        mask = sess.masks[idx]
+    elif idx == sess.reference_frame_offset and sess.reference_mask is not None:
+        mask = sess.reference_mask
+    else:
+        raise HTTPException(404, "no matte for this frame yet")
+    models_cfg = get_state().settings.get("models", {})
+    rgb = _load_rgb(sess.frame_paths[idx])
+    alpha = mask.astype(np.float32)
+    if np.issubdtype(mask.dtype, np.floating):
+        alpha = _clean_soft_alpha_for_frame(mask, sess.frame_paths[idx], models_cfg)
+    if bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)):
+        from ..models.mask_postprocess import clean_edges_with_background
+        rgb, alpha = clean_edges_with_background(rgb, alpha, resolve_alpha=False)
+    rgba = np.dstack([rgb, (np.clip(alpha, 0, 1) * 255.0).round().astype(np.uint8)])
+    buf = io.BytesIO()
+    Image.fromarray(rgba, "RGBA").save(buf, format="PNG", optimize=False)
+    return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
 # ── endpoints: track ───────────────────────────────────────────────────────
 @router.post("/api/scene/{scene_id}/segment/track")
 def track(scene_id: int, body: TrackRequest):
@@ -403,6 +570,9 @@ def track(scene_id: int, body: TrackRequest):
     state = get_state()
     engine = _resolve_engine(body.engine)
     n_frames = len(sess.frame_paths)
+    for kf in body.keyframes or []:
+        if not 0 <= int(kf.frame_idx) < n_frames:
+            raise HTTPException(400, f"keyframe {kf.frame_idx} is outside the clip (0-{n_frames - 1})")
     progress_state = {"last_pct": -1}
 
     def progress(seen: int, total: int):
@@ -427,17 +597,10 @@ def track(scene_id: int, body: TrackRequest):
                 with Image.open(fp) as im:
                     masks[i] = birefnet.mask_image(im.convert("RGB"))
                 progress(i + 1, n_frames)
-            # Per-frame inference re-decides the silhouette on every frame —
-            # smooth the stack so static regions stop flickering. Hard cuts /
-            # teleport motion reset the EMA history inside the helper.
-            models_cfg = state.settings.get("models", {})
-            if bool(models_cfg.get("mask_temporal_smooth_enabled", True)) and n_frames >= 3:
-                from ..models.mask_postprocess import temporal_smooth_alpha
-                masks = temporal_smooth_alpha(
-                    masks,
-                    strength=float(models_cfg.get("mask_temporal_smooth_strength", 0.5)),
-                )
-            sess.masks = masks
+            # Per-frame inference re-decides the silhouette on every frame:
+            # a flow-aligned temporal median removes the flicker without
+            # ghosting moving edges (see finish/matte.py for the numbers).
+            sess.masks = _postprocess(sess, masks, strength_scale=1.0)
         elif engine == "matanyone":
             # Two-stage: BiRefNet for the chosen reference-frame seed (good
             # single-frame silhouette on anime), MatAnyone for temporal
@@ -487,26 +650,37 @@ def track(scene_id: int, body: TrackRequest):
                 for pos, orig_idx in enumerate(backward_indices):
                     masks[orig_idx] = backward[pos]
 
-            sess.masks = masks
+            sess.masks = _apply_overrides(sess, masks)
         else:
-            if not body.positive and body.box is None:
+            ref = (body.reference_frame_offset if body.reference_frame_offset is not None
+                   else sess.reference_frame_offset)
+            if body.positive or body.box is not None:
+                sess.keyframes[int(ref)] = {
+                    "positive": list(body.positive), "negative": list(body.negative), "box": body.box,
+                }
+            for kf in body.keyframes or []:
+                if kf.positive or kf.box is not None:
+                    sess.keyframes[int(kf.frame_idx)] = {
+                        "positive": list(kf.positive), "negative": list(kf.negative), "box": kf.box,
+                    }
+            keyframes = [{"frame_idx": i, **kf} for i, kf in sess.keyframes.items()]
+            # Brush corrections become SAM 2 mask prompts: the corrected frame
+            # conditions the propagation of its neighbours (re-propagation).
+            keyframes += [{"frame_idx": i, "mask": m > 0.5} for i, m in sess.overrides.items()]
+            if not keyframes:
                 raise HTTPException(400, "SAM 2 needs at least one positive point or a box")
             sam2 = state.get_sam2()
-            masks = sam2.predict_video_masks(
-                positive_points=body.positive,
-                negative_points=body.negative,
-                box=body.box,
-                reference_frame_offset=(
-                    body.reference_frame_offset
-                    if body.reference_frame_offset is not None
-                    else sess.reference_frame_offset
-                ),
+            masks = sam2.track_keyframes(
+                keyframes,
                 progress_cb=progress,
                 frames_dir=sess.frames_dir,
                 frame_paths=sess.frame_paths,
                 frame_size=sess.frame_size,
+                soft=True,
             )
-            sess.masks = masks
+            # SAM 2's memory already keeps identity stable; a lighter
+            # stabilisation pass only removes decoder edge shimmer.
+            sess.masks = _postprocess(sess, masks, strength_scale=0.5)
 
         sess.last_prompt = Prompt(
             positive=body.positive, negative=body.negative,
@@ -526,6 +700,8 @@ def track(scene_id: int, body: TrackRequest):
         "frame_w": w,
         "frame_h": h,
         "engine": engine,
+        "keyframes": sorted(int(k) for k in sess.keyframes),
+        "corrected_frames": sorted(int(k) for k in sess.overrides),
     }
 
 
@@ -604,6 +780,8 @@ def export_alpha(scene_id: int, body: ExportAlphaRequest):
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
         edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
         bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
+        # CUDA: raw pipes instead of a PNG round-trip (same pixels, ~5x faster).
+        raw_pipes=getattr(get_state().device, "backend", None) == "cuda",
     )
     return {"ok": True, "output": out}
 

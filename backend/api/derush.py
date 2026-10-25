@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import threading
 from pathlib import Path
 from typing import Optional, Union
@@ -30,6 +31,14 @@ router = APIRouter()
 
 _export_lock = threading.Lock()
 _export_running = False
+# Clips exported side by side. Apple Silicon (M1 Pro, 10 clips): 8.0 s one at
+# a time, 5.1 s with 2, 4.65 s with 3 (other clips: 3.0 s with 3, 2.7 with 4,
+# 2.7 with 5, but full pipeline runs: 6.1-6.5 s with 3, 7.4 s with 4) — each
+# ffmpeg alternates between the
+# CPU decode and the VideoToolbox encode, which leave each other idle. NVIDIA
+# decides per codec (``_parallel_exports``); other platforms keep one at a time
+# until measured.
+_EXPORT_WORKERS = 3 if sys.platform == "darwin" else 1
 
 
 # ── bodies ──────────────────────────────────────────────────────────────────
@@ -182,11 +191,28 @@ def derush_delete_folder(folder_id: int):
 
 # ── batch export ────────────────────────────────────────────────────────────
 def _suffix_for_codec(codec: str) -> str:
-    if codec in ("libx264", "libx265", "libsvtav1", "h264_nvenc", "h264_videotoolbox"):
+    if codec in ("auto", "libx264", "libx265", "libsvtav1", "h264_nvenc", "h264_videotoolbox"):
         return ".mp4"
     if codec in ("prores_ks", "dnxhr"):
         return ".mov"
     return ".webm"
+
+
+def _parallel_exports(codec: str) -> int:
+    """Concurrent clip exports: 3 on NVENC (NVDEC decode, frames stay on the
+    GPU) and on macOS (``_EXPORT_WORKERS``), 1 everywhere else (software
+    encoders already use every core)."""
+    if _EXPORT_WORKERS > 1:
+        # measured with VideoToolbox only: x265 / ProRes / SVT-AV1 already
+        # fill every core
+        return _EXPORT_WORKERS if codec in ("auto", "h264_videotoolbox") else 1
+    try:
+        from ..export.ffmpeg import _cuda_decode_available, _hw_h264_encoder
+        if codec in ("auto", "h264_nvenc") and _hw_h264_encoder() == "h264_nvenc" and _cuda_decode_available():
+            return 3
+    except Exception:
+        pass
+    return 1
 
 
 def _export_worker(items: list[dict], export_settings: dict) -> None:
@@ -197,35 +223,60 @@ def _export_worker(items: list[dict], export_settings: dict) -> None:
     suffix = _suffix_for_codec(export_settings["codec"])
     total = len(items)
     done, failed = 0, 0
+    # NVENC: a few clips at a time — each export is mostly ffmpeg/CUDA start-up
+    # and the NVDEC pre-roll, far from filling the decode/encode engines.
+    workers = _parallel_exports(export_settings["codec"])
+    count_lock = threading.Lock()
+    started = [0]
+
+    def export_one(it: dict, target: Path) -> bool:
+        with count_lock:
+            started[0] += 1
+            i = started[0] - 1
+        state.publish({
+            "type": "derush_export", "current": i + 1, "total": total,
+            "percent": int(i / max(1, total) * 100),
+            "message": target.name, "done": False,
+        })
+        try:
+            if not Path(it["filepath"]).exists():
+                raise RuntimeError("source file missing")
+            export_scene(
+                it["filepath"], it["start_ms"], it["end_ms"], str(target),
+                codec=export_settings["codec"], crf=export_settings["crf"],
+                audio=export_settings["audio"], resolution=export_settings["resolution"],
+                audio_bitrate_kbps=int(export_settings.get("audio_bitrate_kbps", 320)),
+            )
+            return True
+        except Exception as exc:
+            log.warning("derush export failed for item %s: %s", it["item_id"], exc)
+            return False
+
     try:
-        for i, it in enumerate(items):
+        # Output names are reserved up front, in order, so clips exported in
+        # parallel never pick the same "_<n>" suffix.
+        jobs: list[tuple[dict, Path]] = []
+        reserved: set[Path] = set()
+        for it in items:
             # exports/derush/<folder>/<custom name | episode_scene>.<ext>
             out_dir = base_dir / "derush" / (_sanitize(it["folder_name"]) if it["folder_name"] else "")
             out_dir.mkdir(parents=True, exist_ok=True)
             stem = it["custom_name"] or f"{it['display_name']}_scene{it['scene_index']:04d}"
             target = out_dir / f"{_sanitize(stem)}{suffix}"
             n = 1
-            while target.exists():
+            while target.exists() or target in reserved:
                 n += 1
                 target = out_dir / f"{_sanitize(stem)}_{n}{suffix}"
-            state.publish({
-                "type": "derush_export", "current": i + 1, "total": total,
-                "percent": int(i / max(1, total) * 100),
-                "message": target.name, "done": False,
-            })
-            try:
-                if not Path(it["filepath"]).exists():
-                    raise RuntimeError("source file missing")
-                export_scene(
-                    it["filepath"], it["start_ms"], it["end_ms"], str(target),
-                    codec=export_settings["codec"], crf=export_settings["crf"],
-                    audio=export_settings["audio"], resolution=export_settings["resolution"],
-                    audio_bitrate_kbps=int(export_settings.get("audio_bitrate_kbps", 320)),
-                )
-                done += 1
-            except Exception as exc:
-                failed += 1
-                log.warning("derush export failed for item %s: %s", it["item_id"], exc)
+            reserved.add(target)
+            jobs.append((it, target))
+        if workers > 1 and len(jobs) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="derush-export") as ex:
+                results = list(ex.map(lambda job: export_one(*job), jobs))
+        else:
+            results = [export_one(it, target) for it, target in jobs]
+        done = sum(results)
+        failed = len(results) - done
         state.publish({
             "type": "derush_export", "current": total, "total": total, "percent": 100,
             "message": f"{done} exported" + (f", {failed} failed" if failed else ""),

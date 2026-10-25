@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # PyTorch's MPS backend still lacks a few ops; opt into the CPU fallback
@@ -17,6 +18,13 @@ from pathlib import Path
 # behaves like an Electron launch (main.ts sets the same variable).
 if sys.platform == "darwin":
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    # The MPS allocator only starts recycling its cached blocks at 1.4x
+    # Metal's working set by default (~16.5 GB on a 16 GB Mac), so SAM 2's
+    # varying per-frame transients grew a 12 GB cache over a ~2 GB live set
+    # and made the machine swap (M1 Pro: 13.1 GB footprint, ~4 GB swapped
+    # for a 2 s clip). At 0.25 the footprint is 7.5 GB, no swap, and no pass
+    # got slower (indexing, upscale, RIFE, depth, SAM 2 measured).
+    os.environ.setdefault("PYTORCH_MPS_LOW_WATERMARK_RATIO", "0.25")
 
 # Allow `python backend/server.py` from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -26,7 +34,9 @@ from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
-from backend.api import ROUTERS  # noqa: E402
+from backend.api import ROUTERS, searchplus  # noqa: E402
+from backend.diagnostics import setup_logging  # noqa: E402
+from backend.security import LocalAccessMiddleware  # noqa: E402
 from backend.state import get_state  # noqa: E402
 
 logging.basicConfig(
@@ -49,8 +59,24 @@ def _silence_proactor_reset(loop, context):
     loop.default_exception_handler(context)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Same order as the former on_event("startup") hooks: the search+ router
+    # hook was registered (via include_router) before the app-level one.
+    searchplus.start_auto_analyze()
+    setup_logging()
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(_silence_proactor_reset)
+    get_state().set_loop(loop)
+    get_state().start_search_warmup()
+    from backend import autotune
+    autotune.start_background()
+    log.info("AMV Tools sidecar ready")
+    yield
+
+
 def make_app() -> FastAPI:
-    app = FastAPI(title="AMV Tools sidecar", version="0.3.0a")
+    app = FastAPI(title="AMV Tools sidecar", version="0.4.0a0", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -63,6 +89,8 @@ def make_app() -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+    # Added last so it wraps CORS: Host / Origin / per-launch token check.
+    app.add_middleware(LocalAccessMiddleware)
     for r in ROUTERS:
         app.include_router(r)
 
@@ -87,13 +115,6 @@ def make_app() -> FastAPI:
             },
         )
 
-    @app.on_event("startup")
-    async def _on_start():
-        loop = asyncio.get_running_loop()
-        loop.set_exception_handler(_silence_proactor_reset)
-        get_state().set_loop(loop)
-        log.info("AMV Tools sidecar ready")
-
     return app
 
 
@@ -103,6 +124,7 @@ def main():
     parser.add_argument("--host", type=str, default="127.0.0.1")
     args = parser.parse_args()
 
+    setup_logging()
     app = make_app()
     uvicorn.run(app, host=args.host, port=args.port, log_level="info", access_log=False)
 

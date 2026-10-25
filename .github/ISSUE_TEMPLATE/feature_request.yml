@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest an improvement or a new workflow
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the editing problem first, then the feature you have in mind.
+        AMV Tools is built for anime music video creators, so concrete workflow
+        examples help a lot.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do today, and where does the app get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work? UI sketches or mockups are welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workarounds, other tools, or simpler options.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Indexing / Library
+        - Search / Tags
+        - Derush / playback
+        - Export / Mini editor
+        - Mask / alpha
+        - Timeline / NLE integration
+        - Settings / UX
+        - Packaging / installation
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions for this idea.
+          required: true

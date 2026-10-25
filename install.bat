@@ -22,7 +22,7 @@ if not exist "%UV_EXE%" (
 set "PATH=%UV_DIR%;%PATH%"
 
 echo Syncing CPU-only baseline (GPU backend installs in-app)...
-"%UV_EXE%" sync --extra cpu
+"%UV_EXE%" sync --no-dev --extra cpu
 if errorlevel 1 (
     echo.
     echo [!] uv sync failed. Check the message above and re-run install.bat.

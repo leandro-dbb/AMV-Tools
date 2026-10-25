@@ -1,17 +1,30 @@
-import { Search, Play, Sparkles, Loader2, FolderPlus, X, Image as ImageIcon } from 'lucide-react';
+import { Search, Play, Sparkles, Loader2, FolderPlus, X, Image as ImageIcon, Clapperboard } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
-import type { SceneResult } from '../api/types';
+import type { SceneResult, SearchFilters } from '../api/types';
 import { useT } from '../i18n';
+import TimelineExportDialog from './TimelineExportDialog';
+import { filtersActive } from '../searchplus';
+import type { SearchPlusRequest } from '../searchplus';
+import SearchFiltersPanel from './SearchFiltersPanel';
+import { AddToCharacterButton, CharacterChips, SceneBadges, SimilarButton } from './SceneBadges';
+
+const FILTERS_KEY = 'amv-search-filters';
+
+function loadFilters(): SearchFilters {
+  try { return JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') as SearchFilters; } catch { return {}; }
+}
 
 const DEFAULT_RECENT = ['Gojo combat', 'Eva 01 rage', 'Pikachu cute'];
 
 interface Props {
   onOpenScene: (scene: SceneResult, allScenes: SceneResult[], index: number) => void;
   hoverDelayMs: number;
+  // search+: "similar shots" / "search this character" coming from other tabs
+  request?: { req: SearchPlusRequest; nonce: number } | null;
 }
 
-export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
+export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props) {
   const t = useT();
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -29,6 +42,15 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [filters, setFiltersState] = useState<SearchFilters>(loadFilters);
+  const [filtersOpen, setFiltersOpen] = useState(() => filtersActive(loadFilters()));
+  const [similar, setSimilar] = useState<{ seed: SceneResult; excludeSameVideo: boolean; sameGroup: boolean } | null>(null);
+  const setFilters = useCallback((f: SearchFilters) => {
+    setFiltersState(f);
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); } catch {}
+  }, []);
+  const activeFilters = filtersActive(filters) ? filters : null;
 
   useEffect(() => {
     api.recentSearches().then((r) => {
@@ -37,15 +59,18 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
     api.allTags(1000).then((r) => setAllTags(r.tags)).catch(() => {});
   }, []);
 
-  const runTextSearch = useCallback(async (q: string) => {
-    if (!q.trim()) return;
+  const runTextSearch = useCallback(async (q: string, override?: SearchFilters | null) => {
+    const f = override !== undefined ? override : activeFilters;
+    // Empty query + filters = browse ("every zoom-in of Gojo").
+    if (!q.trim() && !f) return;
     setImagePreview(null);
+    setSimilar(null);
     setLoading(true);
     setError(null);
-    setSubmitted(q);
+    setSubmitted(q.trim() || '[filters]');
     setSuggestionsOpen(false);
     try {
-      const res = await api.search({ query: q, threshold: threshold / 100, sort, top_k: 200 });
+      const res = await api.search({ query: q.trim() || undefined, threshold: threshold / 100, sort, top_k: 200, filters: f });
       setResults(res.results);
       setEmpty(res.results.length === 0);
     } catch (err) {
@@ -54,16 +79,54 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [threshold, sort]);
+  }, [threshold, sort, activeFilters]);
+
+  const runSimilar = useCallback(async (sceneId: number, opts: { excludeSameVideo: boolean; sameGroup: boolean }) => {
+    setImagePreview(null);
+    setLoading(true);
+    setError(null);
+    setSubmitted(`[similar] ${sceneId}`);
+    try {
+      const res = await api.similarScenes(sceneId, {
+        top_k: 200, exclude_same_video: opts.excludeSameVideo, same_group: opts.sameGroup,
+        sort, filters: activeFilters,
+      });
+      setSimilar({ seed: res.seed, ...opts });
+      setResults(res.results);
+      setEmpty(res.results.length === 0);
+    } catch (err) {
+      setError((err as Error).message);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [sort, activeFilters]);
+
+  // Requests from other tabs (Tags, Derush, MiniEditor, Characters).
+  const lastNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || request.nonce === lastNonce.current) return;
+    lastNonce.current = request.nonce;
+    if (request.req.kind === 'similar') {
+      runSimilar(request.req.sceneId, { excludeSameVideo: true, sameGroup: false });
+    } else {
+      const f: SearchFilters = { ...filters, characters: [request.req.characterId] };
+      setFilters(f);
+      setFiltersOpen(true);
+      runTextSearch(query, f);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
 
   const runImageSearch = useCallback(async (file: File) => {
     setLoading(true);
     setError(null);
+    setSimilar(null);
     setSubmitted(`[image] ${file.name}`);
     const url = URL.createObjectURL(file);
     setImagePreview(url);
     try {
-      const res = await api.searchImage(file, { threshold: threshold / 100, top_k: 200 });
+      const res = await api.searchImage(file, { threshold: threshold / 100, top_k: 200, filters: activeFilters });
       setResults(res.results);
       setEmpty(res.results.length === 0);
     } catch (err) {
@@ -72,7 +135,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [threshold]);
+  }, [threshold, activeFilters]);
 
   const lastToken = useMemo(() => {
     const m = query.match(/(\S+)$/);
@@ -184,6 +247,39 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
             <span className="text-[#8B5CF6] text-sm font-mono font-semibold w-10">{threshold}%</span>
           </div>
         </div>
+
+        <SearchFiltersPanel
+          filters={filters}
+          onChange={setFilters}
+          open={filtersOpen}
+          onToggle={() => setFiltersOpen((o) => !o)}
+          onApply={() => {
+            if (similar) runSimilar(similar.seed.id, similar);
+            else runTextSearch(query);
+          }}
+        />
+
+        {similar && (
+          <div className="w-[750px] mt-3 flex items-center gap-4 bg-[#8B5CF6]/10 border border-[#8B5CF6]/40 rounded-xl p-3">
+            <img src={api.thumbnailUrl(similar.seed.id)} alt="" className="h-14 aspect-video object-cover rounded-md border border-[#8B5CF6]/60" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] uppercase tracking-wider text-[#A1A1AA]">{t('sp.similar.title')}</div>
+              <div className="text-sm text-[#FAFAFA] truncate">{similar.seed.video_display} · {formatTime(similar.seed.start_ms)}</div>
+            </div>
+            <label className="text-xs text-[#A1A1AA] flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" className="accent-[#8B5CF6]" checked={similar.excludeSameVideo}
+                     onChange={(e) => runSimilar(similar.seed.id, { ...similar, excludeSameVideo: e.target.checked })} />
+              {t('sp.similar.excludeSameVideo')}
+            </label>
+            <label className="text-xs text-[#A1A1AA] flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" className="accent-[#8B5CF6]" checked={similar.sameGroup}
+                     onChange={(e) => runSimilar(similar.seed.id, { ...similar, sameGroup: e.target.checked })} />
+              {t('sp.similar.sameGroup')}
+            </label>
+            <button onClick={() => { setSimilar(null); setResults([]); setSubmitted(''); }} title={t('sp.similar.clear')}
+                    className="p-1.5 rounded-lg text-[#71717A] hover:text-[#EC4899] hover:bg-[#27272A]"><X size={14} /></button>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -199,7 +295,17 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
       )}
 
       {empty && submitted && (
-        <div className="text-center text-[#71717A] mt-8 text-sm">{t('search.noMatches', { threshold })}</div>
+        <div className="text-center text-[#71717A] mt-8 text-sm">{similar ? t('sp.similar.none') : t('search.noMatches', { threshold })}</div>
+      )}
+
+      {results.length > 0 && (
+        <div className="flex items-center justify-between mb-3 relative z-10">
+          <div className="text-xs text-[#71717A]">{t('timeline.scope.searchResults')} · {results.length}</div>
+          <button onClick={() => setTimelineOpen(true)} className="flex items-center gap-2 border-2 border-[#8B5CF6]/50 bg-[#18181B] text-[#FAFAFA] px-4 py-2 rounded-xl text-sm font-semibold hover:bg-[#8B5CF6]/15">
+            <Clapperboard size={14} className="text-[#8B5CF6]" />
+            {t('timeline.button')}
+          </button>
+        </div>
       )}
 
       <div className="grid grid-cols-6 gap-3 relative z-10">
@@ -208,6 +314,15 @@ export default function SearchTab({ onOpenScene, hoverDelayMs }: Props) {
                      onClick={() => onOpenScene(scene, results, idx)} />
         ))}
       </div>
+
+      {timelineOpen && (
+        <TimelineExportDialog
+          selection={{ scene_ids: results.map((r) => r.id) }}
+          defaultName="AMV search"
+          scopeLabel={t('timeline.scope.searchResults')}
+          onClose={() => setTimelineOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -241,6 +356,7 @@ function SceneCard({ scene, hoverDelayMs, onClick }: { scene: SceneResult; hover
           <img src={api.thumbnailUrl(scene.id)} alt={scene.video_display} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         )}
         <div className="absolute top-2 right-2 bg-gradient-to-br from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-2 py-1 rounded-md text-xs font-mono font-bold shadow-lg">{Math.round(scene.score * 100)}</div>
+        {!showProxy && <SceneBadges scene={scene} />}
         {hovering && (
           <>
             {!showProxy && (
@@ -255,7 +371,8 @@ function SceneCard({ scene, hoverDelayMs, onClick }: { scene: SceneResult; hover
                 <span className="truncate mr-2">{scene.video_display}</span>
                 <span className="font-mono text-[#8B5CF6]">{formatTime(scene.start_ms)}</span>
               </div>
-              <div className="text-[#A1A1AA] text-xs flex gap-1 flex-wrap">
+              <CharacterChips scene={scene} />
+              <div className="text-[#A1A1AA] text-xs flex gap-1 flex-wrap mt-1">
                 {scene.tags.slice(0, 3).map((tag, i) => (
                   <span key={i} className="bg-[#27272A]/80 px-2 py-0.5 rounded-full">{tag}</span>
                 ))}
@@ -263,6 +380,10 @@ function SceneCard({ scene, hoverDelayMs, onClick }: { scene: SceneResult; hover
             </div>
           </>
         )}
+        <div className="absolute top-10 right-2 flex flex-col gap-1 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+          <SimilarButton sceneId={scene.id} />
+          <AddToCharacterButton sceneId={scene.id} />
+        </div>
       </div>
     </div>
   );

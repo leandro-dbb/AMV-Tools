@@ -1,0 +1,16 @@
+TITLE: Golden timeline
+FCM: NON-DROP FRAME
+
+001  CLIP     V     C        00:00:01:00 00:00:03:00 00:00:00:00 00:00:02:00
+* FROM CLIP NAME: Scène 01 — 東京
+* FROM FILE: timeline_media/clip_%C3%A9%20%E6%97%A5%E6%9C%AC.mp4
+* SOURCE FPS: 23.976024
+* LABEL: Mango
+* FOLDER: Acte 1
+* TAGS: gojo, combat
+002  CLIP     A     C        00:00:01:00 00:00:03:00 00:00:00:00 00:00:02:00
+* FROM CLIP NAME: Scène 01 — 東京
+003  CLIP_B   V     C        00:00:00:10 00:00:01:10 00:00:02:00 00:00:03:00
+* FROM CLIP NAME: Clip B
+* FROM FILE: timeline_media/clip_b.mp4
+* SOURCE FPS: 25.000000

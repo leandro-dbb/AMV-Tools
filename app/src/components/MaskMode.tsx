@@ -1,8 +1,10 @@
-import { Loader2, X, Eraser, RotateCcw, Sparkles, Download, MousePointerClick, Wand2 } from 'lucide-react';
+import { Loader2, X, Eraser, RotateCcw, Sparkles, Download, MousePointerClick, Wand2, Brush, Undo2, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { maskApi, type BrushStroke, type SegmentSessionInfo } from '../api/mask';
 import { useT } from '../i18n';
-import type { SceneResult, SegmentPreviewResponse } from '../api/types';
+import type { SceneResult } from '../api/types';
+import MaskBrushLayer from './MaskBrushLayer';
 
 type Engine = 'birefnet' | 'sam2';
 
@@ -11,6 +13,8 @@ type Point = { x: number; y: number; polarity: Polarity };
 type Box = [number, number, number, number] | null;
 
 type Phase = 'idle' | 'previewing' | 'reviewing' | 'tracking' | 'ready';
+type Tool = 'points' | 'add' | 'remove';
+type ViewMode = 'overlay' | 'checker' | 'color';
 
 interface MaskModeProps {
   scene: SceneResult;
@@ -21,27 +25,44 @@ interface MaskModeProps {
   onExportSuccess: (outputPath: string) => void;
 }
 
-/** SAM 2 mask + alpha-export panel.
+const CHECKER_BG = {
+  backgroundColor: '#ffffff',
+  backgroundImage:
+    'linear-gradient(45deg, #c8c8c8 25%, transparent 25%), linear-gradient(-45deg, #c8c8c8 25%, transparent 25%),' +
+    'linear-gradient(45deg, transparent 75%, #c8c8c8 75%), linear-gradient(-45deg, transparent 75%, #c8c8c8 75%)',
+  backgroundSize: '20px 20px',
+  backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+};
+
+/** SAM 2 / BiRefNet mask + alpha-export panel.
  *
- * Sits inside the MiniEditor's video area when the user toggles "🎭 Mask".
- * Owns its own canvas + click/box state and talks to /api/scene/<id>/segment.
- * The component releases the server session on unmount so the tempdir of
- * extracted frames gets cleaned up. */
+ * Sits inside the MiniEditor's video area when the user toggles "Mask".
+ * Owns its own canvas + click/box/brush state and talks to
+ * /api/scene/<id>/segment. Any frame can carry clicks (keyframes) and brush
+ * corrections; "Re-propagate" re-tracks with all of them. The component
+ * releases the server session on unmount so the tempdir of extracted frames
+ * gets cleaned up. */
 export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportError, onExportSuccess }: MaskModeProps) {
   const t = useT();
   const [phase, setPhase] = useState<Phase>('idle');
   const [points, setPoints] = useState<Point[]>([]);
   const [box, setBox] = useState<Box>(null);
   const [dragBox, setDragBox] = useState<Box>(null);
-  const [session, setSession] = useState<SegmentPreviewResponse | null>(null);
+  const [session, setSession] = useState<SegmentSessionInfo | null>(null);
   const [maskCacheBust, setMaskCacheBust] = useState(0);
-  const [reviewIdx, setReviewIdx] = useState(0);
+  const [viewIdx, setViewIdx] = useState(0);
   const [trackPct, setTrackPct] = useState(0);
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [alphaCodec, setAlphaCodec] = useState<'prores_4444_alpha' | 'vp9_alpha'>('prores_4444_alpha');
   const [engine, setEngine] = useState<Engine>('birefnet');
+  const [tool, setTool] = useState<Tool>('points');
+  const [brushRadius, setBrushRadius] = useState(14);
+  const [viewMode, setViewMode] = useState<ViewMode>('overlay');
+  const [bgColor, setBgColor] = useState('#00b140');
+  const [corrected, setCorrected] = useState<number[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewIdxCommitted = useRef(0);
 
   // Read the saved engine choice once, so the chip starts on the user's
   // preferred default. The chip lets them flip without leaving the editor.
@@ -60,10 +81,12 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
+    setViewIdx(0);
+    viewIdxCommitted.current = 0;
     api.segmentPreview(scene.id, { positive: [], negative: [], box: null, reference_frame_offset: 0, start_ms: trimStart, end_ms: trimEnd, engine })
       .then((r) => {
         if (cancelled) return;
-        setSession(r);
+        setSession(r as SegmentSessionInfo);
         if (r.has_mask) {
           setPhase('reviewing');
           setMaskCacheBust((n) => n + 1);
@@ -99,6 +122,34 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
     return () => ws.close();
   }, [phase, session?.session_id]);
 
+  // ── moving to another frame before tracking ─────────────────────────────
+  // Every frame can be a keyframe: the server switches its reference frame
+  // (Auto re-runs BiRefNet there; Manual just shows the frame, waiting for
+  // clicks). Debounced so dragging the slider does not spam the model.
+  useEffect(() => {
+    if (!session || phase === 'ready' || phase === 'tracking') return;
+    if (viewIdx === viewIdxCommitted.current) return;
+    const handle = setTimeout(() => {
+      viewIdxCommitted.current = viewIdx;
+      setPoints([]);
+      setBox(null);
+      setBusy(true);
+      api.segmentPreview(scene.id, {
+        positive: [], negative: [], box: null, reference_frame_offset: viewIdx,
+        start_ms: trimStart, end_ms: trimEnd, engine,
+      })
+        .then((r) => {
+          setSession(r as SegmentSessionInfo);
+          setMaskCacheBust((n) => n + 1);
+          if (r.has_mask && phase === 'idle') setPhase('reviewing');
+        })
+        .catch((err) => setErrorMsg(t('mask.error.preview', { message: (err as Error).message })))
+        .finally(() => setBusy(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewIdx, session?.session_id, phase]);
+
   // The reference frame dictates the natural coords. Until the first preview
   // the user can still place points on the thumbnail — we'll send them at the
   // thumbnail size and trust the server to scale. For accuracy though, the
@@ -119,7 +170,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
 
   // ── canvas event handlers ───────────────────────────────────────────────
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (phase === 'tracking') return;
+    if (phase === 'tracking' || tool !== 'points') return;
     if (e.button !== 0) return;
     // Shift = negative point. Otherwise plain click = positive point (we
     // disambiguate from drag→box on mouseup).
@@ -171,7 +222,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
 
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-  }, [phase, naturalSize.w, naturalSize.h]);
+  }, [phase, tool, naturalSize.w, naturalSize.h]);
 
   function clearPrompts() {
     setPoints([]);
@@ -220,12 +271,13 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         positive: points.filter((p) => p.polarity === 'positive').map((p) => [p.x, p.y] as [number, number]),
         negative: points.filter((p) => p.polarity === 'negative').map((p) => [p.x, p.y] as [number, number]),
         box: box ?? null,
-        reference_frame_offset: session?.reference_frame_offset ?? null,
+        reference_frame_offset: viewIdx,
         start_ms: trimStart,
         end_ms: trimEnd,
         engine,
       });
-      setSession(r);
+      viewIdxCommitted.current = viewIdx;
+      setSession(r as SegmentSessionInfo);
       setMaskCacheBust((n) => n + 1);
       setPhase('reviewing');
     } catch (err) {
@@ -248,13 +300,13 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         positive: points.filter((p) => p.polarity === 'positive').map((p) => [p.x, p.y] as [number, number]),
         negative: points.filter((p) => p.polarity === 'negative').map((p) => [p.x, p.y] as [number, number]),
         box: box ?? null,
-        reference_frame_offset: session.reference_frame_offset,
+        reference_frame_offset: viewIdx,
         start_ms: trimStart,
         end_ms: trimEnd,
         engine,
-      });
-      setSession({ ...session, n_frames: r.n_frames });
-      setReviewIdx(0);
+      }) as Awaited<ReturnType<typeof api.segmentTrack>> & { keyframes?: number[]; corrected_frames?: number[] };
+      setSession({ ...session, n_frames: r.n_frames, keyframes: r.keyframes, corrected_frames: r.corrected_frames, tracked: true });
+      if (r.corrected_frames) setCorrected(r.corrected_frames);
       setMaskCacheBust((n) => n + 1);
       setPhase('ready');
     } catch (err) {
@@ -262,6 +314,28 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
       setPhase('reviewing');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function applyStroke(stroke: BrushStroke) {
+    if (!session) return;
+    try {
+      const r = await maskApi.brush(session.session_id, { frame_idx: viewIdx, strokes: [stroke] });
+      setCorrected(r.corrected_frames);
+      setMaskCacheBust((n) => n + 1);
+    } catch (err) {
+      setErrorMsg((err as Error).message);
+    }
+  }
+
+  async function resetCorrection() {
+    if (!session) return;
+    try {
+      const r = await maskApi.brush(session.session_id, { frame_idx: viewIdx, reset: true });
+      setCorrected(r.corrected_frames);
+      setMaskCacheBust((n) => n + 1);
+    } catch (err) {
+      setErrorMsg((err as Error).message);
     }
   }
 
@@ -285,28 +359,34 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
   }
 
   // ── render ──────────────────────────────────────────────────────────────
-  const showingReviewFrame = phase === 'ready' && session;
+  const tracked = phase === 'ready' && !!session;
+  const frameHasMask = tracked || (!!session?.has_mask && session.reference_frame_offset === viewIdx);
   const bgUrl =
-    showingReviewFrame && session
-      ? api.segmentFrameUrl(session.session_id, reviewIdx)
-      : session
-        ? api.segmentFrameUrl(session.session_id, session.reference_frame_offset)
-        : api.thumbnailUrl(scene.id);
+    session
+      ? api.segmentFrameUrl(session.session_id, tracked ? viewIdx : session.reference_frame_offset)
+      : api.thumbnailUrl(scene.id);
+  // Sidecar URLs already carry ?token= in Electron: append the cache-buster.
+  const bust = (url: string) => `${url}${url.includes('?') ? '&' : '?'}v=${maskCacheBust}`;
   const maskUrl =
-    phase === 'ready' && session
-      ? `${api.segmentMaskUrl(session.session_id, reviewIdx)}?v=${maskCacheBust}`
-      : phase === 'reviewing' && session
-        ? `${api.segmentMaskPreviewUrl(session.session_id)}?v=${maskCacheBust}`
+    tracked && session
+      ? bust(api.segmentMaskUrl(session.session_id, viewIdx))
+      : (phase === 'reviewing' || phase === 'previewing') && session && frameHasMask
+        ? bust(api.segmentMaskPreviewUrl(session.session_id))
         : null;
+  const cutoutUrl = session && frameHasMask ? bust(maskApi.cutoutUrl(session.session_id, viewIdx)) : null;
+  const showCutout = viewMode !== 'overlay' && !!cutoutUrl;
 
   const positiveCount = points.filter((p) => p.polarity === 'positive').length;
   const negativeCount = points.length - positiveCount;
   const hasAnyPrompt = points.length > 0 || box !== null;
+  const keyframes = session?.keyframes ?? [];
+  const correctedFrames = corrected.length ? corrected : (session?.corrected_frames ?? []);
+  const nFrames = session?.n_frames ?? 1;
 
   return (
     <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-md flex flex-col p-4">
       {/* toolbar */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-xs font-bold px-3 py-1.5 rounded-lg uppercase tracking-wider">
           {t('mask.badge')}
         </div>
@@ -331,33 +411,47 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
             </button>
           ))}
         </div>
-        <div className="text-[#FAFAFA] text-sm font-medium ml-2">
-          {phase === 'idle' && (
-            engine === 'birefnet'
-              ? t('mask.status.detecting')
-              : (hasAnyPrompt
-                ? t('mask.status.ready', { positive: positiveCount, negative: negativeCount, box: box ? t('mask.status.boxPart') : '' })
-                : t('mask.status.step1'))
+        {/* Tool chip — click prompts vs. brush corrections. */}
+        <div className="flex items-center bg-[#0F0F11] border border-[#27272A] rounded-lg p-0.5">
+          {([
+            { id: 'points', label: t('finish.mask.tool.points'), title: t('mask.legend.clickEq') },
+            { id: 'add', label: t('finish.mask.tool.add'), title: t('finish.mask.tool.addTitle') },
+            { id: 'remove', label: t('finish.mask.tool.remove'), title: t('finish.mask.tool.removeTitle') },
+          ] as const).map(({ id, label, title }) => (
+            <button
+              key={id}
+              onClick={() => setTool(id)}
+              disabled={phase === 'tracking' || (id !== 'points' && !frameHasMask)}
+              title={id !== 'points' && !frameHasMask ? t('finish.mask.brushNeedsMask') : title}
+              className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 disabled:opacity-40 ${
+                tool === id ? 'bg-[#3F3F46] text-white' : 'text-[#A1A1AA] hover:text-[#FAFAFA]'
+              }`}
+            >
+              {id === 'points' ? <MousePointerClick size={12} /> : <Brush size={12} />} {label}
+            </button>
+          ))}
+        </div>
+        {tool !== 'points' && (
+          <label className="flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
+            {t('finish.mask.brushSize')}
+            <input type="range" min={3} max={60} value={brushRadius} onChange={(e) => setBrushRadius(Number(e.target.value))} className="w-20 accent-[#A855F7]" />
+          </label>
+        )}
+        {/* Preview background */}
+        <div className="flex items-center bg-[#0F0F11] border border-[#27272A] rounded-lg p-0.5" title={t('finish.mask.viewTitle')}>
+          {(['overlay', 'checker', 'color'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setViewMode(m)}
+              className={`px-2.5 py-1 rounded text-xs ${viewMode === m ? 'bg-[#3F3F46] text-white' : 'text-[#A1A1AA] hover:text-[#FAFAFA]'}`}
+            >{t(`finish.mask.view.${m}`)}</button>
+          ))}
+          {viewMode === 'color' && (
+            <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="w-6 h-6 ml-1 bg-transparent border-0 cursor-pointer" />
           )}
-          {phase === 'previewing' && (
-            engine === 'sam2'
-              ? t('mask.status.previewingSam2')
-              : t('mask.status.previewingBirefnet')
-          )}
-          {phase === 'reviewing' && (
-            engine === 'sam2'
-              ? t('mask.status.reviewSam2')
-              : t('mask.status.reviewBirefnet')
-          )}
-          {phase === 'tracking' && (
-            engine === 'birefnet'
-              ? t('mask.status.maskingAll', { pct: trackPct })
-              : t('mask.status.trackingAll', { pct: trackPct })
-          )}
-          {phase === 'ready' && t('mask.status.step3')}
         </div>
         <div className="flex-1" />
-        {engine === 'sam2' && (
+        {engine === 'sam2' && tool === 'points' && (
           <>
             <button
               disabled={phase === 'tracking' || !hasAnyPrompt}
@@ -377,6 +471,15 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
             </button>
           </>
         )}
+        {correctedFrames.includes(viewIdx) && (
+          <button
+            disabled={phase === 'tracking'}
+            onClick={resetCorrection}
+            className="px-3 py-1.5 rounded-lg bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] text-xs flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <Undo2 size={12} /> {t('finish.mask.resetFrame')}
+          </button>
+        )}
         <button
           onClick={onClose}
           disabled={busy}
@@ -387,55 +490,84 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         </button>
       </div>
 
-      {/* legend — only visible in Manual mode (Auto has nothing to teach) */}
-      {engine === 'sam2' ? (
-        <div className="flex items-center gap-4 mb-3 text-[11px] text-[#A1A1AA] bg-[#0F0F11]/80 border border-[#27272A] rounded-lg px-4 py-2">
-          <MousePointerClick size={14} className="text-[#A855F7]" />
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-full bg-green-400 border border-white" />
-            {t('mask.legend.clickEq')} <b className="text-[#FAFAFA]">{t('mask.legend.subject')}</b> {t('mask.legend.keep')}
+      {/* status + legend */}
+      <div className="flex items-center gap-3 mb-3 text-[11px] text-[#A1A1AA] bg-[#0F0F11]/80 border border-[#27272A] rounded-lg px-4 py-2 flex-wrap">
+        {engine === 'sam2' ? <MousePointerClick size={14} className="text-[#A855F7]" /> : <Wand2 size={14} className="text-[#A855F7]" />}
+        <span className="text-[#FAFAFA] font-medium">
+          {phase === 'idle' && (
+            engine === 'birefnet'
+              ? t('mask.status.detecting')
+              : (hasAnyPrompt
+                ? t('mask.status.ready', { positive: positiveCount, negative: negativeCount, box: box ? t('mask.status.boxPart') : '' })
+                : t('mask.status.step1'))
+          )}
+          {phase === 'previewing' && (engine === 'sam2' ? t('mask.status.previewingSam2') : t('mask.status.previewingBirefnet'))}
+          {phase === 'reviewing' && (engine === 'sam2' ? t('mask.status.reviewSam2') : t('mask.status.reviewBirefnet'))}
+          {phase === 'tracking' && (
+            engine === 'birefnet'
+              ? t('mask.status.maskingAll', { pct: trackPct })
+              : t('mask.status.trackingAll', { pct: trackPct })
+          )}
+          {phase === 'ready' && t('mask.status.step3')}
+        </span>
+        {engine === 'sam2' && tool === 'points' && (
+          <>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-full bg-green-400 border border-white" />
+              {t('mask.legend.clickEq')} <b className="text-[#FAFAFA]">{t('mask.legend.subject')}</b>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">{t('mask.legend.shiftKey')}</kbd>{t('mask.legend.shiftClickEq')} <b className="text-[#FAFAFA]">{t('mask.legend.background')}</b>
+            </span>
+            <span className="text-[#71717A]">{t('finish.mask.keyframeHint')}</span>
+          </>
+        )}
+        {keyframes.length > 0 && (
+          <span className="flex items-center gap-1">
+            {t('finish.mask.keyframes', { list: '' })}
+            {keyframes.map((k) => (
+              <button key={k} onClick={() => setViewIdx(k)} className={`px-1.5 rounded font-mono ${k === viewIdx ? 'bg-[#A855F7] text-white' : 'bg-[#27272A] hover:bg-[#3F3F46]'}`}>{k + 1}</button>
+            ))}
           </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-full bg-red-500 border border-white" />
-            <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">{t('mask.legend.shiftKey')}</kbd>{t('mask.legend.shiftClickEq')} <b className="text-[#FAFAFA]">{t('mask.legend.background')}</b> {t('mask.legend.drop')}
+        )}
+        {correctedFrames.length > 0 && (
+          <span className="flex items-center gap-1">
+            {t('finish.mask.corrected', { list: '' })}
+            {correctedFrames.map((k) => (
+              <button key={k} onClick={() => setViewIdx(k)} className={`px-1.5 rounded font-mono ${k === viewIdx ? 'bg-emerald-500 text-white' : 'bg-[#27272A] hover:bg-[#3F3F46]'}`}>{k + 1}</button>
+            ))}
           </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-4 h-3 border-2 border-cyan-400 rounded-sm" />
-            {t('mask.legend.dragEq')} <b className="text-[#FAFAFA]">{t('mask.legend.boundingBox')}</b>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <kbd className="bg-[#27272A] px-1.5 rounded text-[10px] border border-[#3F3F46]">{t('mask.legend.escKey')}</kbd> {t('mask.legend.escClears')}
-          </span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 mb-3 text-[11px] text-[#A1A1AA] bg-[#0F0F11]/80 border border-[#27272A] rounded-lg px-4 py-2">
-          <Wand2 size={14} className="text-[#A855F7]" />
-          <span><b className="text-[#FAFAFA]">BiRefNet</b> {t('mask.auto.body1')} <b className="text-[#FAFAFA]">{t('mask.engine.manual')}</b> {t('mask.auto.body2')}</span>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* canvas */}
       <div className="flex-1 flex items-center justify-center min-h-0">
         <div
           ref={containerRef}
           className="relative max-h-full max-w-full rounded-xl overflow-hidden border-2 border-[#A855F7]/50 shadow-xl shadow-[#A855F7]/30 cursor-crosshair select-none"
-          style={{ aspectRatio: `${naturalSize.w} / ${naturalSize.h}` }}
+          style={{ aspectRatio: `${naturalSize.w} / ${naturalSize.h}`, ...(showCutout ? (viewMode === 'checker' ? CHECKER_BG : { backgroundColor: bgColor }) : {}) }}
           onMouseDown={handleMouseDown}
         >
-          <img src={bgUrl} alt={t('mask.alt.referenceFrame')} className="block w-full h-full object-cover pointer-events-none" draggable={false} />
-          {/* The server renders the mask as a "spotlight matte" already
-              (dark outside, transparent inside, magenta outline). Plain
-              alpha compositing — no mix-blend hacks. */}
-          {maskUrl && (
-            <img
-              src={maskUrl}
-              alt={t('mask.alt.maskOverlay')}
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              draggable={false}
-            />
+          {showCutout ? (
+            <img src={cutoutUrl!} alt={t('mask.alt.maskOverlay')} className="block w-full h-full object-cover pointer-events-none" draggable={false} />
+          ) : (
+            <>
+              <img src={bgUrl} alt={t('mask.alt.referenceFrame')} className="block w-full h-full object-cover pointer-events-none" draggable={false} />
+              {/* The server renders the mask as a "spotlight matte" already
+                  (dark outside, transparent inside, magenta outline). Plain
+                  alpha compositing — no mix-blend hacks. */}
+              {maskUrl && (
+                <img
+                  src={maskUrl}
+                  alt={t('mask.alt.maskOverlay')}
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  draggable={false}
+                />
+              )}
+            </>
           )}
           {/* prompts */}
-          {points.map((p, i) => {
+          {tool === 'points' && points.map((p, i) => {
             const num = points.slice(0, i + 1).filter((q) => q.polarity === p.polarity).length;
             const isPos = p.polarity === 'positive';
             return (
@@ -457,7 +589,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
             );
           })}
           {/* box */}
-          {(box ?? dragBox) && (() => {
+          {tool === 'points' && (box ?? dragBox) && (() => {
             const b = (dragBox ?? box)!;
             const [x0, y0, x1, y1] = b;
             return (
@@ -472,13 +604,23 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
               />
             );
           })()}
+          {tool !== 'points' && session && (
+            <MaskBrushLayer
+              frameW={naturalSize.w}
+              frameH={naturalSize.h}
+              mode={tool}
+              radius={brushRadius}
+              disabled={!frameHasMask || phase === 'tracking' || busy}
+              onStroke={applyStroke}
+            />
+          )}
           {/* empty state hint — only in Manual mode; Auto auto-runs */}
           {!hasAnyPrompt && phase === 'idle' && !busy && engine === 'sam2' && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#A855F7]/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none animate-pulse">
               {t('mask.hint.clickCharacter')}
             </div>
           )}
-          {busy && phase === 'idle' && (
+          {busy && (phase === 'idle' || phase === 'reviewing') && (
             <div className="absolute inset-0 bg-black/60 flex items-center justify-center pointer-events-none">
               <div className="text-[#FAFAFA] text-sm flex items-center gap-2">
                 <Loader2 size={16} className="animate-spin" />
@@ -506,62 +648,53 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
 
       {/* footer */}
       <div className="mt-3 flex items-center gap-3 flex-wrap">
-        {/* Frame slider — only after tracking */}
-        {phase === 'ready' && session && (
+        {/* Frame slider — before tracking it picks the keyframe to click on;
+            after tracking it reviews every frame. */}
+        {session && nFrames > 1 && (
           <div className="flex items-center gap-3 bg-[#0F0F11] border-2 border-[#27272A] rounded-xl px-4 py-2 flex-1 min-w-[260px]">
             <span className="text-[#A1A1AA] text-xs font-mono whitespace-nowrap">{t('mask.frame')}</span>
             <input
               type="range"
               min={0}
-              max={session.n_frames - 1}
-              value={reviewIdx}
-              onChange={(e) => { setReviewIdx(Number(e.target.value)); setMaskCacheBust((n) => n + 1); }}
+              max={nFrames - 1}
+              value={viewIdx}
+              disabled={phase === 'tracking'}
+              onChange={(e) => { setViewIdx(Number(e.target.value)); if (tracked) setMaskCacheBust((n) => n + 1); }}
               className="flex-1 accent-[#A855F7]"
             />
             <span className="text-[#FAFAFA] text-xs font-mono whitespace-nowrap">
-              {reviewIdx + 1} / {session.n_frames}
+              {viewIdx + 1} / {nFrames}
             </span>
           </div>
         )}
 
         <div className="flex-1" />
 
-        {/* Manual-only: "Generate mask" while in idle. Auto auto-ran on mount,
-            so it never shows this button. */}
-        {phase === 'idle' && engine === 'sam2' && (
+        {/* Manual: "Generate mask" on the current frame (adds a keyframe). */}
+        {engine === 'sam2' && tool === 'points' && phase !== 'tracking' && (phase === 'idle' || hasAnyPrompt) && (
           <button
             disabled={busy}
             onClick={runPreview}
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-sm font-semibold hover:shadow-lg hover:shadow-[#A855F7]/50 disabled:opacity-50 flex items-center gap-2"
+            title={t('mask.repreviewTitle')}
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            {t('mask.generate')}
+            {phase === 'idle' ? t('mask.generate') : t('mask.repreview')}
           </button>
         )}
 
         {(phase === 'reviewing' || phase === 'ready') && (
-          <>
-            {engine === 'sam2' && (
-              <button
-                disabled={busy}
-                onClick={runPreview}
-                className="px-4 py-2.5 rounded-xl bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] text-sm flex items-center gap-2 disabled:opacity-40"
-                title={t('mask.repreviewTitle')}
-              >
-                <Sparkles size={14} /> {t('mask.repreview')}
-              </button>
-            )}
-            <button
-              disabled={busy}
-              onClick={runTrack}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-sm font-semibold hover:shadow-lg hover:shadow-[#A855F7]/50 disabled:opacity-50 flex items-center gap-2"
-            >
-              {busy && phase !== 'ready' ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              {phase === 'ready'
-                ? (engine === 'sam2' ? t('mask.retrack') : t('mask.rerunClip'))
-                : (engine === 'sam2' ? t('mask.trackClip') : t('mask.runClip'))}
-            </button>
-          </>
+          <button
+            disabled={busy}
+            onClick={runTrack}
+            title={phase === 'ready' ? t('finish.mask.repropagateTitle') : undefined}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-sm font-semibold hover:shadow-lg hover:shadow-[#A855F7]/50 disabled:opacity-50 flex items-center gap-2"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : phase === 'ready' ? <RefreshCw size={16} /> : <Sparkles size={16} />}
+            {phase === 'ready'
+              ? (engine === 'sam2' || correctedFrames.length > 0 ? t('finish.mask.repropagate') : t('mask.rerunClip'))
+              : (engine === 'sam2' ? t('mask.trackClip') : t('mask.runClip'))}
+          </button>
         )}
 
         {phase === 'ready' && (

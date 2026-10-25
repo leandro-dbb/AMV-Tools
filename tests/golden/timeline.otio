@@ -1,0 +1,328 @@
+{
+  "OTIO_SCHEMA": "Timeline.1",
+  "metadata": {
+    "amv": {
+      "sequence_fps": "24000/1001",
+      "drop_frame": false,
+      "width": 1920,
+      "height": 1080,
+      "warnings": []
+    }
+  },
+  "name": "Golden timeline",
+  "global_start_time": {
+    "OTIO_SCHEMA": "RationalTime.1",
+    "rate": 23.976023976023978,
+    "value": 0.0
+  },
+  "tracks": {
+    "OTIO_SCHEMA": "Stack.1",
+    "metadata": {},
+    "name": "tracks",
+    "source_range": null,
+    "effects": [],
+    "markers": [],
+    "enabled": true,
+    "children": [
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "metadata": {
+          "amv": {
+            "kind": "Video"
+          }
+        },
+        "name": "V1",
+        "source_range": null,
+        "effects": [],
+        "markers": [],
+        "enabled": true,
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "metadata": {
+              "amv": {
+                "label": "Mango",
+                "folder": "Acte 1",
+                "tags": [
+                  "gojo",
+                  "combat"
+                ],
+                "scene_id": 10,
+                "item_id": 5,
+                "source_fps": "24000/1001",
+                "source_in_frame": 24,
+                "source_out_frame": 72,
+                "record_start": 0,
+                "record_end": 48
+              }
+            },
+            "name": "Scène 01 — 東京",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 23.976023976023978,
+                "value": 48.0
+              },
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 23.976023976023978,
+                "value": 24.0
+              }
+            },
+            "effects": [],
+            "markers": [
+              {
+                "OTIO_SCHEMA": "Marker.2",
+                "metadata": {
+                  "amv": {
+                    "color": "Mango"
+                  }
+                },
+                "name": "Scène 01 — 東京",
+                "marked_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 1.0
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 24.0
+                  }
+                },
+                "color": "RED",
+                "comment": "[Acte 1] gojo · combat"
+              }
+            ],
+            "enabled": true,
+            "color": null,
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "metadata": {
+                  "amv": {
+                    "source_fps": "24000/1001"
+                  }
+                },
+                "name": "clip_é 日本.mp4",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 240.0
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 0.0
+                  }
+                },
+                "available_image_bounds": null,
+                "target_url": "file:///C:/AMV%20Golden/clip_%C3%A9%20%E6%97%A5%E6%9C%AC.mp4"
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA"
+          },
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "metadata": {
+              "amv": {
+                "label": "",
+                "folder": null,
+                "tags": [],
+                "scene_id": 11,
+                "item_id": null,
+                "source_fps": "25",
+                "source_in_frame": 10,
+                "source_out_frame": 35,
+                "record_start": 48,
+                "record_end": 72
+              }
+            },
+            "name": "Clip B",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25.0,
+                "value": 25.0
+              },
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 25.0,
+                "value": 10.0
+              }
+            },
+            "effects": [],
+            "markers": [
+              {
+                "OTIO_SCHEMA": "Marker.2",
+                "metadata": {
+                  "amv": {
+                    "color": ""
+                  }
+                },
+                "name": "Clip B",
+                "marked_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25.0,
+                    "value": 1.0
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25.0,
+                    "value": 10.0
+                  }
+                },
+                "color": "GREEN",
+                "comment": ""
+              }
+            ],
+            "enabled": true,
+            "color": null,
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "metadata": {
+                  "amv": {
+                    "source_fps": "25"
+                  }
+                },
+                "name": "clip_b.mp4",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25.0,
+                    "value": 125.0
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 25.0,
+                    "value": 0.0
+                  }
+                },
+                "available_image_bounds": null,
+                "target_url": "file:///C:/AMV%20Golden/clip_b.mp4"
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA"
+          }
+        ],
+        "kind": "Video"
+      },
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "metadata": {
+          "amv": {
+            "kind": "Audio"
+          }
+        },
+        "name": "A1",
+        "source_range": null,
+        "effects": [],
+        "markers": [],
+        "enabled": true,
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "metadata": {
+              "amv": {
+                "label": "Mango",
+                "folder": "Acte 1",
+                "tags": [
+                  "gojo",
+                  "combat"
+                ],
+                "scene_id": 10,
+                "item_id": 5,
+                "source_fps": "24000/1001",
+                "source_in_frame": 24,
+                "source_out_frame": 72,
+                "record_start": 0,
+                "record_end": 48
+              }
+            },
+            "name": "Scène 01 — 東京",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 23.976023976023978,
+                "value": 48.0
+              },
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 23.976023976023978,
+                "value": 24.0
+              }
+            },
+            "effects": [],
+            "markers": [
+              {
+                "OTIO_SCHEMA": "Marker.2",
+                "metadata": {
+                  "amv": {
+                    "color": "Mango"
+                  }
+                },
+                "name": "Scène 01 — 東京",
+                "marked_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 1.0
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 24.0
+                  }
+                },
+                "color": "RED",
+                "comment": "[Acte 1] gojo · combat"
+              }
+            ],
+            "enabled": true,
+            "color": null,
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "metadata": {
+                  "amv": {
+                    "source_fps": "24000/1001"
+                  }
+                },
+                "name": "clip_é 日本.mp4",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 240.0
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 23.976023976023978,
+                    "value": 0.0
+                  }
+                },
+                "available_image_bounds": null,
+                "target_url": "file:///C:/AMV%20Golden/clip_%C3%A9%20%E6%97%A5%E6%9C%AC.mp4"
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA"
+          }
+        ],
+        "kind": "Audio"
+      }
+    ]
+  }
+}

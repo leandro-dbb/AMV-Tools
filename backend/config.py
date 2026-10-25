@@ -42,6 +42,9 @@ DEFAULT_SETTINGS = {
         "scene_detect_threshold": 0.40,
     },
     "models": {
+        # Model tier (backend/models/tiers.py): "auto" (by VRAM / unified
+        # memory), a tier id, or "custom" (= the per-model keys below).
+        "tier": "auto",
         "wd_tagger_variant": DEFAULT_WD_TAGGER,
         "siglip_variant": DEFAULT_SIGLIP,
         "default_tag_threshold": 0.50,
@@ -131,6 +134,11 @@ DEFAULT_SETTINGS = {
         # behaviour.
         "tag_boost": 0.0,
     },
+    "searchplus": {
+        # Compute camera motion / intensity / palette for scenes indexed
+        # before 0.4, in the background shortly after launch.
+        "auto_analyze": True,
+    },
     "derush": {
         # Player key bindings — KeyboardEvent.key values, lowercased.
         # Remappable from Settings > Derush. level_up/level_down walk the keep
@@ -158,7 +166,11 @@ DEFAULT_SETTINGS = {
         # "h264_nvenc" = Premiere/Media Encoder-style "Match Source — Adaptive
         # High Bitrate": hardware H.264, VBR 1-pass scaled to the source pixel
         # rate (15.2 Mbps @1080p23.976), Rec.709 tags. CRF is ignored there.
-        "codec": "libx264",
+        # "auto": the hardware encoder when there is one (the adaptive
+        # "h264_nvenc" family below — NVENC or VideoToolbox, with NVDEC
+        # decode), libx264 CRF otherwise (the previous default, unchanged on
+        # machines without a hardware encoder).
+        "codec": "auto",
         "crf": 18,
         "resolution": "source",
         "audio": "copy",

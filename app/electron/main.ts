@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { spawn, ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -11,6 +12,9 @@ const smokeExitMs = Number(process.env.AMV_SMOKE_EXIT_MS || 0);
 let pyProc: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 let apiPort = 0;
+// Per-launch secret: the sidecar refuses requests without it (backend/security.py),
+// so other local web pages cannot drive it. Renderer gets it via the preload.
+const apiToken = randomBytes(32).toString('hex');
 
 type BootstrapStream = 'stdout' | 'stderr';
 type BootstrapEvent =
@@ -122,8 +126,10 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
   // bootstrap the base deps that serve the setup UI — and startSidecar forces
   // one repair sync when a --no-sync launch dies on a missing base module.
   const noSync = useUv && !forceSync && fs.existsSync(venvPath()) ? ['--no-sync'] : [];
+  // Installed app: a (repair) sync must not pull the dev group (pytest, httpx…).
+  const noDev = useUv && !isDev && noSync.length === 0 ? ['--no-dev'] : [];
   const args = useUv
-    ? ['run', ...noSync, '--project', projectRoot, 'python', serverPath, '--port', String(apiPort)]
+    ? ['run', ...noSync, ...noDev, '--project', projectRoot, 'python', serverPath, '--port', String(apiPort)]
     : [serverPath, '--port', String(apiPort)];
   const userDataPath = app.getPath('userData');
   const bundledUvRoot = path.dirname(uvExe);
@@ -141,6 +147,7 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
       // unsupported op raises instead of falling back to CPU. No-op elsewhere.
       PYTORCH_ENABLE_MPS_FALLBACK: '1',
       AMV_DATA_DIR: userDataPath,
+      AMV_TOKEN: apiToken,
       UV_CACHE_DIR: isDev ? path.join(runtimeUvRoot, 'uv_cache') : path.join(userDataPath, '.uv_cache'),
       UV_PYTHON_INSTALL_DIR: path.join(runtimeUvRoot, 'python'),
       ...(isDev ? {} : { UV_PROJECT_ENVIRONMENT: path.join(userDataPath, '.venv') }),
@@ -330,6 +337,8 @@ app.on('before-quit', () => {
 });
 
 ipcMain.handle('amv:get-port', () => apiPort);
+// Synchronous so the preload can expose the token before any renderer code runs.
+ipcMain.on('amv:get-token', (e) => { e.returnValue = apiToken; });
 ipcMain.handle('amv:bootstrap-state', () => ({ phase: bootstrapPhase, port: apiPort }));
 ipcMain.handle('amv:clean-reinstall', async () => {
   await performCleanReinstall();
@@ -343,6 +352,7 @@ ipcMain.handle('amv:open-dialog', async (_e, opts: { directory?: boolean; multi?
   return r.canceled ? [] : r.filePaths;
 });
 ipcMain.handle('amv:reveal', async (_e, p: string) => shell.showItemInFolder(p));
+ipcMain.handle('amv:open-path', async (_e, p: string) => shell.openPath(p));
 ipcMain.handle('amv:save-dialog', async (_e, opts: { defaultPath?: string; filters?: any[] }) => {
   const r = await dialog.showSaveDialog(mainWindow!, opts as any);
   return r.canceled ? null : r.filePath ?? null;

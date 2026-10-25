@@ -1,6 +1,6 @@
 [project]
 name = "amv-tools"
-version = "0.3.0a0"
+version = "0.4.0a0"
 description = "AMV Tools — semantic scene browser for anime music video creators."
 readme = "README.md"
 requires-python = ">=3.12, <3.14"
@@ -39,6 +39,16 @@ dependencies = [
 # Users who want the temporal propagation step can install it manually:
 #   uv pip install "matanyone @ git+https://github.com/pq-yang/MatAnyone"
 
+[dependency-groups]
+# Test/tooling dependencies are intentionally separate from the runtime extras:
+# `uv run pytest` must work on a CPU-only machine without pulling a GPU stack.
+dev = [
+    "pytest>=9.1.1",
+    "httpx>=0.27.0",
+    # Timeline export golden tests round-trip the .otio output.
+    "opentimelineio>=0.17",
+]
+
 [project.optional-dependencies]
 cpu = [
     "torch==2.11.0",
@@ -56,17 +66,24 @@ mps = [
     "torchvision==0.26.0 ; sys_platform == 'darwin'",
     "onnxruntime>=1.18.0",
     "sam2==1.1.0 ; sys_platform == 'darwin'",
+    # Core ML conversion of the finishing nets (Neural Engine / Core ML GPU,
+    # backend/finish/coreml.py); BSD-3-Clause. Optional at runtime.
+    "coremltools==9.0 ; sys_platform == 'darwin'",
 ]
 cu126 = [
     "torch==2.11.0 ; sys_platform != 'darwin'",
     "torchvision==0.26.0 ; sys_platform != 'darwin'",
     "onnxruntime-gpu>=1.18.0 ; sys_platform != 'darwin'",
     "sam2==1.1.0 ; sys_platform != 'darwin'",
+    # NVDEC -> CUDA tensors for the indexing pass (MIT; optional at runtime:
+    # without it the ffmpeg pass is used)
+    "PyNvVideoCodec==2.2.3 ; sys_platform != 'darwin'",
 ]
 cu130     = [
     "torch==2.11.0 ; sys_platform != 'darwin'",
     "torchvision==0.26.0 ; sys_platform != 'darwin'",
     "onnxruntime-gpu>=1.18.0 ; sys_platform != 'darwin'",
+    "PyNvVideoCodec==2.2.3 ; sys_platform != 'darwin'",
     # Same rationale as cu130-trt: onnxruntime-gpu needs CUDA-12 runtime DLLs
     # to put the wd-tagger on the GPU. Without these, the tagger silently falls
     # back to CPU and indexing slows down by ~20×.
@@ -88,6 +105,7 @@ cu130-trt = [
     "torchvision==0.26.0 ; sys_platform != 'darwin'",
     "torch-tensorrt ; sys_platform != 'darwin'",
     "onnxruntime-gpu>=1.18.0 ; sys_platform != 'darwin'",
+    "PyNvVideoCodec==2.2.3 ; sys_platform != 'darwin'",
     # onnxruntime-gpu 1.26 is built against CUDA 12 + cuDNN 9. PyTorch cu130 ships
     # cu13 runtimes only, so we add the cu12 runtime wheels side-by-side. DLLs are
     # named cublasLt64_12 vs cublasLt64_13 so they coexist without conflict.
@@ -214,3 +232,12 @@ explicit = true
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "slow: runs real models on CPU (weights required); deselect with -m \"not slow\"",
+    "hw: real-hardware check (CUDA / Apple Silicon, real models and footage); runs only with AMV_HW_VIDEO set",
+]

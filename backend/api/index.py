@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ..config import VIDEO_EXTENSIONS
 from ..db import queries, schema
+from ..security import origin_allowed
 from ..state import get_state
 
 router = APIRouter()
@@ -83,6 +84,11 @@ def stop_indexing():
 
 @router.websocket("/ws/progress")
 async def progress(ws: WebSocket):
+    # Browsers always send Origin on websockets: refuse other web pages (the
+    # token itself is checked by LocalAccessMiddleware, ?token= here).
+    if not origin_allowed(ws.headers.get("origin")):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     state = get_state()
     queue = state.subscribe()
