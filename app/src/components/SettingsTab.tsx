@@ -331,11 +331,13 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
       </Row>
       <Row label={t('settings.models.autoModel.label')} hint={t('settings.models.autoModel.hint')}>
         <select
-          value={s.birefnet_variant || 'general'}
-          onChange={(e) => patch('models', { birefnet_variant: e.target.value as 'general' | 'hr' | 'portrait' | 'anime' })}
+          value={s.birefnet_variant || 'auto'}
+          onChange={(e) => patch('models', { birefnet_variant: e.target.value as 'auto' | 'toonout' | 'general' | 'hr' | 'portrait' | 'anime' })}
           disabled={!s.enable_mask || s.mask_engine !== 'birefnet'}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
+          <option value="auto">{t('settings.models.autoModel.opt.auto')}</option>
+          <option value="toonout">{t('settings.models.autoModel.opt.toonout')}</option>
           <option value="anime">{t('settings.models.autoModel.opt.anime')}</option>
           <option value="general">{t('settings.models.autoModel.opt.general')}</option>
           <option value="hr">{t('settings.models.autoModel.opt.hr')}</option>
@@ -344,11 +346,12 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
       </Row>
       <Row label={t('settings.models.sam2.label')} hint={t('settings.models.sam2.hint')}>
         <select
-          value={s.sam2_variant || 'base_plus'}
-          onChange={(e) => patch('models', { sam2_variant: e.target.value as 'tiny' | 'small' | 'base_plus' | 'large' })}
-          disabled={!s.enable_mask || !sam2Available || s.mask_engine !== 'sam2'}
+          value={s.sam2_variant || 'auto'}
+          onChange={(e) => patch('models', { sam2_variant: e.target.value as 'auto' | 'tiny' | 'small' | 'base_plus' | 'large' })}
+          disabled={!s.enable_mask || !sam2Available}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
+          <option value="auto">{t('settings.models.sam2.opt.auto')}</option>
           <option value="tiny">{t('settings.models.sam2.opt.tiny')}</option>
           <option value="small">{t('settings.models.sam2.opt.small')}</option>
           <option value="base_plus">{t('settings.models.sam2.opt.basePlus')}</option>
