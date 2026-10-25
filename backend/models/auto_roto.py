@@ -44,6 +44,7 @@ GATE_FRAC = 0.025            # dilation of the track gate, share of the frame di
 CORE_FRAC = 0.012            # erosion of the track core, share of the frame diagonal
 CORE_MISS = 0.7              # adaptive core: fill from the track only when the detector
                              # sees less than this share of the tracked area (motion blur)
+TRACK_SPILL = 1.4            # track area above this x the usual target area = spill
 CORE_MODE = "adaptive"       # "always": fill from the track core on every frame
 
 
@@ -210,9 +211,13 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.logical_and(a, b).sum() / u) if u else 1.0
 
 
-def fuse(detector: np.ndarray, track: np.ndarray) -> np.ndarray:
+def fuse(detector: np.ndarray, track: np.ndarray, ref_area: float = 0.0) -> np.ndarray:
     """Final alpha of one frame: detector edges inside the tracked region,
-    tracker core where the detector missed (motion blur), nothing outside."""
+    tracker core where the detector missed (motion blur), nothing outside.
+
+    ``ref_area``: usual pixel area of the target in this shot (median of the
+    detector's picks). A track much bigger than that is the tracker spilling
+    onto smoke / ground / an empty frame — then only the detector counts."""
     import cv2
     h, w = track.shape
     diag = float(np.hypot(h, w))
@@ -229,6 +234,8 @@ def fuse(detector: np.ndarray, track: np.ndarray) -> np.ndarray:
     # detector components touching the track only: another character inside
     # the gate must not leak in
     det = detector.astype(np.float32) * match_targets(detector, t > 0)
+    if ref_area > 0 and t.sum() > TRACK_SPILL * ref_area:
+        return np.clip(det * gate, 0, 1).astype(np.float32)
     if CORE_MODE == "adaptive" and (det > 0.5).sum() >= CORE_MISS * t.sum():
         # the detector saw the character on this frame: trust its outline,
         # the track only selects which components to keep
@@ -350,8 +357,12 @@ def auto_track(
             shutil.rmtree(tmp, ignore_errors=True)
         log.info("auto roto: shot %d-%d, %d keyframe(s), track %.1fs", a, b, len(keyframes),
                  time.perf_counter() - t_shot)
+        nz = areas[areas > 0]
+        ref_area = float(np.median(nz)) if nz.size and mode != "click" else 0.0
+        if mode == "click" and nz.size:
+            ref_area = float(nz.max())
         for t in range(b - a):
-            out[a + t] = fuse(det[a + t], track[t]) if fuse_edges else track[t]
+            out[a + t] = fuse(det[a + t], track[t], ref_area) if fuse_edges else track[t]
         done += b - a
         if progress_cb is not None:
             try:
