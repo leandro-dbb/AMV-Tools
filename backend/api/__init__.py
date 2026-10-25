@@ -4,6 +4,7 @@ from . import searchplus, characters
 from . import finish
 from . import reembed
 from . import autotune
+from . import shutdown
 
 ROUTERS = [
     status.router,
@@ -26,4 +27,5 @@ ROUTERS = [
     finish.router,
     reembed.router,
     autotune.router,
+    shutdown.router,
 ]
