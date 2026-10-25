@@ -12,6 +12,11 @@ const smokeExitMs = Number(process.env.AMV_SMOKE_EXIT_MS || 0);
 let pyProc: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 let apiPort = 0;
+// How long a quitting app waits for the sidecar's own shutdown (about 1 s,
+// see backend/shutdown.py) before it kills the process tree.
+const SIDECAR_STOP_GRACE_MS = 3000;
+let sidecarStopping: Promise<void> | null = null;
+let sidecarStopped = false;
 // Per-launch secret: the sidecar refuses requests without it (backend/security.py),
 // so other local web pages cannot drive it. Renderer gets it via the preload.
 const apiToken = randomBytes(32).toString('hex');
@@ -154,6 +159,9 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
       PATH: `${bundledUvRoot}${path.delimiter}${runtimeUvRoot}${path.delimiter}${process.env.PATH ?? ''}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    // POSIX: own process group (uv, python, ffmpeg…), so killSidecarGroup
+    // reaches all of it. Not on Windows, where detached opens a console.
+    detached: process.platform !== 'win32',
   });
 
   let lastActivity = Date.now();
@@ -244,17 +252,58 @@ function venvPath(): string {
   return path.join(app.getPath('userData'), '.venv');
 }
 
-async function killSidecarTree(): Promise<void> {
-  if (!pyProc || pyProc.killed) return;
-  const pid = pyProc.pid;
-  try { pyProc.kill(); } catch {}
-  if (process.platform === 'win32' && pid) {
-    await new Promise<void>((resolve) => {
-      const tk = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore' });
-      tk.on('exit', () => resolve());
-      tk.on('error', () => resolve());
-    });
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Stops the sidecar and everything it started: a graceful request
+// (POST /api/shutdown, plus SIGTERM outside Windows), a bounded wait, then
+// the whole process tree is killed. A plain pyProc.kill() used to leave the
+// sidecar running as long as the progress websocket was open.
+function stopSidecar(graceMs = SIDECAR_STOP_GRACE_MS): Promise<void> {
+  const proc = pyProc;
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+    if (proc) killSidecarGroup(proc);   // sweep a leftover ffmpeg, if any
+    return Promise.resolve();
   }
+  sidecarStopping ??= (async () => {
+    const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
+    if (apiPort) {
+      fetch(`http://127.0.0.1:${apiPort}/api/shutdown`, {
+        method: 'POST',
+        headers: { 'X-AMV-Token': apiToken },
+        signal: AbortSignal.timeout(graceMs),
+      }).catch(() => {});
+    }
+    if (process.platform !== 'win32') {
+      try { proc.kill('SIGTERM'); } catch {}
+    }
+    const inTime = await Promise.race([exited.then(() => true), delay(graceMs).then(() => false)]);
+    if (!inTime) console.warn(`[main] sidecar still running after ${graceMs} ms — killing its process tree`);
+    await killProcessTree(proc);
+    if (!inTime) await Promise.race([exited, delay(1000)]);
+  })().finally(() => { sidecarStopping = null; });
+  return sidecarStopping;
+}
+
+function killSidecarGroup(proc: ChildProcess): void {
+  if (process.platform === 'win32' || !proc.pid) return;
+  try { process.kill(-proc.pid, 'SIGKILL'); } catch {}   // ESRCH: group already gone
+}
+
+async function killProcessTree(proc: ChildProcess): Promise<void> {
+  if (process.platform !== 'win32') {
+    killSidecarGroup(proc);
+    return;
+  }
+  if (!proc.pid || proc.exitCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const tk = spawn('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore', windowsHide: true });
+    tk.on('exit', () => resolve());
+    tk.on('error', () => resolve());
+  });
+}
+
+async function killSidecarTree(): Promise<void> {
+  await stopSidecar();
   // Give the OS a moment to release the DLL/file handles before we rm -rf.
   await new Promise((r) => setTimeout(r, 600));
 }
@@ -327,13 +376,19 @@ app.whenReady().then(async () => {
   }
 });
 
+// Quit on every platform: the window is never re-created (no 'activate'
+// handler), so a macOS app left without window nor sidecar was useless.
 app.on('window-all-closed', () => {
-  pyProc?.kill();
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });
 
-app.on('before-quit', () => {
-  pyProc?.kill();
+app.on('before-quit', (event) => {
+  if (sidecarStopped || !pyProc) return;
+  event.preventDefault();
+  void stopSidecar().finally(() => {
+    sidecarStopped = true;
+    app.quit();
+  });
 });
 
 ipcMain.handle('amv:get-port', () => apiPort);

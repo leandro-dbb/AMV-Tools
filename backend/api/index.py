@@ -92,11 +92,35 @@ async def progress(ws: WebSocket):
     await ws.accept()
     state = get_state()
     queue = state.subscribe()
+    # Watch receive() too: it is how the handler sees the socket close. Parked
+    # in queue.get() alone it never did, and uvicorn's shutdown waited for it
+    # forever (the sidecar stayed up while the renderer was connected).
+    closed = asyncio.ensure_future(_until_disconnect(ws))
     try:
         while True:
-            event = await queue.get()
+            getter = asyncio.ensure_future(queue.get())
+            await asyncio.wait({getter, closed}, return_when=asyncio.FIRST_COMPLETED)
+            if not getter.done():
+                getter.cancel()
+                break
+            event = getter.result()
+            if event is None:   # sidecar shutting down (state.close_listeners)
+                try:
+                    await ws.close(code=1001)
+                except RuntimeError:
+                    pass        # uvicorn's own shutdown closed it first
+                break
             await ws.send_text(json.dumps(event))
     except WebSocketDisconnect:
         pass
     finally:
+        closed.cancel()
         state.unsubscribe(queue)
+
+
+async def _until_disconnect(ws: WebSocket) -> None:
+    try:
+        while (await ws.receive())["type"] != "websocket.disconnect":
+            pass
+    except (WebSocketDisconnect, RuntimeError):
+        pass

@@ -408,6 +408,10 @@ without swapping.
   (indexing used to drop the video's Search+ metrics); a video re-indexed
   during the background analysis is skipped instead of ending the job.
 - **Mask Mode**: brush radius / points and keyframe indexes are bounded.
+- **Quitting**: the sidecar no longer hangs while the progress websocket is
+  open (it had to be killed by hand); it stops its jobs and child processes
+  (ffmpeg, Core ML workers…) in about a second, and Electron kills the whole
+  process tree if it is still running after 3 s.
 - **macOS**: three parallel clip exports only with VideoToolbox (software
   encoders already fill every core).
 - **Schema**: a column migration racing another `init_db` no longer fails;

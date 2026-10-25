@@ -607,6 +607,14 @@ class AppState:
         if q in self._listeners:
             self._listeners.remove(q)
 
+    def close_listeners(self) -> None:
+        """Shutdown: ``None`` tells each progress websocket to close."""
+        for q in list(self._listeners):
+            if self._loop:
+                self._loop.call_soon_threadsafe(q.put_nowait, None)
+            else:
+                q.put_nowait(None)
+
     def publish(self, event: dict) -> None:
         msg = dict(event)
         print(f"progress: {json.dumps(msg)}", flush=True)

@@ -36,6 +36,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 
 from backend.api import ROUTERS, searchplus  # noqa: E402
 from backend.diagnostics import setup_logging  # noqa: E402
+from backend import shutdown  # noqa: E402
 from backend.security import LocalAccessMiddleware  # noqa: E402
 from backend.state import get_state  # noqa: E402
 
@@ -125,8 +126,18 @@ def main():
     args = parser.parse_args()
 
     setup_logging()
+    shutdown.install_child_tracking()
     app = make_app()
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info", access_log=False)
+    config = uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False,
+                            timeout_graceful_shutdown=shutdown.GRACE_S)
+    server = shutdown.SidecarServer(config)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
+    # SIGTERM never gets here (uvicorn re-raises it once stopped); Ctrl+C and
+    # POST /api/shutdown do, and must not wait on leftover worker threads.
+    shutdown.exit_process(0 if server.started else 3)
 
 
 if __name__ == "__main__":
