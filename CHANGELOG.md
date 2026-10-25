@@ -22,8 +22,9 @@ All notable changes to AMV Tools are documented here.
   tracked region. New *Main character / All characters* switch. Brush
   corrections are keyframes for the tracker. The Cutout finishing job uses the
   same pipeline.
-- **Manual: a click picks the whole character**: J 0.60 -> 0.76, failures
-  41 -> 18 (a box still goes straight to SAM 2).
+- **Manual: a click picks the whole character** (carried across cuts and
+  flashes): J 0.60 -> 0.83, failures 41 -> 10 (a box still goes straight to
+  SAM 2).
 - **No more ~4 s ceiling**: shots longer than 96 frames are tracked window by
   window with the user keyframes carried along (11 s shot: 9.0 -> 2.1 GB of
   VRAM, 4.6 -> 3.2 GB of RAM).

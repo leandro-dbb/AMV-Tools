@@ -163,7 +163,7 @@ Lecture honnête :
 | **Auto 0.5** | 551 | 2.9 Go | 4.1 Go |
 | SAM 2.1 tiny, 1 clic (0.4) | 418 | 6.1 Go | 4.8 Go |
 | SAM 2.1 large, 1 clic | 519 | 8.8 Go | 4.5 Go |
-| **Manuel 0.5** | 544 | 2.9 Go | 4.0 Go |
+| **Manuel 0.5** | 402 | 2.9 Go | 4.0 Go |
 
 Les temps ont été mesurés pendant que d'autres calculs tournaient sur la même machine (jusqu'à
 trois processus GPU et une autre session) : ils sont gonflés d'un facteur 2 à 4 et ne valent que
@@ -184,17 +184,17 @@ plus visible.
 |---|---|---|---|---|---|---|
 | action floue | SAM 2.1 tiny, 1 clic (0.4) | 0.761 | 0.746 | 18.9 | 5.1 | 5/23 |
 | action floue | SAM 2.1 large, 1 clic | 0.551 | 0.571 | 27.2 | 6.8 | 10/23 |
-| action floue | **Manuel 0.5** | 0.439 | 0.439 | 33.6 | 13.1 | 10/23 |
+| action floue | **Manuel 0.5** | 0.752 | 0.742 | 19.3 | 5.7 | 3/23 |
 | effets | SAM 2.1 tiny, 1 clic (0.4) | 0.139 | 0.149 | 50.0 | 11.2 | 14/14 |
 | effets | SAM 2.1 large, 1 clic | 0.165 | 0.156 | 48.0 | 4.8 | 14/14 |
 | effets | **Manuel 0.5** | 0.781 | 0.737 | 25.0 | 11.9 | 0/14 |
 | **tous (22 plans)** | SAM 2.1 tiny, 1 clic (0.4) | 0.601 | 0.580 | 29.0 | 5.5 | 41/107 |
 | **tous (22 plans)** | SAM 2.1 large, 1 clic | 0.689 | 0.677 | 21.0 | 3.1 | 30/107 |
-| **tous (22 plans)** | **Manuel 0.5** | 0.757 | 0.732 | 18.8 | 5.4 | 17/107 |
+| **tous (22 plans)** | **Manuel 0.5** | 0.828 | 0.801 | 15.5 | 3.8 | 10/107 |
 
 Sur l'anime, SAM 2 seul sélectionne la plage de couleur sous le clic (un œil, une chaussure, une
 mèche) : c'est la principale cause des 41 échecs de la 0.4. En 0.5, le clic choisit le personnage
-entier trouvé par le détecteur, puis le suivi fait le reste : J 0,60 → 0,76 et échecs 41 → 17. Pas
+entier trouvé par le détecteur, puis le suivi fait le reste : J 0,60 → 0,83 et échecs 41 → 10. Pas
 de régression : la boîte (SAM 2 direct) et le pinceau fonctionnent comme avant.
 
 ### Verdict visuel par plan (Auto, sortie alpha sur damier et sur fond vert)
@@ -235,10 +235,9 @@ la 0.5 change à l'œil : moins de « respiration » du contour, plus d'image vi
 entièrement opaque sur un plan à fumée, et le personnage principal sélectionnable. ISNet, conseillé
 par la doc 0.4, rendait 7 plans inutilisables.
 
-Défaut connu du Manuel 0.5 : sur un plan d'action (s09), le clic n'a rien produit sur tout le plan
-(personnage non retrouvé par le détecteur sous le clic sur l'image clé choisie) ; c'est la cause de la
-chute de la catégorie « action » au Manuel (10 échecs). À corriger avant d'en faire le comportement
-par défaut du clic : retomber sur SAM 2 seul quand le personnage cliqué n'est pas suivi.
+Défaut trouvé pendant ce verdict et corrigé avant la mesure finale du Manuel : sur un plan
+d'action à éclairs, les flashs sont pris pour des coupes et les sous-plans sans clic restaient vides ;
+le personnage cliqué est maintenant reporté d'un sous-plan au suivant.
 
 
 ## 4. Candidats : gardés et rejetés
@@ -357,8 +356,7 @@ Chaque planche montre 3 images clés, chacune composée sur damier puis sur fond
   re-propagées : J 0,85, 7 échecs sur 107, scintillement 4,2 %. C'est nettement mieux que ISNet,
   mais seulement un peu mieux que BiRefNet seul (réglage par défaut réel de la 0.4) ; verdict visuel
   identique : 19 plans sur 22 exploitables, 3 inutilisables.
-- **Manuel 0.5** : le clic prend le personnage détecté entier ; J 0,60 → 0,76, échecs 41 → 17
-  (un défaut connu sur un plan d'action).
+- **Manuel 0.5** : le clic prend le personnage détecté entier ; J 0,60 → 0,83, échecs 41 → 10.
 - **Plus de plafond de 4 s** : suivi par fenêtres, 11 s en 2,1 Go de VRAM au lieu de 9,0 Go.
 - Candidats écartés à la mesure : ToonOut (garde les auras), MatAnyone 2 (perd le personnage en
   action), ensemble de détecteurs (gain nul). SAM 3 non mesurable (accès Hugging Face validé à la
