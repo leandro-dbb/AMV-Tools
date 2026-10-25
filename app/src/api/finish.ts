@@ -19,6 +19,7 @@ export interface FinishModel {
   kind: 'upscale' | 'interpolate' | 'depth';
   label: string;
   license: string;
+  non_commercial?: boolean;
   source: string;
   size: number;
   installed: boolean;

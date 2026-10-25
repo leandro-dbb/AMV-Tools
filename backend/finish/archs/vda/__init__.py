@@ -6,7 +6,9 @@ folder): ``dinov2*``, ``dpt*``, ``motion_module``, ``util/blocks.py``.
 Changes: EasyDict replaced by a dict (no extra dependency), the "xFormers
 not available" prints removed; the model class keeps the upstream
 ``forward`` so ``video_depth_anything_vits.pth`` loads with strict=True.
-Only the Small checkpoint is Apache-2.0 (Base/Large are CC-BY-NC-4.0).
+The code is Apache-2.0 and builds every encoder; the Small checkpoint is
+Apache-2.0, Base/Large checkpoints are CC-BY-NC-4.0 (non-commercial; Large is
+offered for the "Max quality" tier, downloaded on demand).
 """
 from __future__ import annotations
 

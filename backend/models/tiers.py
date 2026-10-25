@@ -65,6 +65,9 @@ MODEL_INFO: dict[str, dict[str, Any]] = {
         "label": "Real-ESRGAN x4plus anime 6B", "size_mb": 18, "license": "bsd-3-clause", "kind": "upscale"},
     "hfa2k-avc-compact": {
         "label": "2xHFA2kAVCCompact (Phhofm)", "size_mb": 4.8, "license": "cc-by-4.0", "kind": "upscale"},
+    "animejanai-v3-uc": {
+        "label": "2x AnimeJaNai HD V3 UltraCompact", "size_mb": 24.7, "license": "cc-by-nc-sa-4.0",
+        "kind": "upscale"},
     "rife-4.25": {
         "label": "RIFE 4.25", "size_mb": 25, "license": "mit", "kind": "interpolate"},
     "rife-4.26": {
@@ -73,6 +76,8 @@ MODEL_INFO: dict[str, dict[str, Any]] = {
         "label": "RIFE 4.26 heavy", "size_mb": 25, "license": "mit", "kind": "interpolate"},
     "video-depth-anything-small": {
         "label": "Video Depth Anything Small", "size_mb": 116, "license": "apache-2.0", "kind": "depth"},
+    "video-depth-anything-large": {
+        "label": "Video Depth Anything Large", "size_mb": 1538, "license": "cc-by-nc-4.0", "kind": "depth"},
     "depth-anything-v2-small": {
         "label": "Depth Anything V2 Small", "size_mb": 99, "license": "apache-2.0", "kind": "depth"},
 }
@@ -86,11 +91,20 @@ MODEL_INFO: dict[str, dict[str, Any]] = {
 # the real 1080p; RIFE 4.26 is 4.25 with better weights. "fast" keeps the
 # lightest set (+ depth at 364 px, 2x faster); "max" takes the slower
 # options that measured a little better.
+# Chantier 4b (docs/reports/chantier-4b-modeles-non-commerciaux.md):
+# non-commercial licenses are allowed. AnimeJaNai HD V3 UltraCompact
+# (CC-BY-NC-SA-4.0) replaces 2xHFA2kAVCCompact (LPIPS 0.030 vs 0.044 on the
+# 540p -> 1080p set, no colour halo on dark lines, half the convolutions);
+# "max" takes Video Depth Anything Large at 364 px (CC-BY-NC-4.0, flicker
+# 0.21 % vs 0.24 %, visibly sharper relief, 9.3 GB). UltraCompact is also
+# the "fast" upscaler: 1.6-2x the throughput of animevideov3 (x2 native, 8
+# convolutions), same job time. GIMM-VFI, AMT, VDA Base and PixAI v1.0 were
+# measured and rejected.
 NVIDIA_TIERS: dict[str, dict[str, Any]] = {
     "fast": {
         "embedding": {"model": "google/siglip2-base-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "realesr-animevideov3",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -98,7 +112,7 @@ NVIDIA_TIERS: dict[str, dict[str, Any]] = {
     "8gb": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -106,7 +120,7 @@ NVIDIA_TIERS: dict[str, dict[str, Any]] = {
     "12gb": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -114,23 +128,24 @@ NVIDIA_TIERS: dict[str, dict[str, Any]] = {
     "16gb": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
     },
     "24gb": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
     },
     "max": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 256},
         "tagger": "SmilingWolf/wd-eva02-large-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26-heavy",
-        "depth": "video-depth-anything-small",
+        "depth": "video-depth-anything-large",
+        "depth_input_size": 364,
     },
 }
 
@@ -145,7 +160,7 @@ MAC_TIERS: dict[str, dict[str, Any]] = {
     "fast": {
         "embedding": {"model": "google/siglip2-base-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "realesr-animevideov3",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "depth-anything-v2-small",
         "depth_input_size": 364,
@@ -153,14 +168,14 @@ MAC_TIERS: dict[str, dict[str, Any]] = {
     "mac8": {
         "embedding": {"model": "google/siglip2-base-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "depth-anything-v2-small",
     },
     "mac16": {
         "embedding": {"model": "google/siglip2-base-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -168,7 +183,7 @@ MAC_TIERS: dict[str, dict[str, Any]] = {
     "mac24": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -176,7 +191,7 @@ MAC_TIERS: dict[str, dict[str, Any]] = {
     "mac32": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 128},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -184,7 +199,7 @@ MAC_TIERS: dict[str, dict[str, Any]] = {
     "max": {
         "embedding": {"model": "google/siglip2-so400m-patch16-naflex", "patches": 256},
         "tagger": "SmilingWolf/wd-vit-tagger-v3",
-        "upscale": "hfa2k-avc-compact",
+        "upscale": "animejanai-v3-uc",
         "interpolate": "rife-4.26-heavy",
         "depth": "video-depth-anything-small",
         "depth_input_size": 364,
@@ -372,7 +387,8 @@ def model_info(model_id: str) -> dict[str, Any]:
                     "license": spec.license.lower(), "kind": spec.kind}
         else:
             info = {"label": model_id, "size_mb": None, "license": None, "kind": None}
-    return {"id": model_id, **info}
+    from ..model_download import is_non_commercial
+    return {"id": model_id, **info, "non_commercial": is_non_commercial(info.get("license"))}
 
 
 def describe_tiers(platform: str) -> list[dict[str, Any]]:

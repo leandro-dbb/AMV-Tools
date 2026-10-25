@@ -27,9 +27,11 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-UPSCALE_MODELS = ("realesr-animevideov3", "realesrgan-x4plus-anime-6b", "hfa2k-avc-compact")
+UPSCALE_MODELS = ("realesr-animevideov3", "realesrgan-x4plus-anime-6b", "hfa2k-avc-compact",
+                  "animejanai-v3-uc")
 # Native x2 Compact checkpoints: (weights file, SRVGGNetCompact num_conv).
-NATIVE_X2 = {"hfa2k-avc-compact": ("2xHFA2kAVCCompact.pth", 16)}
+NATIVE_X2 = {"hfa2k-avc-compact": ("2xHFA2kAVCCompact.pth", 16),
+             "animejanai-v3-uc": ("2x_AnimeJaNai_HD_V3_UltraCompact.pth", 8)}
 DEFAULT_UPSCALE_MODEL = "realesr-animevideov3"
 
 
