@@ -265,7 +265,10 @@ try {
       'fcpxml' { $x = [xml]$text; if (-not $x.fcpxml) { throw 'fcpxml: no fcpxml root' }
                  if ($text -notmatch 'src="file:///[A-Za-z]:/') { throw 'fcpxml: src is not a Windows file URL' } }
       'otio' { $j = $text | ConvertFrom-Json; if ($j.OTIO_SCHEMA -notlike 'Timeline.*') { throw 'otio: bad schema' } }
-      { $_ -in 'edl', 'vegas' } { if ($text -notmatch 'FROM CLIP NAME:') { throw "$($f.id): no FROM CLIP NAME" } }
+      'edl' { if ($text -notmatch 'FROM CLIP NAME:') { throw 'edl: no FROM CLIP NAME' } }
+      'vegas' { if (-not $text.StartsWith('"ID";"Track";"StartTime"')) { throw 'vegas: not a Vegas EDL text header' }
+                if ($text -notmatch ';VIDEO;"[A-Za-z]:\\') { throw 'vegas: no VIDEO event with a Windows path' }
+                if ($text.Contains("`r`r")) { throw 'vegas: doubled CR (newline translation bug)' } }
       'aftereffects' { if ($text -notmatch 'app\.project') { throw 'aftereffects: not an AE script' } }
     }
     $summary.timeline[$f.id] = "$($r.clip_count) clips, $((Get-Item -LiteralPath $target).Length) bytes"
