@@ -462,14 +462,15 @@ def gate_alpha(base: np.ndarray, selector: np.ndarray, *, box: bool = False,
 
 def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str = SELECTOR_PROMPT,
                    progress_cb: Optional[Callable[[int, int], None]] = None,
-                   keep: Optional[list] = None) -> np.ndarray:
+                   keep: Optional[list] = None, zoom: bool = False) -> np.ndarray:
     """Detector mattes ``(T, H, W)`` (uint8 or float) kept only near what the
     selector (a :class:`~backend.models.sam3_concept.Sam3Concept`) calls a
     character on each frame (:func:`gate_alpha`; a frame where it sees nobody
     keeps the detector's matte). ``frames``: RGB arrays or image paths. Any
     selector failure returns ``det`` unchanged — the 0.5 pipeline.
     ``keep``: a list that receives the selector's masks (uint8 0/1, one per
-    frame) for :func:`tighten` after tracking."""
+    frame) for :func:`tighten` after tracking. ``zoom``: the selector's
+    zoomed second pass per character (max quality)."""
     from PIL import Image
     out = np.empty_like(det)
     T = len(det)
@@ -479,7 +480,10 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
             if not isinstance(f, np.ndarray):
                 with Image.open(f) as im:
                     f = np.asarray(im.convert("RGB"))
-            sel = selector.segment(f, prompt)
+            if zoom and hasattr(selector, "segment_zoomed"):
+                sel = selector.segment_zoomed(f, prompt)
+            else:
+                sel = selector.segment(f, prompt)
             if keep is not None:
                 keep.append((sel > 0.5).astype(np.uint8))
             d = det[t].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[t]
@@ -495,9 +499,42 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
     return out
 
 
+def _fill_holes(m: np.ndarray) -> np.ndarray:
+    """Background regions not connected to the frame border, filled."""
+    import cv2
+    inv = (~m).astype(np.uint8)
+    n, lab = cv2.connectedComponents(inv, connectivity=4)
+    border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
+    holes = [i for i in range(1, n) if i not in border]
+    out = m.copy()
+    if holes:
+        out[np.isin(lab, holes)] = True
+    return out
+
+
+def _background_palette(rgb: np.ndarray, base: np.ndarray, selector: np.ndarray, k: int = 8):
+    """Main colours (k-means, 0..1 RGB) of the background around the
+    character: pixels the base matte calls background, in a ring 10-40 px
+    outside the selector."""
+    import cv2
+    s = (selector > 0.5).astype(np.uint8)
+    d = cv2.distanceTransform(1 - s, cv2.DIST_L2, 3)
+    ring = (d > 10) & (d < 40) & (base < 0.1)
+    px = rgb[ring].astype(np.float32) / 255.0
+    if len(px) < 50:
+        return None
+    if len(px) > 20000:
+        px = px[np.random.default_rng(0).choice(len(px), 20000, replace=False)]
+    kk = min(k, len(px))
+    crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1e-3)
+    _c, _l, centers = cv2.kmeans(px, kk, None, crit, 2, cv2.KMEANS_PP_CENTERS)
+    return centers
+
+
 def hug_with_tips(base: np.ndarray, selector: np.ndarray, *, tight_frac: float = 0.004,
                   reach_frac: float = GATE_FRAC, opaque: float = 0.9, max_touch: float = 0.45,
-                  fringe_px: int = 2) -> np.ndarray:
+                  fringe_px: int = 2, rgb: Optional[np.ndarray] = None,
+                  bg_share: float = 0.35, bg_dist: float = 0.12) -> np.ndarray:
     """Matte hugged to the selector's outline at ``tight_frac``, giving back
     the *tips* the selector under-segments.
 
@@ -507,7 +544,16 @@ def hug_with_tips(base: np.ndarray, selector: np.ndarray, *, tight_frac: float =
     ``reach_frac`` of the selector, and sticks *out* of the character: less
     than ``max_touch`` of its outline touches the hugged matte (a pocket of
     background enclosed between the arms touches it on most sides and stays
-    cut). Its antialiased fringe (``fringe_px``) comes back with it."""
+    cut). Its antialiased fringe (``fringe_px``) comes back with it.
+
+    With ``rgb``: an opaque piece enclosed by the character (or in a hole of
+    the selector's mask) comes back too when it does not have the colours of
+    the background around (less than ``bg_share`` of its pixels within
+    ``bg_dist`` of the background palette): an object held in front of the
+    body (a bowl) is not a hole of sky between the arms. Not used by
+    :func:`tighten`: on the benchmark it also gave back background pockets
+    whose colours differ from the ring around (enclosed background 5.7 ->
+    7.2 %)."""
     import cv2
     s = (selector > 0.5).astype(np.uint8)
     b = np.clip(base.astype(np.float32), 0, 1)
@@ -519,12 +565,16 @@ def hug_with_tips(base: np.ndarray, selector: np.ndarray, *, tight_frac: float =
     d_out = cv2.distanceTransform(1 - s, cv2.DIST_L2, 3)
     body = tight > 0.5
     cand = (b > opaque) & ~body & (d_out <= reach_frac * diag)
+    if rgb is not None:   # holes of the selector's mask, however far from its outline
+        cand |= (b > opaque) & ~body & _fill_holes(s > 0) & (s == 0)
     if not cand.any():
         return tight
     n, lab, stats, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8), connectivity=8)
     k3 = np.ones((3, 3), np.uint8)
     near_body = cv2.dilate(body.astype(np.uint8), k3) > 0
     keep = np.zeros(n, bool)
+    palette = _background_palette(rgb, b, s) if rgb is not None else None
+    src = rgb.astype(np.float32) / 255.0 if palette is not None else None
     for i in range(1, n):
         x, y, bw, bh, _a = stats[i]
         x0, y0, x1, y1 = max(0, x - 1), max(0, y - 1), min(w, x + bw + 1), min(h, y + bh + 1)
@@ -536,6 +586,10 @@ def hug_with_tips(base: np.ndarray, selector: np.ndarray, *, tight_frac: float =
             continue
         touch = float((ring & near_body[y0:y1, x0:x1]).sum()) / nr
         keep[i] = 0 < touch < max_touch and edge.any()
+        if not keep[i] and palette is not None and touch >= max_touch:
+            cols = src[y0:y1, x0:x1][comp]
+            dmin = np.sqrt(((cols[:, None, :] - palette[None, :, :]) ** 2).sum(-1)).min(1)
+            keep[i] = float((dmin < bg_dist).mean()) < bg_share
     if not keep.any():
         return tight
     tips = keep[lab]

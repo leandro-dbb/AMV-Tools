@@ -537,8 +537,8 @@ def method_runner(name: str, args, dev):
         import re
         head, rest = name.split("~", 1)
         base, sel = rest.rsplit("~", 1)
-        mm = re.match(r"hug(\d+)(?:t(\d+))?(?:o(\d+))?(f)?", head)
-        k, tt, oo, ff = int(mm.group(1)), mm.group(2), mm.group(3), mm.group(4)
+        mm = re.match(r"hug(\d+)(?:t(\d+))?(?:o(\d+))?(f)?(h)?", head)
+        k, tt, oo, ff, hh = int(mm.group(1)), mm.group(2), mm.group(3), mm.group(4), mm.group(5)
         from backend.models.auto_roto import drop_fragments, hug_with_tips
         root = Path(args.root)
 
@@ -550,7 +550,8 @@ def method_runner(name: str, args, dev):
                 g = read_alpha(root / "runs" / sel / sid / f"{i:05d}.png")
                 o = hug_with_tips(b, g, tight_frac=k / 1000.0,
                                   max_touch=int(tt) / 100.0 if tt else 0.45,
-                                  opaque=int(oo) / 100.0 if oo else 0.9)
+                                  opaque=int(oo) / 100.0 if oo else 0.9,
+                                  rgb=read_rgb(paths[i]) if hh else None)
                 out.append(drop_fragments(o, g) if ff else o)
             return np.stack(out)
         run.detector = [base, sel]
@@ -1111,10 +1112,10 @@ def main(argv=None) -> None:
                                             "to score methods in parallel")
         if name in ("boards", "zoom"):
             p.add_argument("--out", required=True)
+            p.add_argument("--width", type=int, default=2400)
         if name == "zoom":
             p.add_argument("--bg", default="magenta", choices=["magenta", "black", "white", "green"])
             p.add_argument("--scale", type=int, default=3)
-            p.add_argument("--width", type=int, default=2400)
     args = ap.parse_args(argv)
     {"extract": cmd_extract, "propose": cmd_propose, "run": cmd_run,
      "score": cmd_score, "boards": cmd_boards, "zoom": cmd_zoom}[args.cmd](args)

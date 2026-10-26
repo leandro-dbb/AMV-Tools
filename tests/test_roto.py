@@ -433,3 +433,23 @@ def test_tighten_max_quality_uses_the_tips_aware_hug():
     std = tighten(m, [body.astype(np.uint8)], quality="standard", tight_frac=0.004)
     mx = tighten(m, [body.astype(np.uint8)], quality="max")
     assert std[0, 202, 380] == 0.0 and mx[0, 202, 380] == 1.0
+
+
+def test_hug_gives_back_a_held_object_but_not_a_pocket_of_sky():
+    from backend.models.auto_roto import hug_with_tips
+    h, w = 608, 1080
+    rgb = np.zeros((h, w, 3), np.uint8)
+    rgb[:] = (90, 150, 230)                        # sky
+    body = _blob(h, w, 400, 100, 700, 560)
+    rgb[100:560, 400:700] = (150, 90, 160)         # purple character
+    rgb[300:360, 500:580] = (240, 240, 240)        # white bowl held in front of the chest
+    rgb[200:240, 620:660] = (90, 150, 230)         # sky seen through a gap in the body
+    base = body.copy()                             # the detector keeps both, opaque
+    sel = body.copy()
+    sel[300:360, 500:580] = 0.0                    # SAM 3 leaves out the bowl ...
+    sel[200:240, 620:660] = 0.0                    # ... and the gap
+    out = hug_with_tips(base, sel, rgb=rgb)
+    assert out[330, 540] == 1.0                    # bowl given back
+    assert out[220, 640] == 0.0                    # sky stays out
+    no_rgb = hug_with_tips(base, sel)
+    assert no_rgb[330, 540] == 0.0

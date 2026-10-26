@@ -11,6 +11,9 @@ and it is right there in the frame. This module uses that:
   (blur-fusion foreground estimation, Germer et al. 2021): a semi-transparent
   pixel keeps the character's colour, never the old background's. Used by
   every alpha export (ProRes 4444, VP9, PNG) since 0.6;
+* :func:`finish_edges` — the export step; ``mode="max"`` (max-quality
+  pipeline) first re-solves the alpha of a narrow outline band from the
+  local colours with ink lines protected (:func:`colour_solve_safe`);
 * :func:`kill_background`, :func:`colour_solve`, :class:`EdgeRefiner`
   (ViTMatte on a trimap around the outline) — candidates measured on the
   benchmark and not used by default: on real episodes they did not lower the
