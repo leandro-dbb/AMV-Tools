@@ -348,6 +348,7 @@ INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diag
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
 INK_MAX_HALF_FRAC = 0.0014  # ink line half-width at most this share of the diagonal (3 px at 1080p)
+SOFT_INK_MIN_ALPHA = 0.15   # "soft" export: ink absorbed only where the matte already has this much alpha
 INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
 INK_FILL_MAX_REL = 0.0   # what matte + outline enclose filled up to this share of the matte (0: off — it filled
                          # background between two spikes; tips now come from the full-resolution edge solve)
@@ -425,6 +426,13 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
                   & ~solid)
     # 1. outline: dark pixels connected to the solid matte, within reach
     cand = dark & (d_out <= reach) & ~solid
+    if not cut_fringe:
+        # "soft": only within the matte's own soft gradient (the outline the
+        # outline model half saw), never on background it left at 0, and no
+        # lighter than the character it borders (a dark green leaf next to
+        # black hair is scenery)
+        lf = _lf
+        cand &= (a >= SOFT_INK_MIN_ALPHA) & (lum <= lf + 0.04)
     far_dark = dark & (d_out > reach)
     if far_dark.any():
         cand &= ~(cv2.dilate(far_dark.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
