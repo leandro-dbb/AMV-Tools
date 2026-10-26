@@ -4,9 +4,10 @@ import { api } from '../api/client';
 import type { SceneResult, SearchFilters } from '../api/types';
 import { useT } from '../i18n';
 import TimelineExportDialog from './TimelineExportDialog';
-import { filtersActive } from '../searchplus';
+import { filtersActive, searchDefaults } from '../searchplus';
 import type { SearchPlusRequest } from '../searchplus';
 import SearchFiltersPanel from './SearchFiltersPanel';
+import SourcePreview from './SourcePreview';
 import { AddToCharacterButton, CharacterChips, SceneBadges, SimilarButton } from './SceneBadges';
 
 const FILTERS_KEY = 'amv-search-filters';
@@ -32,6 +33,17 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
   // 10% is a sane default that surfaces semantic matches without burying them.
   const [threshold, setThreshold] = useState(10);
   const [sort, setSort] = useState<'relevance' | 'duration' | 'video' | 'random'>('relevance');
+  const [maxResults, setMaxResults] = useState(200);
+  // Start from Settings > Search (threshold, max results, sort): the tab used
+  // to ignore them and always search with 10 % / 200 / relevance.
+  useEffect(() => {
+    api.getSettings().then((st) => {
+      const d = searchDefaults(st.search);
+      setThreshold(d.threshold);
+      setSort(d.sort);
+      setMaxResults(d.maxResults);
+    }).catch(() => {});
+  }, []);
   const [results, setResults] = useState<SceneResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +82,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     setSubmitted(q.trim() || '[filters]');
     setSuggestionsOpen(false);
     try {
-      const res = await api.search({ query: q.trim() || undefined, threshold: threshold / 100, sort, top_k: 200, filters: f });
+      const res = await api.search({ query: q.trim() || undefined, threshold: threshold / 100, sort, top_k: maxResults, filters: f });
       setResults(res.results);
       setEmpty(res.results.length === 0);
     } catch (err) {
@@ -79,7 +91,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     } finally {
       setLoading(false);
     }
-  }, [threshold, sort, activeFilters]);
+  }, [threshold, sort, maxResults, activeFilters]);
 
   const runSimilar = useCallback(async (sceneId: number, opts: { excludeSameVideo: boolean; sameGroup: boolean }) => {
     setImagePreview(null);
@@ -88,7 +100,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     setSubmitted(`[similar] ${sceneId}`);
     try {
       const res = await api.similarScenes(sceneId, {
-        top_k: 200, exclude_same_video: opts.excludeSameVideo, same_group: opts.sameGroup,
+        top_k: maxResults, exclude_same_video: opts.excludeSameVideo, same_group: opts.sameGroup,
         sort, filters: activeFilters,
       });
       setSimilar({ seed: res.seed, ...opts });
@@ -100,7 +112,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     } finally {
       setLoading(false);
     }
-  }, [sort, activeFilters]);
+  }, [sort, maxResults, activeFilters]);
 
   // Requests from other tabs (Tags, Derush, MiniEditor, Characters).
   const lastNonce = useRef<number | null>(null);
@@ -126,7 +138,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     const url = URL.createObjectURL(file);
     setImagePreview(url);
     try {
-      const res = await api.searchImage(file, { threshold: threshold / 100, top_k: 200, filters: activeFilters });
+      const res = await api.searchImage(file, { threshold: threshold / 100, top_k: maxResults, filters: activeFilters });
       setResults(res.results);
       setEmpty(res.results.length === 0);
     } catch (err) {
@@ -135,7 +147,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     } finally {
       setLoading(false);
     }
-  }, [threshold, activeFilters]);
+  }, [threshold, maxResults, activeFilters]);
 
   const lastToken = useMemo(() => {
     const m = query.match(/(\S+)$/);
@@ -332,9 +344,14 @@ function SceneCard({ scene, hoverDelayMs, onClick }: { scene: SceneResult; hover
   const [showProxy, setShowProxy] = useState(false);
   const timeoutRef = useRef<number | null>(null);
 
+  // Proxies are off by default: without one, preview the scene straight from
+  // the source file (falls back to the thumbnail if Chromium cannot decode it,
+  // e.g. HEVC on Linux).
+  const [sourceFailed, setSourceFailed] = useState(false);
+  const canPreview = !!scene.proxy_path || !sourceFailed;
   function startHover() {
     setHovering(true);
-    if (scene.proxy_path) {
+    if (canPreview) {
       timeoutRef.current = window.setTimeout(() => setShowProxy(true), hoverDelayMs);
     }
   }
@@ -352,6 +369,8 @@ function SceneCard({ scene, hoverDelayMs, onClick }: { scene: SceneResult; hover
       <div className="aspect-video bg-[#18181B] rounded-lg overflow-hidden border border-[#27272A] relative group-hover:border-[#8B5CF6]/50 transition-all group-hover:scale-[1.02] group-hover:shadow-xl group-hover:shadow-[#8B5CF6]/20">
         {showProxy && scene.proxy_path ? (
           <video src={api.proxyUrl(scene.id)} autoPlay muted loop playsInline className="w-full h-full object-cover" />
+        ) : showProxy && !sourceFailed ? (
+          <SourcePreview scene={scene} onFail={() => { setSourceFailed(true); setShowProxy(false); }} />
         ) : (
           <img src={api.thumbnailUrl(scene.id)} alt={scene.video_display} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         )}
