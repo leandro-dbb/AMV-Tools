@@ -155,6 +155,8 @@ def _load_upscaler(model: str, backend: str, weights: str | None):
         from backend.models.device import DeviceInfo
         up = Upscaler(model, DeviceInfo(backend, backend, dev, dtype))
         return up.net, up.native_scale, dtype, dev
+    if weights and weights.endswith(".onnx"):
+        return _onnx_upscaler(weights, backend), 2, torch.float32, dev
     import spandrel
     desc = spandrel.ModelLoader().load_from_file(weights)
     net = desc.model.eval().to(dev)
@@ -165,6 +167,35 @@ def _load_upscaler(model: str, backend: str, weights: str | None):
     if backend == "cuda":
         net = net.to(memory_format=torch.channels_last)
     return net, desc.scale, dtype, dev
+
+
+def _onnx_upscaler(path: str, backend: str):
+    """ONNX-only x2 models (AnimeJaNai V3.1 SPAN, fp16 graph) through ONNX
+    Runtime's CUDA provider, I/O bound to torch CUDA tensors (no host copy)."""
+    import onnxruntime as ort
+    import torch
+    providers = (["CUDAExecutionProvider"] if backend == "cuda" else []) + ["CPUExecutionProvider"]
+    sess = ort.InferenceSession(path, providers=providers)
+    inp, out = sess.get_inputs()[0], sess.get_outputs()[0]
+    half = "float16" in inp.type
+    print(f"onnx {Path(path).name}: {inp.name} {inp.type} {inp.shape} -> {out.shape}, {sess.get_providers()}",
+          file=sys.stderr, flush=True)
+
+    def run(x):
+        x = x.to(torch.float16 if half else torch.float32).contiguous()
+        if backend != "cuda":
+            y = sess.run([out.name], {inp.name: x.cpu().numpy()})[0]
+            return torch.from_numpy(y).float()
+        n, c, h, w = x.shape
+        y = torch.empty((n, c, h * 2, w * 2), dtype=x.dtype, device=x.device)
+        b = sess.io_binding()
+        et = np.float16 if half else np.float32
+        b.bind_input(inp.name, "cuda", 0, et, tuple(x.shape), x.data_ptr())
+        b.bind_output(out.name, "cuda", 0, et, tuple(y.shape), y.data_ptr())
+        torch.cuda.synchronize()
+        sess.run_with_iobinding(b)
+        return y
+    return run
 
 
 def cmd_upscale(args) -> None:
@@ -267,6 +298,10 @@ def _load_interp(model: str, backend: str, weights: str | None):
                 y = net(x[0], x[1], dt)
                 return (y.float().clamp(0, 1)[0].permute(1, 2, 0) * 255).round().byte().cpu().numpy()
         return film
+    if model.startswith("amt-"):
+        return _amt(model, dev, weights)
+    if model.startswith("gimm"):
+        return _gimm(model, dev, weights)
     from backend.finish.interpolate import RifeInterpolator
     kw = {}
     if model != "rife-4.25":
@@ -275,6 +310,83 @@ def _load_interp(model: str, backend: str, weights: str | None):
 
     def f(a, b, t):
         return r.at(r.make_pair(a, b), t)
+    return f
+
+
+def _rgb_in(f, dev):
+    import torch
+    return torch.from_numpy(np.ascontiguousarray(f)).to(dev).permute(2, 0, 1)[None].float() / 255.0
+
+
+def _rgb_out(y):
+    return (y.float().clamp(0, 1)[0].permute(1, 2, 0) * 255).round().byte().cpu().numpy()
+
+
+def _pad16(xs, div: int = 16):
+    import torch.nn.functional as F
+    h, w = xs[0].shape[-2:]
+    ph, pw = (-h) % div, (-w) % div
+    pad = [pw // 2, pw - pw // 2, ph // 2, ph - ph // 2]
+    return [F.pad(x, pad, mode="replicate") for x in xs], (pad[2], pad[2] + h, pad[0], pad[0] + w)
+
+
+def _amt(model: str, dev, weights: str):
+    """AMT (MCG-NKU, CC-BY-NC-4.0 code + weights) from its source tree
+    (``AMT_SRC``): amt-s / amt-l / amt-g, fp32, scale 1, padding to 16 like
+    the upstream demo (a 24 GB card keeps scale 1 at 1080p)."""
+    import importlib
+    import torch
+    sys.path.insert(0, os.environ["AMT_SRC"])
+    variant = model.split("-")[1].upper()
+    mod = importlib.import_module(f"networks.AMT-{variant}")
+    net = mod.Model(corr_radius=3, corr_lvls=4, num_flows=3 if variant == "S" else 5)
+    import typing
+    with torch.serialization.safe_globals([typing.OrderedDict]):
+        ck = torch.load(weights, map_location="cpu", weights_only=True)
+    net.load_state_dict(ck.get("state_dict", ck))
+    net = net.eval().to(dev)
+
+    def f(a, b, t):
+        with torch.inference_mode():
+            (x0, x1), (t0, t1, l0, l1) = _pad16([_rgb_in(a, dev), _rgb_in(b, dev)])
+            embt = x0.new_full((1, 1, 1, 1), t)
+            y = net(x0, x1, embt, scale_factor=1.0, eval=True)["imgt_pred"]
+            return _rgb_out(y[..., t0:t1, l0:l1])
+    return f
+
+
+def _gimm(model: str, dev, weights: str):
+    """GIMM-VFI-R-P (S-Lab License 1.0, non-commercial) from its source tree
+    (``GIMM_SRC``; needs CuPy for softsplat). RAFT is loaded from
+    ``pretrained_ckpt/raft-things.pth`` relative to ``GIMM_RUN``.
+    ``gimm-r-p`` = full resolution, ``gimm-r-p-ds05`` = flow at half
+    resolution (``ds_factor`` 0.5, upstream's setting for 2K)."""
+    import torch
+    from omegaconf import OmegaConf
+    src = Path(os.environ["GIMM_SRC"])
+    sys.path.insert(0, str(src / "src"))
+    from models import create_model
+    from utils.config import augment_arch_defaults
+    cfg = OmegaConf.load(src / "configs/gimmvfi/gimmvfi_r_arb.yaml")
+    cwd = os.getcwd()
+    os.chdir(os.environ["GIMM_RUN"])
+    try:
+        net, _ = create_model(augment_arch_defaults(cfg.arch))
+    finally:
+        os.chdir(cwd)
+    ck = torch.load(weights, map_location="cpu", weights_only=False)
+    net.load_state_dict(ck["state_dict"], strict=True)
+    net = net.eval().to(dev)
+    ds = 0.5 if model.endswith("ds05") else 1.0
+
+    def f(a, b, t):
+        with torch.no_grad():
+            (x0, x1), (t0, t1, l0, l1) = _pad16([_rgb_in(a, dev), _rgb_in(b, dev)], 32)
+            xs = torch.cat((x0.unsqueeze(2), x1.unsqueeze(2)), dim=2)
+            coord = [(net.sample_coord_input(1, xs.shape[-2:], [t], device=dev, upsample_ratio=ds), None)]
+            ts = [t * torch.ones(1, device=dev)]
+            y = net(xs, coord, t=ts, ds_factor=ds)["imgt_pred"][0]
+            return _rgb_out(y[..., t0:t1, l0:l1])
     return f
 
 
@@ -358,9 +470,11 @@ def _depth_fn(model: str, backend: str, input_size: int, weights: str | None):
                                          fp32=backend != "cuda")
             return [cv2_resize_like(x) for x in d]
         return run
-    if model == "video-depth-anything-small":
+    if model.startswith("video-depth-anything"):
+        # Small from the registry; Base / Large (CC-BY-NC-4.0, chantier 4b)
+        # from --weights
         from backend.finish.vda import VideoDepthEstimator
-        vest = VideoDepthEstimator(info, input_size=input_size)
+        vest = VideoDepthEstimator(info, input_size=input_size, model_id=model, weights=weights)
         return lambda frames: [d for _, d in vest.predict_stream(frames)]
     from backend.finish.depth import DepthEstimator
     kw = {} if model == "depth-anything-v2-small" else {"model_id": model}

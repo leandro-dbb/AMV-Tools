@@ -95,7 +95,10 @@ def _build_model(weights: str, in_h: int, in_w: int, cache: str):
 
         sd = torch.load(weights, map_location="cpu", weights_only=True)
         sd = sd.get("params_ema") or sd.get("params") or sd
-        net = SRVGGNetCompact(num_feat=64, num_conv=16, upscale=2 if native2 else 4)
+        # body = conv, prelu, (conv, prelu) * num_conv, conv: Compact = 16,
+        # UltraCompact = 8
+        n_conv = sum(1 for k, v in sd.items() if k.startswith("body.") and k.endswith(".weight") and v.dim() == 4)
+        net = SRVGGNetCompact(num_feat=64, num_conv=n_conv - 2, upscale=2 if native2 else 4)
         net.load_state_dict(sd, strict=True)
 
         class _X2(torch.nn.Module):

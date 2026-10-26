@@ -83,3 +83,57 @@ class PixAITagger:
         if y.min() < 0 or y.max() > 1:
             y = 1 / (1 + np.exp(-y))
         return y
+
+
+# ── PixAI tagger v1.0 (chantier 4b) ─────────────────────────────────────────
+# pixai-labs/pixai-tagger-v1.0: Apache-2.0 on the card, but a finetuned SAM 3
+# backbone (Meta "SAM License", non-commercial use allowed). 486 M params,
+# 1008x1008 input (aspect kept, zero padding), 30 877 tags. The repo's own
+# model code (``tagger_pipeline.py``) is loaded from the download folder
+# (``PIXAI_V1_DIR``) without going through transformers' remote-code path.
+_V1_CATS = {"general": 0, "character": 4, "copyright": 3, "style": 1, "meta": 5, "rating": 9}
+
+
+class PixAIV1Tagger:
+    def __init__(self, model: str, backend: str):
+        import ast
+        import importlib.util
+        import os
+
+        import torch
+
+        d = Path(os.environ["PIXAI_V1_DIR"])
+        spec = importlib.util.spec_from_file_location("pixai_v1_pipeline", d / "tagger_pipeline.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        raw = json.loads((d / "config.json").read_text())
+        # transformers' own loader (a hand-built model + load_state_dict
+        # gave wrong scores: Goku 0/12)
+        net = mod.ViTDetCls.from_pretrained(str(d))
+        tags = net.config.tags
+        tags = ast.literal_eval(tags) if isinstance(tags, str) else tags
+        self.dev = torch.device(backend)
+        self.dtype = torch.bfloat16 if backend == "cuda" else (torch.float16 if backend == "mps" else torch.float32)
+        # device only: ``.to(dtype)`` would also cast the complex RoPE
+        # buffers (freqs_cis) to real and wreck the model; bf16 via autocast
+        self.net = net.eval().to(self.dev)
+        self.size = int(raw.get("img_size", 1008))
+        self.mod = mod
+        self._labels = []
+        for cat, count in net.config.tags_split:
+            self._labels += [(None, _V1_CATS.get(cat, 0))] * count
+        self._labels = [(t, c) for t, (_, c) in zip(tags, self._labels)]
+        self.thresholds = raw.get("category_best_threshold")
+
+    def active_providers(self):
+        return [f"torch-{self.dev.type}-{str(self.dtype).split('.')[-1]}"]
+
+    def _run_batch(self, images):
+        import torch
+        import torchvision.transforms.functional as vF
+        xs = [vF.to_tensor(im.convert("RGB")).to(self.dev) for im in images]
+        xs = [vF.normalize(self.mod.rescale_pad(x, self.size), [0.5] * 3, [0.5] * 3) for x in xs]
+        with torch.inference_mode(), torch.autocast(self.dev.type, dtype=self.dtype,
+                                                    enabled=self.dtype != torch.float32):
+            y = self.net(torch.stack(xs)).float().sigmoid()
+        return y.cpu().numpy()

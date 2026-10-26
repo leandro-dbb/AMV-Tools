@@ -2,6 +2,35 @@
 
 All notable changes to AMV Tools are documented here.
 
+## 0.5.0-alpha — unreleased
+
+### Models — non-commercial candidates re-evaluated (chantier 4b)
+
+AMV Tools is non-commercial, so models rejected in chantier 4 only for a
+non-commercial license were measured with the same protocol
+([report](docs/reports/chantier-4b-modeles-non-commerciaux.md)).
+
+- **Upscale: AnimeJaNai HD V3 UltraCompact** (the-database, CC-BY-NC-SA-4.0)
+  replaces 2xHFA2kAVCCompact in every NVIDIA and Mac tier from 8 GB and in
+  *Max quality*, and animevideov3 in *Fast* (1.6-2x its throughput): LPIPS
+  0.030 vs 0.044 against the real 1080p (PSNR 42.7 vs
+  42.5 dB, dark shots 48.7 vs 45.3 dB), no colour halo on dark lines, half
+  the convolutions. Downloaded from the official archive, only the 2.5 MB
+  checkpoint is kept.
+- **Depth: Video Depth Anything Large** (CC-BY-NC-4.0) at 364 px in the
+  NVIDIA *Max quality* tier: flicker 0.21 % vs 0.24 % (Small 518 px) and
+  visibly sharper relief; 9.3 GB of VRAM, does not fit 24 GB at 518 px.
+- **Rejected after measurement**: AnimeJaNai V3.1 (SPAN, ONNX only, no gain
+  over V3), GIMM-VFI and AMT (no better than RIFE 4.26 on anime action,
+  8-22x slower, AMT needs 14-17 GB at 1080p), Video Depth Anything Base
+  (checkerboard artefacts on dark shots), PixAI tagger v1.0 (still no
+  Beerus/Whis; finds Asta and Cell but ~50x slower than wd-vit, lower tag F1).
+- **Licenses**: the download allow-list now accepts CC-BY-NC-4.0 and
+  CC-BY-NC-SA-4.0; Settings > Models (tier table and finishing models) shows a
+  *non-commercial use* mark next to those models; the README lists them.
+- Finishing registry: a model file can be a member of a checksum-verified zip
+  archive (only that member is kept on disk).
+
 ## 0.4.0-alpha — 2026-10-25
 
 Four tracks land together: a tested and diagnosable app (Reliability), timeline
