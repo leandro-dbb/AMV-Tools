@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import aftereffects, edl, fcp7, fcpxml, otio
+from . import aftereffects, edl, fcp7, fcpxml, otio, vegas
 from .collect import collect_media
 from .model import (
     ClipSpec,
@@ -57,7 +57,7 @@ FORMATS: dict[str, dict] = {
         "label": "Vegas Pro (EDL text)",
         "label_fr": "Vegas Pro (EDL texte)",
         "apps": ["Vegas Pro"],
-        "description": "CMX3600 text for File > Import > EDL in Vegas Pro.",
+        "description": "Vegas' own event list for File > Import > EDL Text File.",
     },
     "aftereffects": {
         "id": "aftereffects",
@@ -74,7 +74,7 @@ _WRITERS = {
     "fcpxml": fcpxml.dumps,
     "edl": edl.dumps,
     "otio": otio.dumps,
-    "vegas": edl.dumps_vegas,
+    "vegas": vegas.dumps,
     "aftereffects": aftereffects.dumps,
 }
 
@@ -89,7 +89,9 @@ def _write_atomic(path: Path, content: str) -> None:
     """Write via a temporary file in the same folder, then rename."""
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
     try:
-        tmp.write_text(content, encoding="utf-8")
+        # newline="": byte-identical output on every OS. Without it Windows
+        # turned each "\n" into "\r\n" (and Vegas' "\r\n" into "\r\r\n").
+        tmp.write_text(content, encoding="utf-8", newline="")
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)

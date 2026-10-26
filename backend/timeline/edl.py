@@ -75,7 +75,8 @@ def _title_line(title: str) -> str:
     return line if len(line) <= _MAX_LINE else line[: _MAX_LINE - 3] + "..."
 
 
-def _render(timeline: Timeline, *, vegas: bool = False) -> str:
+def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
+    del options
     if not timeline.clips:
         raise ValueError("the timeline is empty")
 
@@ -101,12 +102,13 @@ def _render(timeline: Timeline, *, vegas: bool = False) -> str:
         # EDL timecodes are on the sequence timebase.  Source in/out are
         # converted from the clip's own rate, never guessed from ms.
         src_in = convert_frames(clip.in_frame, clip.source.fps, seq_rate)
-        src_out = convert_frames(clip.out_frame, clip.source.fps, seq_rate)
-        # A one-frame source at a higher rate can round down to the same
-        # sequence frame; CMX3600 events must be at least one frame long.
-        src_out = max(src_in + 1, src_out)
         rec_in = clip.record_start
         rec_out = clip.record_end
+        # Source and record durations must match exactly (a 1-frame
+        # difference reads as a speed change), and an event is never
+        # shorter than one frame: rounding in and out separately broke
+        # both for very short clips at a foreign rate (60 fps → 23.976).
+        src_out = src_in + max(1, rec_out - rec_in)
         tc_in = frames_to_timecode(src_in, seq_rate, drop)
         tc_out = frames_to_timecode(src_out, seq_rate, drop)
         rec_tc_in = frames_to_timecode(rec_in, seq_rate, drop)
@@ -135,19 +137,4 @@ def _render(timeline: Timeline, *, vegas: bool = False) -> str:
                 f"{tc_in} {tc_out} {rec_tc_in} {rec_tc_out}"
             )
             lines.extend(_comment_lines("* FROM CLIP NAME:", clip.name))
-    if vegas:
-        # Vegas Pro ignores FCP7/FCPXML but reads this CMX3600 text through
-        # File > Import > EDL.  A trailing comment is valid CMX (a comment
-        # before the first event is rejected by strict parsers such as OTIO).
-        lines.append("* AMV Tools - Vegas Pro: File > Import > EDL")
     return "\n".join(lines) + "\n"
-
-
-def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
-    del options
-    return _render(timeline)
-
-
-def dumps_vegas(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
-    del options
-    return _render(timeline, vegas=True)

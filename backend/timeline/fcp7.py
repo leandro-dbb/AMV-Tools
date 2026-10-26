@@ -7,6 +7,7 @@ in the element's own timebase; NTSC is expressed as nominal timebase + the
 """
 from __future__ import annotations
 
+import re
 from fractions import Fraction
 from typing import Optional
 from .model import Timeline, TimelineOptions
@@ -61,13 +62,30 @@ def _sample_characteristics(rate: Fraction, width: int, height: int) -> str:
     )
 
 
+_DRIVE = re.compile(r"^([A-Za-z]):/")
+
+
+def xmeml_pathurl(url: str) -> str:
+    """``file:///C:/a b.mp4`` → ``file://localhost/C%3a/a%20b.mp4``.
+
+    The exact spelling Premiere Pro writes in its own xmeml exports (and
+    Resolve on import/export): ``localhost`` host, drive colon encoded.
+    macOS paths become ``file://localhost/Users/...``; UNC shares
+    (``file://server/share/...``) are left alone."""
+    if not url.startswith("file:///"):
+        return url
+    path = url[len("file:///"):]
+    path = _DRIVE.sub(lambda m: f"{m.group(1)}%3a/", path)
+    return "file://localhost/" + path
+
+
 def _file_xml(file_id: str, info, timeline: Timeline) -> str:
     # Always absolute, even with "collect media" (path_mode="relative"):
     # xmeml's <pathurl> is a file:// URL and Premiere, FCP 7, Resolve and
     # Vegas don't resolve relative ones (they report the media offline).
     # After collection the URL points at the copy in <timeline>_media/, and
     # <name> carries the file name so a moved project relinks by folder.
-    url = media_url(info.path, base_dir=timeline.base_dir, relative=False)
+    url = xmeml_pathurl(media_url(info.path, base_dir=timeline.base_dir, relative=False))
     duration = info.duration_frames or 0
     # Canonical FCP 7 order inside file/media/video is samplecharacteristics
     # (the file-level <duration> already carries the length).  Premiere is
