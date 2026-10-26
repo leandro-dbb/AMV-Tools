@@ -158,6 +158,12 @@ by default** — enable it from `Settings > Models`.
   goes straight to SAM 2. Clicks on several frames are keyframes.
 - Long shots are tracked window by window, so a 10 s+ shot no longer runs out
   of memory (11 s shot: 2.1 GB of VRAM instead of 9.0 GB).
+- **Max quality** (default on NVIDIA 8 GB and up with SAM 3; the standard
+  pipeline is the automatic fallback elsewhere): SAM 3 runs a second, zoomed
+  pass on each character, the matte hugs SAM 3's outline tightly but gives
+  back the hair tips SAM 3 misses, loose fragments are dropped, and the
+  export re-solves the outline from the local colours (ink line protected)
+  — the least background in the hair, slower.
 - Clean edges at export: the matte is exported as computed and the colour of
   every semi-transparent edge pixel is decontaminated (foreground
   estimation), so no ring or tint of the old background is left around hair
@@ -664,6 +670,8 @@ Useful settings:
 - `Auto model` / `SAM 2 variant`: *Auto* picks per memory tier (see the tier
   table in `Settings > Models`). `toonout` and `anime` are alternative
   detectors; on real episodes BiRefNet general measured best.
+- `Max quality cutout` (on): the max-quality pipeline where the tier supports
+  it (see above); off = the standard 0.6 pipeline.
 - `Clean edge colours at export` (on): matte exported as computed + edge
   colour decontamination. The 0.4/0.5 guided-filter export painted a ring of
   the old background around hair (background along the outline 4.0 % ->

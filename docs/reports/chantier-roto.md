@@ -1,7 +1,153 @@
 # Chantier roto : rendre le détourage (Mask Mode) utilisable sur de vrais épisodes
 
-Ce rapport a deux parties : **la partie 2 (chantier roto 2, SAM 3 et fond dans les cheveux)** en tête,
-puis la partie 1 (chantier roto, 0.5) inchangée, dont elle reprend le banc.
+Ce rapport a trois parties, la plus récente en tête : **partie 3 (qualité max)**, partie 2 (SAM 3 et
+fond dans les cheveux), partie 1 (chantier roto, 0.5, le banc).
+
+# Partie 3 — Qualité max : le moins de fond possible, sans contrainte de temps
+
+Date : nuit du 25 au 26 octobre 2026. Même machine (RTX 3090, bridée en horloge), même banc de 22 plans
+notés, mêmes métriques (partie 2, §2). Consigne : faire baisser ensemble le fond dans le masque
+(contour et intérieur), la contamination de couleur des bords, les échecs et le scintillement, sans
+perdre de cheveux ; le temps de calcul et la VRAM ne comptent plus ; **une variante meilleure au
+chiffre mais avec un artefact visible est refusée** (planches zoomées ×3 à ×6 sur fond magenta,
+noir et blanc, et planches de plans entiers).
+
+## 1. Le pipeline « Qualité max »
+
+1. **BiRefNet** détoure chaque image (le contour : cheveux, trait d'encre, alpha doux).
+2. **SAM 3 zoomé** (concept « anime character ») : passe sur l'image entière, puis seconde passe sur
+   le recadrage de chaque personnage trouvé — SAM 3 travaille à 1008 px fixes, un personnage
+   recadré y gagne 1,5 à 3 fois en résolution.
+3. Filtre large (2,5 % de la diagonale) autour de SAM 3 avant le suivi, **suivi SAM 2.1** comme en
+   partie 2.
+4. **Contour serré à 0,4 % du contour SAM 3, pointes rendues** : un morceau du masque BiRefNet hors
+   de ce contour serré revient seulement s'il est opaque (une mèche, un doigt — pas une lueur ni un
+   halo semi-transparents), reste à moins de 2,5 % de SAM 3, et **dépasse** du personnage (moins de
+   30 % de son pourtour touche le personnage : une poche de fond enfermée entre les bras touche de
+   partout et reste coupée).
+5. **Fragments isolés supprimés** : petits morceaux détachés du personnage et hors de SAM 3 (bouts
+   d'auréole, d'aura).
+6. **Export** (ProRes 4444, VP9, PNG) : l'alpha d'une bande de 2 px à l'intérieur et 12 px à
+   l'extérieur du contour est **recalculé à partir des couleurs locales** (personnage / fond), sauf
+   sur les pixels d'encre (plus sombres que le personnage et le fond autour : un trait noir n'est
+   ni l'un ni l'autre), puis estimation de la couleur de premier plan.
+
+## 2. Du 0.4 à la qualité max (22 plans notés, alpha exporté)
+
+| étape | J | F | échecs | scint. % | fond contour % | fond intérieur % | mangé % | contam. % | temps / image |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.4, ISNet anime (conseillé par la doc) | 0,751 | 0,669 | 21/107 | 13,0 | 21,8 | 24,9 | 22,4 | 40,8 | ≈ 70 ms (chargé) |
+| 0.4, BiRefNet seul (réglage par défaut) | 0,847 | 0,794 | 8/107 | 4,6 | 19,7 | 23,5 | 10,2 | 29,7 | 119 ms |
+| Auto BiRefNet + suivi SAM 2 (0.5) | 0,853 | 0,793 | 7/107 | 4,2 | 18,6 | 24,8 | 10,6 | 28,4 | 225 ms |
+| filtre SAM 3 (0.6 standard, partie 2) | 0,920 | 0,862 | 1/107 | 2,8 | 10,6 | 7,8 | 7,6 | 30,9 | 435 ms |
+| filtre SAM 3 serré 0,4 % (variante notée tgate4c0) | 0,915 | 0,857 | 2/107 | 2,6 | 6,6 | 5,9 | 7,7 | 28,0 | ≈ 440 ms |
+| **qualité max** (tel que l'application, stabilisation temporelle comprise) | **0,924** | **0,863** | **1/107** | **2,5** | **6,1** | **5,1** | 8,4 | **19,1** | 651 ms (+ export 580 ms / image 1080p) |
+
+Plans simples (calmes, dialogue, multi-personnages, cheveux, plan long) :
+
+| étape | J | F | échecs | fond contour % | fond intérieur % | mangé % | contam. % |
+|---|---|---|---|---|---|---|---|
+| 0.4, ISNet anime | 0,941 | 0,869 | 0/40 | 15,3 | 15,9 | 9,2 | 28,0 |
+| 0.4, BiRefNet seul | 0,970 | 0,898 | 0/40 | 11,0 | 10,7 | 6,8 | 25,9 |
+| Auto BiRefNet + suivi (0.5) | 0,968 | 0,895 | 0/40 | 9,2 | 10,1 | 7,8 | 23,7 |
+| filtre SAM 3 (0.6 standard) | 0,974 | 0,911 | 0/40 | 2,7 | 3,0 | 3,4 | 23,9 |
+| **qualité max** | **0,974** | **0,917** | 0/40 | **1,7** | **2,5** | 4,2 | **16,3** |
+
+Les lignes 0.4 et 0.5 sont mesurées avec l'export de leur époque (filtre guidé) ; les suivantes avec
+l'export 0.6 ou « max ». Temps : passe au calme sur un plan de 84 images (sauf mention « chargé ») ;
+qualité max = BiRefNet 118 ms + SAM 3 zoomé 419 ms (deux passes ; 216 ms pour une) + suivi SAM 2
+98 ms + contour serré et fragments 15 ms ; l'export « max » prend 580 ms par image 1080p sur CPU
+(294 ms pour l'export standard). Pic de VRAM : 2,0 Go (SAM 3), les modèles étant chargés l'un après
+l'autre — la qualité max tient sur une carte de 8 Go. Sans la stabilisation temporelle de
+l'application (le banc brut), le scintillement de la qualité max est de 2,7 %.
+
+## 3. Ce qui a été essayé, gardé ou refusé
+
+Toutes les lignes ci-dessous sont comparées à la même base (filtre SAM 3 suivi, 22 plans) ; « vu »
+= vérifié sur les planches zoomées.
+
+| essai | mesure (22 plans) | à l'œil | décision |
+|---|---|---|---|
+| contour serré 0,4 % sans rendre les pointes | fond contour 6,6 %, intérieur 5,9 % | **rogne les pointes de mèches** que SAM 3 sous-segmente (s06) | remplacé par ↓ |
+| **contour serré 0,4 % + pointes opaques rendues** (seuil de contact 30 %) | J 0,923, fond contour 6,8 %, intérieur 6,1 % | pointes gardées, lueurs et poches coupées | **gardé** |
+| seuils de contact 45 % / 60 %, opacité 0,8 | fond contour 6,5 / 10,6 %, J jusqu'à 0,912 | — | refusés (plus de fond) |
+| **suppression des fragments isolés** | identique au chiffre près | bouts d'auréole flottants autour de Whis supprimés (s05) | **gardé** |
+| rendre les objets tenus (poche opaque dont la couleur n'est pas celle du fond autour) | fond intérieur 5,7 → 7,2 % | rend le bol de Beerus mais aussi des poches de fond | refusé |
+| résolution couleur de l'alpha, bande ±10 px (la variante c5 de la partie 2) | contamination 30,9 → 10,6 % | **mange le trait d'encre**, mangé 18,6 % | refusé |
+| idem, bande 2 px dedans / 8 px dehors | contamination 17,3 % | **trait d'encre en pointillés** (s06) | refusé |
+| **idem + encre protégée**, bande 2 / 12 px | contamination 27,5 → 20,7 %, mangé 8,2 % | trait continu, plus de liseré bleu sur fond noir (b1) | **gardé** |
+| bande 3 px dedans | contamination 15,4 %, mangé 10,1 % | **ronge les pointes jaunes sur l'aura jaune** (s06) | refusé |
+| couleur du pixel opaque le plus proche pour tous les pixels du bord | contamination 18,8 % | **contour crénelé** (b1) | refusé |
+| **encre protégée + démélange contre le fond le plus proche + estimation du premier plan** | contamination 20,6 → 19,1 %, alpha identique | trait plus net contre le blanc, aucun artefact (b1, s02, s06) | **gardé** |
+| démélange seul (sans estimation du premier plan) | contamination 23,9 % | — | refusé |
+| portée des pointes rendues 1,0 / 1,5 % au lieu de 2,5 % | identique (fond contour 6,0 %) | — | refusé (garde les longues pointes) |
+| niveaux sur l'alpha (seuils 10-90 %, 20-80 %) | contamination 34 à 37 % | — | refusé |
+| **SAM 3 zoomé** (seconde passe par personnage) | fond intérieur 5,7 → 5,1 % (sombre 13,4 → 9,5 %) | identique | **gardé** (2 passes SAM 3) |
+| fusion de prompts « anime character » + « person » | fond contour 7,0 %, J 0,922 | — | refusé |
+| fusion « anime character » + « hair » | fond contour 6,6 % (cheveux 1,3 → 1,8 %), J 0,922 | — | refusé |
+| « person » seul | J 0,917 | — | refusé |
+| SAM 3 vidéo comme sélecteur (cohérence temporelle) | mangé 11,5 %, J 0,910 | — | refusé |
+| union SAM 3 image + vidéo | J 0,922, fond contour 7,3 % | — | refusé |
+| vote temporel du sélecteur (comblement, majorité sur 3 images) | identique ou pire (scint. 2,7 → 3,1 %) | — | refusé |
+| **ensemble BiRefNet + BiRefNet HR** (moyenne) | J 0,924 → **0,938** (effets 0,80 → 0,89) | **ailes du démon à moitié transparentes** (b2) : la moyenne de deux avis contraires donne un fantôme | refusé |
+| BiRefNet HR seul / HR-matting (entrée 2048) | HR : J 0,848, contamination 34,7 % ; HR-matting : J 0,816, 11 échecs, scint. 8,1 % | — | refusés |
+
+Ce qui reste dans les chiffres vient en partie de la **référence** (SAM 2.1, binaire) : sur le plan
+long, les mains jointes de Goku y sont marquées « fond » (une image clé à 92 % de « fond
+intérieur » alors que le pipeline a raison) et l'auréole de Kaio y compte comme personnage ; sur s13,
+du sol entre les jambes y est inclus. Le « mangé » des effets (29 %) est surtout l'aura qui enveloppe
+les mains et les objets tenus que SAM 3 exclut.
+
+## 4. Verdict visuel par plan (qualité max contre filtre SAM 3)
+
+La qualité max est **égale ou meilleure sur chaque plan** : plus de bouts d'auréole autour de Whis
+(s05), bords nets sans liseré sur fond noir ou blanc (b1, s01, s06), lueur de l'aura retirée autour
+des pointes (s06), bords plus propres sur b6. Restent : le bâton de Whis et le bol de Beerus coupés
+(objets tenus, et le bol laisse un trou dans le torse sur s19), un amas de particules gardé sur une
+image de b2 (SAM 3 le compte comme personnage), une lueur verte aux pieds sur s13, le personnage
+secondaire perdu en fin de plan sous la pluie (b4). Compte inchangé : **13 U / 8 R / 1 X** (comme
+le filtre SAM 3) — les gains sont à l'intérieur des plans (liseré, lueurs, fragments, poches), pas
+assez pour faire changer de classe un plan dont il manque un objet tenu (s05, s19).
+
+## 5. Intégration
+
+- Réglage `mask_quality` (*Détourage qualité max*, Settings > Models) : *Auto* = qualité max sur les
+  paliers NVIDIA 8, 12, 16, 24 Go et Max **quand SAM 3 est accessible** ; sinon, et sur le palier
+  Rapide, Mac et CPU, **repli automatique** sur le pipeline standard (ou sur l'Auto 0.5 sans SAM 3).
+  L'export suit (`mask_edge_mode` = *auto*).
+- VRAM : les modèles sont chargés l'un après l'autre (BiRefNet 1,6 Go, SAM 3 2,0 Go, SAM 2 1,7 Go) ;
+  la qualité max ne coûte pas plus de VRAM que le standard, seulement du temps (deux passes SAM 3,
+  étapes CPU).
+- Mode manuel : le clic passe par le même chemin (SAM 3 zoomé, contour serré, export max) — **pas de
+  régression** : J 0,879 → 0,883, échecs 5 → 5, fond contour 10,0 → 5,8 %, fond intérieur 7,8 → 5,1 %,
+  contamination 31,2 → 19,2 %, mangé 10,8 → 11,6 %.
+
+## 6. Mask Mode Auto activable par défaut ?
+
+**Oui, sur les cartes NVIDIA de 8 Go et plus où SAM 3 est accessible : l'Auto « qualité max » est
+activable par défaut.** Sur 22 plans réels, il ne perd le personnage qu'une fois sur 107 images
+clés, et le défaut qui motivait ces trois chantiers — du fond dans les cheveux et autour des
+personnages, même sur des plans simples — est divisé par cinq à six depuis la 0.5 sur les plans
+simples (fond le long du contour 9,2 → 1,7 %, fond enfermé 10,1 → 2,5 %, couleur de fond dans les
+bords 23,7 → 16,3 %), sans perte de cheveux à l'œil sur fond noir, blanc et magenta. Restent : les
+objets tenus coupés, la lueur d'aura aux pieds sur un plan, un personnage secondaire perdu sous la
+pluie de nuit, et un traitement 2,9 fois plus long qu'en 0.5 (≈ 0,65 s par image sur RTX 3090).
+
+**Non ailleurs** : sans SAM 3 (Mac non mesuré, CPU, palier Rapide, jeton absent), l'application
+retombe automatiquement sur le pipeline standard ou sur l'Auto 0.5, dont les verdicts des parties 2
+et 1 restent valables. Comme l'accès à SAM 3 dépend du jeton Hugging Face de chaque utilisateur,
+`enable_mask` reste désactivé dans le code ; l'activer automatiquement quand le palier a SAM 3 et
+que le jeton ouvre ses poids est la dernière marche.
+
+## 7. Planches
+
+Dans `reports/roto/roto3/` sur la machine de mesure : `cheveux-avant-apres/` (zooms ×3, filtre SAM 3
+contre qualité max, sur magenta), `noir/` et `blanc/` (mêmes zooms ×4 sur fond noir et blanc, pour le
+liseré), `plans/` (images entières), `verdict/` (planches compactes du §4).
+
+
+---
+
 
 # Partie 2 — SAM 3, détecteur anime, et le fond qui reste dans les cheveux
 
