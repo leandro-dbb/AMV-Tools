@@ -134,6 +134,9 @@ EXTRA_BG_SHARE = 0.35        # ... in between, they go when this share of their 
 EXTRA_BG_DIST = 0.12         # colour distance (0..1 RGB) to the background palette counted as "background colour"
 ABSORB_AT_WORK_RES = False   # the ink line is absorbed at export, at full resolution (a 608p one, scaled
                              # up, made staircase edges)
+STABLE_EDGE = "soft"         # v5: BiRefNet's soft matte is the edge (soft_frame); "hard": the v2-v4 stable_frame
+SOFT_FILL_SEEN = 0.6         # v5: SAM 3 fills a character BiRefNet sees less than this share of
+SOFT_FILL_SIGMA = 1.5        # ... with a soft join this wide (px)
 TIP_KEEP_PX = 10.0           # solid pixels of a dropped extra this close to SAM 3 stay (hair tips)
 STABLE_SOFT_PX = 3.0         # semi-transparent pixels kept within this of a solid one / SAM 3 (px)
 SPECK_LO = 0.0002            # detached islands under this share of the frame: background specks
@@ -1383,6 +1386,82 @@ def det_seen(det: np.ndarray, shots: Optional[List[tuple[int, int]]] = None) -> 
     return ok
 
 
+def soft_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optional[np.ndarray] = None,
+               held: Optional[np.ndarray] = None, *, det_ok: bool = True, low: float = STABLE_DET_LOW,
+               fill_seen: float = SOFT_FILL_SEEN, fill_sigma: float = SOFT_FILL_SIGMA,
+               track_min_rel: float = TRACK_MIN_REL) -> np.ndarray:
+    """One frame of the "stable" matte, v5 ("soft" edge): BiRefNet's own soft
+    matte is the base and its outline is never redrawn.
+
+    Every BiRefNet piece (alpha > ``low``) that touches a character (SAM 3's
+    character mask ``selector``, the SAM 2 ``track`` away from SAM 3 only
+    when character-sized, a ``held`` object) is kept as it is, with its
+    antialiased gradient; pieces detached from the characters (scenery) are
+    dropped — nothing is tightened. SAM 3 is only a backup: where BiRefNet
+    lost the character on this frame (``det_ok`` False: motion blur) or sees
+    less than ``fill_seen`` of one of SAM 3's characters (a dark character
+    BiRefNet half misses), SAM 3's mask fills what BiRefNet does not cover,
+    away from BiRefNet's own edge, with a ``fill_sigma`` px soft join. Held
+    objects are added. No character evidence at all: BiRefNet as is."""
+    import cv2
+    d = np.clip(det.astype(np.float32), 0, 1)
+    h, w = d.shape
+    ev = np.zeros((h, w), bool)
+    s = None
+    if selector is not None and np.any(selector):
+        s = np.asarray(selector) > 0.5
+        ev |= s
+    tr = None
+    if track is not None and np.any(track):
+        tr = np.clip(np.asarray(track, np.float32), 0, 1)
+        tm = tr > 0.5
+        if s is not None:
+            n_t, lab_t, st_t, _ = cv2.connectedComponentsWithStats(tm.astype(np.uint8), connectivity=8)
+            if n_t > 1:
+                ok = np.zeros(n_t, bool)
+                ok[np.unique(lab_t[tm & s])] = True
+                ok |= st_t[:, 4] >= track_min_rel * float(s.sum())
+                ok[0] = False
+                tm = ok[lab_t]
+        ev |= tm
+    hm = None
+    if held is not None and np.any(held):
+        hm = np.asarray(held, np.float32)
+        hm = hm / 255.0 if hm.max() > 1.0 else hm
+        ev |= hm > 0.5
+    if not ev.any():
+        return d
+    m = (d > low).astype(np.uint8)
+    n, lab = cv2.connectedComponents(m, connectivity=8)
+    keep = np.zeros(n, bool)
+    if n > 1:
+        keep[np.unique(lab[ev & (m > 0)])] = True
+        keep[0] = False
+    # the piece's own antialiased gradient (alpha under ``low``) comes along
+    zone = cv2.dilate(keep[lab].astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    out = np.where(zone, d, 0.0).astype(np.float32)
+    if s is not None:
+        n_s, lab_s = cv2.connectedComponents(s.astype(np.uint8), connectivity=8)
+        if n_s > 1:
+            tot = np.bincount(lab_s.ravel(), minlength=n_s)
+            seen = np.bincount(lab_s[d > 0.5], minlength=n_s)
+            fill_c = np.ones(n_s, bool) if not det_ok else seen < fill_seen * np.maximum(tot, 1)
+            fill_c[0] = False
+            if fill_c.any():
+                # away from BiRefNet's own edge, soft join
+                edge_keep = cv2.dilate((d > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+                fill = fill_c[lab_s] & ~edge_keep
+                if fill.any():
+                    soft = cv2.GaussianBlur(fill.astype(np.float32), (0, 0), fill_sigma)
+                    soft = np.where(fill_c[lab_s] | (soft > 0.05), soft, 0.0)
+                    out = np.maximum(out, np.clip(soft * 1.5, 0, 1)).astype(np.float32)
+    elif tr is not None:
+        out = np.maximum(out, tr)
+    if hm is not None:
+        out = np.maximum(out, hm)
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
 def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]],
                  track: Optional[np.ndarray] = None, held: Optional[Sequence[Optional[np.ndarray]]] = None,
                  frames: Optional[Sequence] = None, shots: Optional[List[tuple[int, int]]] = None,
@@ -1418,8 +1497,11 @@ def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]]
             if rgb.shape[:2] != d.shape:
                 import cv2
                 rgb = cv2.resize(rgb, (d.shape[1], d.shape[0]), interpolation=cv2.INTER_AREA)
-        out[t] = stable_frame(d, sel[t], None if track is None else track[t], hl[t], reach_frac=reach_frac,
-                              prev=None if t in starts else out[t - 1], rgb=rgb, det_ok=det_ok[t])
+        if STABLE_EDGE == "soft":
+            out[t] = soft_frame(d, sel[t], None if track is None else track[t], hl[t], det_ok=det_ok[t])
+        else:
+            out[t] = stable_frame(d, sel[t], None if track is None else track[t], hl[t], reach_frac=reach_frac,
+                                  prev=None if t in starts else out[t - 1], rgb=rgb, det_ok=det_ok[t])
     if frames is not None and len(frames) == T:
         out, fixed = temporal_guard(out, frames, det, shots, selector=sel)
         if fixed:

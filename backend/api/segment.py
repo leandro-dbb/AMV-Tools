@@ -849,9 +849,10 @@ def _edge_mode(models_cfg: dict) -> str:
     """Export edge mode: the setting, "auto" = "max" with the max-quality
     pipeline, "fg" otherwise."""
     mode = str(models_cfg.get("mask_edge_mode", "auto"))
-    if mode in ("fg", "legacy", "max"):
+    if mode in ("fg", "legacy", "max", "soft"):
         return mode
-    return "max" if _quality(models_cfg) in ("max", "stable") else "fg"
+    q = _quality(models_cfg)
+    return "soft" if q == "stable" else ("max" if q == "max" else "fg")
 
 
 def _keep_held(models_cfg: dict) -> bool:

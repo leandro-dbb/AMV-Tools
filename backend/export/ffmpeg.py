@@ -597,6 +597,15 @@ def _encode_scene_with_alpha(
 
     def finish_frame(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
         alpha = np.clip(mask.astype(np.float32), 0.0, 1.0)
+        if edge_mode == "soft":
+            # v5 (Stable): the soft matte is scaled up onto the full-res art
+            # with a guided filter (smooth, no staircase), then the outer ink
+            # line is added and the edge colours decontaminated
+            from ..models.edge_refine import finish_edges
+            if alpha.shape != rgb.shape[:2]:
+                alpha = upsample_alpha_guided(alpha, rgb)
+            rgb, alpha = finish_edges(rgb, alpha, "soft")
+            return np.dstack([rgb, (alpha * 255.0).round().astype(np.uint8)])
         if edge_mode in ("fg", "max"):
             # 0.6 (chantier roto 2): the guided-filter upscale painted a ring
             # of the old background around hair (x4 background along the

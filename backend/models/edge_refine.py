@@ -372,7 +372,8 @@ def _ink_context(rgb: np.ndarray, alpha: np.ndarray, band: int):
 
 
 def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_FRAC,
-               reach_frac: float = INK_REACH_FRAC, fill_max_rel: float = INK_FILL_MAX_REL) -> tuple[np.ndarray, np.ndarray]:
+               reach_frac: float = INK_REACH_FRAC, fill_max_rel: float = INK_FILL_MAX_REL,
+               cut_fringe: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """Matte completed along the character's outer ink line, at the
     resolution of ``rgb``.
 
@@ -398,7 +399,8 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
        staircase, no fringe of background.
 
     Where the background is as dark as the ink (night) nothing changes.
-    Returns (alpha, outline pixels made opaque)."""
+    ``cut_fringe`` False: alpha is only ever raised (the "soft" export keeps
+    the matte's own gradient). Returns (alpha, outline pixels made opaque)."""
     import cv2
     a = np.clip(alpha.astype(np.float32), 0.0, 1.0)
     h, w = a.shape
@@ -473,7 +475,10 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
             cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)
             # background-luma pixels: the fringe of background, out; darker
             # ones: the drawing's antialiasing (never lowered)
-            out[ring] = np.where(lum[ring] >= lb[ring] - 0.03, 0.0, np.maximum(out[ring], cov[ring]))
+            if cut_fringe:
+                out[ring] = np.where(lum[ring] >= lb[ring] - 0.03, 0.0, np.maximum(out[ring], cov[ring]))
+            else:   # v5 "soft": the matte's own gradient is never lowered
+                out[ring] = np.maximum(out[ring], np.where(lum[ring] >= lb[ring] - 0.03, 0.0, cov[ring]))
         # nothing new may stand detached from the character
         n, lab = cv2.connectedComponents((out > 0.5).astype(np.uint8), connectivity=8)
         if n > 2:
@@ -563,6 +568,12 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
     down to alpha 0.05, nearest opaque colour below). Ground-truth colour
     contamination on the benchmark composites: 13.4 % (``fg``) -> 2.6 %."""
     a = np.clip(alpha.astype(np.float32, copy=False), 0.0, 1.0)
+    if mode == "soft":
+        # v5: the matte's own soft edge is kept; the outer ink line is added
+        # (alpha only raised), tiny holes closed, edge colours decontaminated
+        a, _ink = absorb_ink(rgb, a, cut_fringe=False)
+        a = fill_small_holes(a)
+        return unmix_with_background(rgb, a, faint=MAX_UNMIX_FAINT, solid=MAX_UNMIX_SOLID), a
     # the outer ink line belongs to the character: absorbed, opaque, and
     # never made transparent or recoloured afterwards
     if mode == "max":
