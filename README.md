@@ -153,7 +153,7 @@ by default** — enable it from `Settings > Models`.
   the arms, under the chin and between hair spikes. SAM 3's weights are gated
   on Hugging Face: accept its license with your account and paste your token
   in `Settings > Models`; without access, Auto runs as in 0.5.
-  In max quality SAM 3 also finds what the characters hold or wear (a staff,
+  In Stable and max quality SAM 3 also finds what the characters hold or wear (a staff,
   a halo, a sword, a bowl...) and puts it back in the cutout instead of
   cutting it off (`Keep held objects`, on by default).
 - **Manual**: click a character and it is the whole detected character that
@@ -161,8 +161,16 @@ by default** — enable it from `Settings > Models`.
   goes straight to SAM 2. Clicks on several frames are keyframes.
 - Long shots are tracked window by window, so a 10 s+ shot no longer runs out
   of memory (11 s shot: 2.1 GB of VRAM instead of 9.0 GB).
-- **Max quality** (default on NVIDIA 8 GB and up with SAM 3; the standard
-  pipeline is the automatic fallback elsewhere): SAM 3 runs a second, zoomed
+- **Stable** (default on NVIDIA 8 GB and up with SAM 3; the standard
+  pipeline is the automatic fallback elsewhere): nothing disappears. The
+  outline model's matte is kept wherever it touches a character — hair,
+  edges and held objects (a cigarette, a staff) are never cut; SAM 3 only
+  removes scenery detached from the characters and oversized pieces sticking
+  out of them (aura flares); a frame where the character would vanish
+  (camera shake, motion blur, flash) takes its neighbours' matte; loose
+  background specks are cleaned the same way on every frame. A little
+  background can remain, to brush away.
+- **Max quality** (*Settings > Models > Cutout mode*): SAM 3 runs a second, zoomed
   pass on each character, the matte hugs SAM 3's outline tightly but gives
   back the hair tips SAM 3 misses, loose fragments are dropped, and the
   export re-solves the outline from the local colours (ink line protected)
@@ -655,7 +663,7 @@ How the engines work (0.5, with the 0.6 character pick):
   while the detector still draws the hair and the ink line. A frame where SAM
   3 sees nobody keeps the detector's matte. Off switch: `Character pick with
   SAM 3` in `Settings > Models`.
-- **Held objects (max quality)**: the same SAM 3 pass looks for weapon,
+- **Held objects (Stable and max quality)**: the same SAM 3 pass looks for weapon,
   sword, staff, halo, bowl, hammer and cup; an instance that touches a
   character, that the detector sees as foreground, that does not glow (energy
   beams and ki flames are effects) and that persists over neighbouring frames
@@ -678,8 +686,10 @@ Useful settings:
 - `Auto model` / `SAM 2 variant`: *Auto* picks per memory tier (see the tier
   table in `Settings > Models`). `toonout` and `anime` are alternative
   detectors; on real episodes BiRefNet general measured best.
-- `Max quality cutout` (on): the max-quality pipeline where the tier supports
-  it (see above); off = the standard 0.6 pipeline.
+- `Cutout mode`: *Stable* (default where the tier supports it, see above),
+  *Max quality* (tight outline: the least background, but it can eat edges
+  and props and lose a blurred character) or *Standard* (the first 0.6
+  pipeline).
 - `Clean edge colours at export` (on): matte exported as computed + edge
   colour decontamination. The 0.4/0.5 guided-filter export painted a ring of
   the old background around hair (background along the outline 4.0 % ->
