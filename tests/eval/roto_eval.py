@@ -1361,6 +1361,8 @@ def stability(root: Path, sid: str, rd: Path, n: int) -> dict:
 def cmd_score(args) -> None:
     root = Path(args.root)
     shots = load_shots(root)
+    if args.only:
+        shots = [s for s in shots if s["id"] in set(args.only)]
     methods = args.methods or sorted(p.name for p in (root / "runs").iterdir() if p.is_dir())
     out = Path(args.scores) if args.scores else root / "scores.json"
     prev = json.loads(out.read_text()) if out.exists() else {}

@@ -22,7 +22,26 @@ All notable changes to AMV Tools are documented here.
   from the matte) are cleaned after the temporal stabilisation, decided with
   the previous frame. Held objects are on in this mode; the SAM 3 character
   and object concepts share one batched encoder pass.
-- RESULTS_PLACEHOLDER
+- **The outer ink line stays in the cutout** (export and Stable matte): the
+  mattes stopped at the boundary between the fill and the black outline, and
+  the max-quality export thinned what was left — composited, characters lost
+  their contour even on calm shots. The dark pixels connected to the matte's
+  edge (darker than the local background, a few pixels wide) are now taken
+  in, opaque, with their antialiasing; the export never makes them
+  transparent or recolours them. Nothing changes where the background is as
+  dark as the ink.
+- Measured on the rebuilt benchmark (27 shots, 2 058 frames, the app's chain
+  end to end), old 0.4 -> night max quality -> Stable: lost frames 30 -> 28
+  -> 10 (all checked by eye: smoke hiding the character, pure speed-blur
+  frames, a character entering the frame), jumps 60 -> 33 -> 18,
+  character eaten along the outline 10.5 -> 12.7 -> 3.1-4.4 %, contour ink
+  kept 62 -> 64 -> 95 % (20 of 27 shots over 97 %; the examples' ProRes:
+  99.2 and 98.5 %, and 60.4 % on the SSJ3 shot where dark ground around the
+  aura counts as ink), cigarette of b1 kept on all 84 frames (worst
+  frame 98.6 / 11 / 99.0 %); background along the outline 17.2 -> 5.8 ->
+  10.1-11.0 % (median 14.5 -> 1.5 -> 6.8-9.6 %): more background than the
+  night's tight outline, the price of cutting nothing. About 1.1-1.2 s per
+  frame on an RTX 3090 with the ProRes 1080p export.
 - *Settings > Models > Cutout mode*: Stable (default) / Max quality (tight
   outline) / Standard.
 - Benchmark rebuilt for stability: every frame of every shot is checked
