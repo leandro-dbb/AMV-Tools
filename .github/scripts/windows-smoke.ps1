@@ -217,6 +217,12 @@ try {
   }
   if (-not $done) { throw 'Indexing did not finish within 30 minutes' }
   $summary.index_s = [int]((Get-Date) - $t0).TotalSeconds
+  # Fresh machine: the models must have been fetched up front, with progress.
+  $bl = Join-Path $userData 'logs\backend.log'
+  $pre = @(Select-String -LiteralPath $bl -Pattern 'model prefetch: downloading')
+  if ($pre.Count -lt 2) { throw "Expected the SigLIP + tagger prefetch on a fresh machine, saw $($pre.Count)" }
+  if (Select-String -LiteralPath $bl -Pattern 'model prefetch failed' -Quiet) { throw 'model prefetch failed' }
+  $summary.prefetch = @($pre | ForEach-Object { $_.Line.Substring([Math]::Min(24, $_.Line.Length)) })
   Save-Json $videos 'videos.json'
   Save-Json (Api GET '/api/models/status') 'models-after.json'
 
