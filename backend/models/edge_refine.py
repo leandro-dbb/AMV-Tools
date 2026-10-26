@@ -171,6 +171,7 @@ def colour_solve(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008,
 
 EDGE_SOLVE_OUT = 0.006   # full-resolution edge solve: band outside the matte (share of the diagonal, 13 px at 1080p)
 EDGE_SOLVE_IN = 0.0015   # ... and inside it (3 px at 1080p)
+RAISE_COLOUR_DIST = 0.18 # a piece the edge solve adds must have about the colours of the character it touches
 
 
 def edge_solve(rgb: np.ndarray, alpha: np.ndarray, out_frac: float = EDGE_SOLVE_OUT,
@@ -209,6 +210,29 @@ def edge_solve(rgb: np.ndarray, alpha: np.ndarray, out_frac: float = EDGE_SOLVE_
     # lowering: the drawing's antialiasing, no halo; raising only to solid
     # (a tip the matte stopped short of), never a half-alpha pocket of glow
     sub[band] = np.where(new < cur, new, np.where(new >= 0.9, new, cur))
+    # a raised piece must continue the character's own colours where it
+    # touches it (a hair tip), not be scenery fused with the edge
+    before = a[y0:y1, x0:x1]
+    raised = (sub >= 0.5) & (before < 0.5)
+    if raised.any():
+        src = rgb[y0:y1, x0:x1].astype(np.float32) / 255.0
+        n, lab, st, _ = cv2.connectedComponentsWithStats(raised.astype(np.uint8), connectivity=8)
+        solid_in = before >= 0.5
+        k5 = np.ones((5, 5), np.uint8)
+        for i in range(1, n):
+            x, y, bw, bh, _ar = st[i]
+            yy0, xx0 = max(0, y - 3), max(0, x - 3)
+            yy1, xx1 = min(sub.shape[0], y + bh + 3), min(sub.shape[1], x + bw + 3)
+            comp = lab[yy0:yy1, xx0:xx1] == i
+            contact = (cv2.dilate(comp.astype(np.uint8), k5) > 0) & solid_in[yy0:yy1, xx0:xx1] & ~comp
+            if not contact.any():
+                bad = True
+            else:
+                patch = src[yy0:yy1, xx0:xx1]
+                bad = float(np.linalg.norm(patch[comp].mean(0) - patch[contact].mean(0))) > RAISE_COLOUR_DIST
+            if bad:
+                sp = sub[yy0:yy1, xx0:xx1]
+                sp[comp] = before[yy0:yy1, xx0:xx1][comp]
     return res
 
 
@@ -323,7 +347,7 @@ MAX_UNMIX_SOLID = 0.30   # full unmix from this alpha up
 INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diagonal (6 px at 1080p, 3 px at 608p)
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
-INK_REACH_FRAC = 0.03    # outline followed this far from the matte (a hair spike to its tip; 66 px at 1080p)
+INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
 INK_FILL_MAX_REL = 0.03  # what matte + outline enclose is filled up to this share of the matte's area
 
 
