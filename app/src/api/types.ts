@@ -243,6 +243,7 @@ export interface AppSettings {
     mask_edge_mode?: 'auto' | 'fg' | 'max' | 'legacy';
     mask_quality?: 'auto' | 'max' | 'standard';
     mask_selector_enabled?: boolean;
+    mask_keep_held?: 'auto' | boolean;
     mask_temporal_smooth_enabled: boolean;
     mask_temporal_smooth_strength: number;
     hf_token: string;

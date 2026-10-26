@@ -453,3 +453,100 @@ def test_hug_gives_back_a_held_object_but_not_a_pocket_of_sky():
     assert out[220, 640] == 0.0                    # sky stays out
     no_rgb = hug_with_tips(base, sel)
     assert no_rgb[330, 540] == 0.0
+
+
+# ── 0.6 held objects (roto held) ─────────────────────────────────────────────
+def _staff_scene(h=608, w=1080):
+    body = _blob(h, w, 400, 100, 600, 560)
+    staff = _blob(h, w, 380, 40, 396, 580)             # held against the body's side
+    pillar = _blob(h, w, 900, 0, 940, 608)              # far from anyone
+    base = np.maximum(body, staff)
+    base = np.maximum(base, pillar)
+    return body, staff > 0.5, pillar > 0.5, base
+
+
+def test_held_regions_keeps_objects_touching_a_character_that_the_detector_sees():
+    from backend.models.auto_roto import held_regions
+    body, staff, pillar, base = _staff_scene()
+    ghost = np.zeros_like(staff)
+    ghost[200:300, 600:640] = True                      # touches, but the detector sees background there
+    held = held_regions(base, body, [staff, pillar, ghost])
+    assert held[300, 386] and not held[300, 920] and not held[250, 620]
+    assert not held_regions(base, np.zeros_like(body), [staff]).any()   # nobody: nothing held
+    huge = np.ones_like(staff)
+    assert not held_regions(np.ones_like(base), body, [huge]).any()    # bigger than 2x the character
+
+
+def test_keep_held_gives_back_the_detector_matte_with_its_fringe():
+    from backend.models.auto_roto import keep_held
+    body, staff, _p, base = _staff_scene()
+    base = base.copy()
+    base[300, 397] = 0.5                                # antialiased fringe of the staff
+    out = keep_held(body, base, staff)
+    assert out[300, 386] == 1.0 and out[300, 397] == 0.5 and out[300, 920] == 0.0
+    assert keep_held(body, base, None) is body
+
+
+def test_persist_held_drops_one_frame_detections():
+    from backend.models.auto_roto import persist_held
+    a = np.zeros((40, 40), bool)
+    a[10:20, 10:20] = True
+    b = np.zeros((40, 40), bool)
+    b[25:30, 25:30] = True                              # only on frame 1
+    out = persist_held([a, a | b, a])
+    assert out[1][15, 15] and not out[1][27, 27] and out[0][15, 15]
+    assert persist_held([None, a])[0] is None
+
+
+def test_apply_selector_and_tighten_give_back_held_objects():
+    from backend.models.auto_roto import apply_selector, tighten
+    body, staff, pillar, base = _staff_scene()
+    det = np.stack([np.clip(base * 255, 0, 255).astype(np.uint8)] * 3)
+    frames = [np.zeros(body.shape + (3,), np.uint8)] * 3
+
+    class Sel:
+        def segment(self, rgb, prompt):
+            return body
+
+        def segment_with_objects(self, rgb, prompt, objects, zoom=False):
+            assert "staff" in objects
+            return body, [staff, pillar]
+
+    keep, held = [], []
+    gated = apply_selector(det, frames, Sel(), keep=keep, held=held)
+    assert gated[1, 50, 386] == 0 and held[1] is not None and held[1][50, 386] == 255   # beyond the gate
+    assert held[1][300, 920] == 0
+    m = gated.astype(np.float32) / 255.0
+    out = tighten(m, keep, quality="max", held=held)
+    assert out[1, 50, 386] == 1.0 and out[1, 300, 920] == 0.0
+    assert tighten(m, keep, quality="max")[1, 50, 386] == 0.0
+    # main-character mode: a prop that does not touch the tracked target stays out
+    other = np.zeros_like(m)
+    other[:, 100:300, 700:850] = 1.0
+    assert tighten(other, keep, quality="max", held=held)[1, 50, 386] == 0.0
+
+
+def test_keep_held_setting_is_max_quality_only(monkeypatch):
+    from backend.api import segment
+    monkeypatch.setattr(segment, "_quality", lambda cfg: cfg.get("q", "max"))
+    assert segment._keep_held({"mask_keep_held": True}) is True
+    assert segment._keep_held({"mask_keep_held": True, "q": "standard"}) is False
+    assert segment._keep_held({"mask_keep_held": False}) is False
+    assert segment._keep_held({}) is auto_roto.HELD_DEFAULT
+
+
+def test_held_regions_rejects_light_effects():
+    from backend.models.auto_roto import held_regions
+    body, staff, _p, base = _staff_scene()
+    rgb = np.zeros(body.shape + (3,), np.uint8)
+    rgb[:] = (200, 60, 60)
+    beam = staff.copy()
+    rgb[beam] = (255, 250, 245)                         # a white-hot energy beam SAM 3 calls a "sword"
+    assert held_regions(base, body, [beam]).any()       # without the frame: kept
+    assert not held_regions(base, body, [beam], rgb=rgb).any()
+    rgb[beam] = (60, 170, 250)                          # a blue ki flame: vivid
+    assert not held_regions(base, body, [beam], rgb=rgb).any()
+    rgb[beam] = (150, 210, 235)                         # a pale blue halo: bright but not vivid
+    assert held_regions(base, body, [staff], rgb=rgb).any()
+    rgb[beam] = (40, 40, 120)                           # a dark blue staff
+    assert held_regions(base, body, [staff], rgb=rgb).any()

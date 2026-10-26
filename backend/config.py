@@ -133,6 +133,11 @@ DEFAULT_SETTINGS = {
         # before the detector's matte is used, when the tier has it and the
         # gated weights are accessible.
         "mask_selector_enabled": True,
+        # Max quality: give back the objects the characters hold or wear
+        # (staff, halo, bowl, weapons: SAM 3 object prompts that touch a
+        # character and that BiRefNet sees as foreground). "auto" = on/off
+        # per the benchmark (backend/models/auto_roto.HELD_DEFAULT).
+        "mask_keep_held": "auto",
         # Bidirectional EMA over per-frame (Auto engine) mattes — removes the
         # silhouette flicker of frame-independent inference. Hard cuts and
         # teleport-fast motion reset the history automatically.
