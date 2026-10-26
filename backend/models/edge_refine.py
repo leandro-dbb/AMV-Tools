@@ -277,10 +277,92 @@ MAX_UNMIX_FAINT = 0.05   # unmix down to this alpha, nearest opaque colour below
 MAX_UNMIX_SOLID = 0.30   # full unmix from this alpha up
 
 
+INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diagonal (6 px at 1080p, 3 px at 608p)
+INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
+INK_MAX_LUMA = 0.55      # ... and darker than this
+
+
+def _ink_context(rgb: np.ndarray, alpha: np.ndarray, band: int):
+    """(luma, local background luma, local character luma, solid mask) for
+    :func:`absorb_ink` / :func:`outline_ink`."""
+    import cv2
+    lum = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32) / 255.0
+    solid = alpha > 0.5
+    m8 = solid.astype(np.uint8)
+    d_out = cv2.distanceTransform(1 - m8, cv2.DIST_L2, 3)
+    d_in = cv2.distanceTransform(m8, cv2.DIST_L2, 3)
+    k = (8 * band + 9) | 1
+    bgw = ((d_out > band + 2) & (d_out <= 3 * band + 10) & (alpha < 0.05)).astype(np.float32)
+    fgw = ((d_in > band + 2) & (d_in <= 3 * band + 10)).astype(np.float32)
+    lb = cv2.blur(lum * bgw, (k, k)) / (cv2.blur(bgw, (k, k)) + 1e-6)
+    lf = cv2.blur(lum * fgw, (k, k)) / (cv2.blur(fgw, (k, k)) + 1e-6)
+    has_bg = cv2.blur(bgw, (k, k)) > 0.02
+    return lum, np.where(has_bg, lb, 0.0), lf, solid, d_out, d_in
+
+
+def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_FRAC) -> tuple[np.ndarray, np.ndarray]:
+    """Matte grown outwards over the character's outer ink line.
+
+    Mattes (BiRefNet, SAM 3) often stop at the boundary between the fill
+    colour and the outline, or halfway through the outline: composited, the
+    character loses its black contour. Here every dark pixel (luma at least
+    :data:`INK_DARK` under the local background and under
+    :data:`INK_MAX_LUMA`) connected to the solid matte through dark pixels,
+    within ``band_frac`` of the diagonal outside it, is made opaque, the
+    dark pixels already in the matte's edge too; the 1-2 px antialiasing
+    ring beyond the ink gets the alpha its luma implies (between the ink and
+    the background). Where the background is as dark as the ink (night)
+    nothing is changed. Returns (alpha, ink mask made opaque)."""
+    import cv2
+    a = np.clip(alpha.astype(np.float32), 0.0, 1.0)
+    h, w = a.shape
+    band = max(2, int(round(band_frac * float(np.hypot(h, w)))))
+    if not (a > 0.5).any():
+        return a, np.zeros_like(a, dtype=bool)
+    lum, lb, _lf, solid, d_out, d_in = _ink_context(rgb, a, band)
+    dark = (lum < lb - INK_DARK) & (lum < INK_MAX_LUMA)
+    near = (d_out <= band) | ((d_in <= band) & solid)
+    cand = dark & near
+    region = solid.copy()
+    k3 = np.ones((3, 3), np.uint8)
+    for _ in range(band + 1):
+        grown = (cv2.dilate(region.astype(np.uint8), k3) > 0) & (cand | region)
+        if (grown == region).all():
+            break
+        region = grown
+    ink = region & cand
+    out = a.copy()
+    out[ink] = 1.0
+    if ink.any():
+        # antialiasing ring just beyond the absorbed ink: coverage from luma
+        ring = (cv2.dilate(ink.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~ink & (out < 0.99) & ~solid
+        if ring.any():
+            ink_l = cv2.erode(np.where(ink, lum, 1.0).astype(np.float32), np.ones((5, 5), np.uint8))
+            cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)
+            cov = np.where(lum < lb - 0.03, cov, 0.0)
+            out[ring] = np.maximum(out[ring], cov[ring])
+    return out.astype(np.float32), ink
+
+
+def outline_ink(rgb: np.ndarray, ref: np.ndarray, band_px: int = 4) -> np.ndarray:
+    """Pixels of the outer ink line of a reference mask: dark pixels (as in
+    :func:`absorb_ink`) within ``band_px`` of the reference contour, on
+    either side, where the local background is lighter than the ink — the
+    "contour ink kept" metric counts how many the matte keeps opaque."""
+    import cv2
+    g = (np.asarray(ref) > 0.5).astype(np.uint8)
+    d_out = cv2.distanceTransform(1 - g, cv2.DIST_L2, 3)
+    d_in = cv2.distanceTransform(g, cv2.DIST_L2, 3)
+    band = ((d_out <= band_px) & (g == 0)) | ((d_in <= band_px) & (g == 1))
+    lum, lb, _lf, _s, _do, _di = _ink_context(rgb, g.astype(np.float32), band_px)
+    return band & (lum < lb - INK_DARK) & (lum < INK_MAX_LUMA)
+
+
 def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[np.ndarray, np.ndarray]:
     """Export-time edge finishing, ``(rgb_uint8, alpha_float32)``.
 
     ``fg``: alpha as is + foreground estimation of the edge colours.
+    Both first absorb the character's outer ink line (:func:`absorb_ink`).
     ``max``: the alpha of a band 2 px inside / 12 px outside the outline is
     first re-solved from the local character / background colours (glows,
     halos and background-coloured fringes drop out), never on ink pixels
@@ -289,8 +371,12 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
     down to alpha 0.05, nearest opaque colour below). Ground-truth colour
     contamination on the benchmark composites: 13.4 % (``fg``) -> 2.6 %."""
     a = np.clip(alpha.astype(np.float32, copy=False), 0.0, 1.0)
+    # the outer ink line belongs to the character: absorbed, opaque, and
+    # never made transparent or recoloured afterwards
+    a, ink = absorb_ink(rgb, a)
     if mode == "max":
         a = colour_solve_safe(rgb, a, band_frac=MAX_EDGE_OUT, in_frac=MAX_EDGE_IN)
+        a[ink] = 1.0
         return unmix_with_background(rgb, a, faint=MAX_UNMIX_FAINT, solid=MAX_UNMIX_SOLID), a
     return estimate_foreground(rgb, a), a
 

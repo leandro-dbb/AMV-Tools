@@ -853,3 +853,36 @@ def test_stable_frame_does_not_add_an_aura_sam3_glued_to_a_character_birefnet_se
     assert stable_frame(np.zeros_like(body), sam3, det_ok=False)[200, 180] == 1.0   # blurred frame: SAM 3 fills
     det = np.stack([body] * 5); det[2] = 0.0
     assert det_seen(det) == [True, True, False, True, True]
+
+
+def _inked(h=120, w=200):
+    """A yellow character with a 3 px black outline on sky; the matte stops
+    at the fill (the ink line is left out), as BiRefNet often does."""
+    rgb = np.zeros((h, w, 3), np.uint8)
+    rgb[:] = (90, 150, 230)                              # sky
+    rgb[27:93, 57:143] = (20, 20, 25)                    # ink line, 3 px
+    rgb[30:90, 60:140] = (240, 220, 120)                 # fill
+    matte = _blob(h, w, 60, 30, 140, 90)
+    return rgb, matte
+
+
+def test_absorb_ink_takes_the_outer_outline_into_the_matte():
+    from backend.models.edge_refine import absorb_ink, finish_edges, outline_ink
+    rgb, matte = _inked()
+    a, ink = absorb_ink(rgb, matte)
+    assert (a[27:30, 57:143] == 1.0).all() and (a[90:93, 57:143] == 1.0).all()   # the whole line, opaque
+    assert a[20, 100] == 0.0 and a[60, 30] == 0.0                                 # sky stays out
+    ref_ink = outline_ink(rgb, matte > 0.5)
+    assert ref_ink.sum() > 400 and (matte[ref_ink] >= 0.9).mean() < 0.1           # the bare matte misses it
+    for mode in ("max", "fg"):
+        col, a2 = finish_edges(rgb, matte, mode)
+        assert (a2[ref_ink] >= 0.9).mean() > 0.97                                  # export keeps it opaque
+        assert col[28, 100].max() < 60                                             # and black, not recoloured
+
+
+def test_absorb_ink_does_nothing_on_a_background_as_dark_as_the_ink():
+    from backend.models.edge_refine import absorb_ink
+    rgb, matte = _inked()
+    rgb[np.where(matte == 0)] = (15, 15, 20)            # night: background as dark as the line
+    a, ink = absorb_ink(rgb, matte)
+    assert not ink.any() and a[10, 10] == 0.0
