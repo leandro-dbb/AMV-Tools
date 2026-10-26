@@ -1244,8 +1244,17 @@ def _touching_mask(m: Optional[np.ndarray], ref: np.ndarray) -> Optional[np.ndar
     return np.where(ok[lab], m, 0).astype(np.asarray(m).dtype)
 
 
+def _rgb_of(f) -> np.ndarray:
+    if isinstance(f, np.ndarray):
+        return f
+    from PIL import Image
+    with Image.open(f) as im:
+        return np.asarray(im.convert("RGB"))
+
+
 def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[tuple[int, int]]] = None,
-                     min_overlap: float = 0.3, slack_frac: float = 0.012, spike: float = SEL_SPIKE) -> list:
+                     min_overlap: float = 0.3, slack_frac: float = 0.012, spike: float = SEL_SPIKE,
+                     frames: Optional[Sequence] = None) -> list:
     """SAM 3's character masks without its one-frame false detections: a
     piece (connected component) of frame t is kept if the mask of t-1 or
     t+1 (same shot, dilated by ``slack_frac`` of the diagonal for motion)
@@ -1254,7 +1263,7 @@ def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[t
     character stays). A frame whose mask swells over ``spike`` x the
     rolling median of the shot keeps it only near the mask of the nearest
     normal frame (SAM 3 taking an aura for the character on blurred
-    frames)."""
+    frames) — carried by optical flow when the ``frames`` are given."""
     import cv2
     T = len(sel)
     out = list(sel)
@@ -1298,6 +1307,11 @@ def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[t
             u = min(normal, key=lambda v: abs(v - t))
             mu = np.asarray(out[u]) > 0.5
             r = max(1, int(round(2 * slack_frac * float(np.hypot(*mu.shape)))))
+            if frames is not None and len(frames) == T:
+                # the neighbour's mask carried onto this frame (camera shake),
+                # with a tighter margin
+                mu = _flow_warp(_rgb_of(frames[u]), _rgb_of(frames[t]), mu.astype(np.float32)) > 0.5
+                r = max(1, int(round(0.5 * slack_frac * float(np.hypot(*mu.shape)))))
             zone = cv2.dilate(mu.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
             out[t] = np.where(zone, np.asarray(out[t]), 0).astype(np.asarray(out[t]).dtype)
     return out
@@ -1318,7 +1332,7 @@ def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]]
     T = len(det)
     out = np.empty(det.shape, np.float32)
     sel = list(selector_masks) if selector_masks is not None and len(selector_masks) == T else [None] * T
-    sel = persist_selector(sel, shots)
+    sel = persist_selector(sel, shots, frames=frames if frames is not None and len(frames) == T else None)
     hl = list(held) if held is not None and len(held) == T else [None] * T
     starts = {a for a, _b in (shots or [(0, T)])}
     for t in range(T):
