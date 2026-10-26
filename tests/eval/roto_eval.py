@@ -1278,7 +1278,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
         paths = frame_paths(root, sid)
         js, fs, es, fails = [], [], [], 0
         bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": [], "contam_true": [], "colerr": [], "contam_col": [],
-               "held": [], "ink": []}
+               "held": [], "ink": [], "jag": []}
         for idx in scored_frames(root, sid, len(paths)):
             gt = read_alpha(root / "gt" / sid / f"{idx:05d}.png") > 0.5
             a = read_alpha(rd / f"{idx:05d}.png")
@@ -1288,6 +1288,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
                 bgs[k_].append(v_)
             bgs["held"].append(held_kept(a_e, root / "gt_held" / sid / f"{idx:05d}.png"))
             bgs["ink"].append(ink_kept(rgb, a_e, gt))
+            bgs["jag"].append(jaggies(a_e))
             bgs["contam"].append(contamination(rgb_e, rgb, a_e, gt))
             # ground-truth contamination: the same export run on a composite
             # of this frame whose true colours are known (method's alpha)
@@ -1326,6 +1327,37 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
     return res
 
 
+def jaggies(a: np.ndarray, sigma: float = 2.0) -> float:
+    """Outline roughness (%): how much longer the contour of alpha > 0.5 is
+    than the same contour after a light blur of the matte (sigma px) — a
+    staircase (a low-resolution matte scaled up, a binary edge) or a ragged
+    outline is longer than the drawing's smooth curve. nan without a
+    contour."""
+    import cv2
+    def length(m):
+        cs, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+        return float(sum(cv2.arcLength(c, True) for c in cs if len(c) >= 20))
+    m = a > 0.5
+    if m.sum() < 200:
+        return float("nan")
+    ls = length(cv2.GaussianBlur(a.astype(np.float32), (0, 0), sigma) > 0.5)
+    return float((length(m) / ls - 1) * 100) if ls > 0 else float("nan")
+
+
+def holes(a: np.ndarray, max_frac: float = 0.001) -> tuple[int, int]:
+    """(count, pixels) of small transparent holes enclosed in the matte:
+    components of alpha < 0.5 not touching the frame border and smaller than
+    ``max_frac`` of the frame (bigger ones are background pockets between
+    arms) — a piece of fill or line missing inside the character."""
+    import cv2
+    inv = (a < 0.5).astype(np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(inv, connectivity=4)
+    border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])).tolist())
+    h, w = a.shape
+    small = [i for i in range(1, n) if i not in border and st[i, 4] < max_frac * h * w]
+    return len(small), int(sum(st[i, 4] for i in small))
+
+
 def stability(root: Path, sid: str, rd: Path, n: int) -> dict:
     """Stability of a method's mattes on every frame of a shot, no reference
     needed: ``lost`` frames (matte area < 60 % of the rolling median of the
@@ -1340,7 +1372,9 @@ def stability(root: Path, sid: str, rd: Path, n: int) -> dict:
     lost = lost_frames(a, cuts)
     jumps = area_jumps(a, cuts)
     sp = np.array([specks(x) for x in a], float)
+    hl = np.array([holes(x) for x in a], float)
     out = {"lost": len(lost), "jumps": len(jumps), "lost_ids": lost, "jump_ids": jumps, "n_frames": n,
+           "holes": float(hl[:, 0].mean()), "hole_px": float(hl[:, 1].mean()),
            "area_med": float(np.median([(x > 0.5).mean() * 100 for x in a])),
            "islands": float(sp[:, 0].mean()), "orphans": float(sp[:, 1].mean())}
     hs = []

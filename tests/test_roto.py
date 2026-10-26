@@ -405,7 +405,8 @@ def test_finish_edges_max_keeps_the_ink_line_and_drops_the_glow():
     assert (a[300, 497:502] == 1.0).all()         # ink untouched
     assert a[300, 506] < 0.3                      # glow fades
     col_fg, a_fg = finish_edges(rgb, alpha, "fg")
-    assert np.array_equal(a_fg, alpha)
+    assert np.array_equal(a_fg[:, :497], alpha[:, :497])          # fg: the matte inside the outline as is
+    assert (a_fg[300, 497:502] == 1.0).all() and a_fg[300, 503] < 0.3   # ink kept, no fringe right beyond it
 
 
 def test_quality_by_tier_and_setting():
