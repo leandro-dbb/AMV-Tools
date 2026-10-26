@@ -79,8 +79,12 @@ def seed_frame(root: Path, sid: str, n: int) -> int:
 
 
 def scored_frames(root: Path, sid: str, n: int) -> list[int]:
+    """Every frame with a reference except the seed frame: the 6 key frames,
+    plus the extra references added where a shot needs a closer look
+    (roto stable: blur frames of s13, the cigarette of b1...)."""
     seed = seed_frame(root, sid, n)
-    return [k for k in key_frames(n) if k != seed and (root / "gt" / sid / f"{k:05d}.png").exists()]
+    have = sorted(int(p.stem) for p in (root / "gt" / sid).glob("*.png") if p.stem.isdigit())
+    return [k for k in have if k != seed and k < n]
 
 
 def load_shots(root: Path) -> list[dict]:
@@ -558,6 +562,95 @@ def method_runner(name: str, args, dev):
             return np.stack(out)
         run.detector = [base, sel]
         return run
+    if name.startswith("held"):
+        # held[p<codes>][k<cover %>][x<max rel x10>][q<score %>][t<touch %%>][l<glow %>][v][r][f]~<base>~<selector>:
+        # objects held or worn given back from the BiRefNet matte (runs/birefnet)
+        # on SAM 3 object instances (<root>/obj/<shot>/<prompt>/*.png labels +
+        # scores.json, written by a multi-prompt SAM 3 pass): auto_roto.held_regions
+        # + keep_held. v: temporal persistence (persist_held); r: also give back
+        # characters SAM 3 sees that the matte lost (selector components
+        # covered < 50 %); l: light-effect filter (max_glow); f: object interior made opaque.
+        import re
+        head, rest = name.split("~", 1)
+        base, sel = rest.rsplit("~", 1)
+        codes = {"w": "weapon", "s": "sword", "t": "staff", "h": "halo", "b": "bowl", "m": "hammer",
+                 "c": "cup", "g": "wings"}
+        mm = re.match(r"held(?:p([wsthbmcg]+))?(?:k(\d+))?(?:x(\d+))?(?:q(\d+))?(?:t(\d+))?(?:l(\d+))?(v)?(r)?(f)?$", head)
+        pc, kk, xx, qq, tt, ll, vv, rr, ff = mm.groups()
+        prompts = [codes[c] for c in (pc or "wsthbmc")]
+        from backend.models import auto_roto as ar
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            import cv2
+            sid = paths[0].parent.parent.name
+            od = root / "obj" / sid
+            sc = json.loads((od / "scores.json").read_text())
+            A, B, H = [], [], []
+            for i in range(len(paths)):
+                a = read_alpha(root / "runs" / base / sid / f"{i:05d}.png")
+                b = read_alpha(root / "runs" / "birefnet" / sid / f"{i:05d}.png")
+                g = read_alpha(root / "runs" / sel / sid / f"{i:05d}.png")
+                objs = []
+                for p in prompts:
+                    lab = np.asarray(Image.open(od / p.replace(" ", "+") / f"{i:05d}.png"))
+                    for j, s_ in enumerate(sc[p][i]):
+                        if s_ >= (int(qq) / 100.0 if qq else 0.4):
+                            objs.append(lab == j + 1)
+                if rr:
+                    n, lab, st, _ = cv2.connectedComponentsWithStats((g > 0.5).astype(np.uint8), connectivity=8)
+                    for j in range(1, n):
+                        c = lab == j
+                        if float((a[c] > 0.5).mean()) < 0.5:
+                            objs.append(c)
+                hm = ar.held_regions(b, g, objs, min_cover=int(kk) / 100.0 if kk else ar.HELD_MIN_COVER,
+                                     rgb=read_rgb(paths[i]) if ll else None,
+                                     max_glow=int(ll) / 100.0 if ll else None,
+                                     max_rel=int(xx) / 10.0 if xx else ar.HELD_MAX_REL,
+                                     touch_frac=int(tt) / 1000.0 if tt else ar.HELD_TOUCH_FRAC)
+                A.append(a); B.append(b); H.append(hm)
+            if vv:
+                H = ar.persist_held(H)
+            return np.stack([ar.keep_held(a, b, h, fill_px=2 if ff else None) for a, b, h in zip(A, B, H)])
+        run.detector = [base, sel]
+        return run
+    if name.startswith("sfill"):
+        # sfill<pct>-<sel>: motion-blur fill of a selector — on a frame where
+        # it sees less than pct % of what it sees on a neighbour (SAM 3 drops
+        # smeared limbs), add what both neighbours, warped to this frame by
+        # optical flow, agree on; never across a hard cut
+        import cv2
+        head, sel = name.split("-", 1)
+        pct = int(head[5:] or 80) / 100.0
+        root = Path(args.root)
+        from backend.models.auto_roto import split_shots
+
+        def warp(src_mask, g_to, g_from):
+            flow = cv2.calcOpticalFlowFarneback(g_to, g_from, None, 0.5, 4, 21, 3, 5, 1.1, 0)
+            h, w = g_to.shape
+            gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+            sm = cv2.resize(src_mask.astype(np.float32), (w, h), interpolation=cv2.INTER_AREA)
+            return cv2.remap(sm, gx + flow[..., 0], gy + flow[..., 1], cv2.INTER_LINEAR) > 0.5
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            S = np.stack([read_alpha(root / "runs" / sel / sid / f"{i:05d}.png") > 0.5 for i in range(len(paths))])
+            rgbs = [read_rgb(p) for p in paths]
+            G = [cv2.cvtColor(cv2.resize(f, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY)
+                 for f in rgbs]
+            small = [np.asarray(Image.fromarray(f).resize((256, 144))) for f in rgbs]
+            out = S.copy()
+            area = S.reshape(len(S), -1).sum(1)
+            H, W = S.shape[1:]
+            for a, b in split_shots(small, len(paths)):
+                for t in range(a + 1, b - 1):
+                    if area[t] >= pct * max(area[t - 1], area[t + 1]):
+                        continue
+                    fill = warp(S[t - 1], G[t], G[t - 1]) & warp(S[t + 1], G[t], G[t + 1])
+                    out[t] |= cv2.resize(fill.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST) > 0
+            return out.astype(np.float32)
+        run.detector = [sel]
+        return run
     if name.startswith(("votefill-", "votemaj-")):
         # vote<fill|maj>-<sel>: temporal vote of a selector over t-1, t, t+1
         # (fill: S_t or (S_t-1 and S_t+1); maj: at least 2 of 3); never across
@@ -580,7 +673,7 @@ def method_runner(name: str, args, dev):
             return out.astype(np.float32)
         run.detector = [sel]
         return run
-    if name.startswith("stab"):
+    if name.startswith("stab") and not name.startswith("stable"):
         # stab<k>~<base>: the app's temporal stabilisation after tracking
         # (finish.matte.postprocess_stack, strength k/100; the Auto engine
         # uses 0.5 x the setting = 0.25)
@@ -645,7 +738,79 @@ def method_runner(name: str, args, dev):
             return np.stack(out)
         run.detector = [base]
         return run
+    if name.startswith("stable"):
+        # stable[r<reach ‰>][e<erode px>][l<low %>][n][t][h][s]~<track>~<selector>: the "stable"
+        # Auto (auto_roto.stable_masks): BiRefNet (runs/birefnet) pieces that touch a
+        # character kept whole, SAM 3 (<selector>) only drops detached ones, the
+        # tracked matte (<track>) and held objects (<root>/obj, as heldv) add to it,
+        # collapsed frames refilled from their neighbours. n: no temporal guard;
+        # t: no track; h: no held objects; s: SAM 3's mask not added to the matte.
+        import re
+        head, rest = name.split("~", 1)
+        track_name, sel = rest.rsplit("~", 1)
+        mm = re.match(r"stable(?:r(\d+))?(?:e(\d+))?(?:l(\d+))?(n)?(t)?(h)?(s)?$", head)
+        rr, ee, ll, nn, tt, hh, ss = mm.groups()
+        from backend.models import auto_roto as ar
+        root = Path(args.root)
+        prompts = list(ar.HELD_PROMPTS)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            n = len(paths)
+            det = np.stack([read_alpha(root / "runs" / "birefnet" / sid / f"{i:05d}.png") for i in range(n)])
+            S = [read_alpha(root / "runs" / sel / sid / f"{i:05d}.png") for i in range(n)]
+            tr = None if tt else np.stack([read_alpha(root / "runs" / track_name / sid / f"{i:05d}.png")
+                                           for i in range(n)])
+            H = None
+            od = root / "obj" / sid
+            if not hh and (od / "scores.json").exists():
+                sc = json.loads((od / "scores.json").read_text())
+                hm = []
+                for i in range(n):
+                    objs = []
+                    for p in prompts:
+                        lab = np.asarray(Image.open(od / p.replace(" ", "+") / f"{i:05d}.png"))
+                        objs += [lab == j + 1 for j, s_ in enumerate(sc[p][i]) if s_ >= 0.4]
+                    hm.append(ar.held_regions(det[i], S[i], objs, rgb=read_rgb(paths[i])))
+                H = [None if m is None or not np.any(m) else
+                     np.clip(np.rint(ar.keep_held(np.zeros(m.shape, np.float32), det[i], m) * 255), 0, 255).astype(np.uint8)
+                     for i, m in enumerate(ar.persist_held(hm))]
+            kw = {}
+            if rr:
+                kw["reach_frac"] = int(rr) / 1000.0
+            old_e, old_l = ar.STABLE_SEL_ERODE, ar.STABLE_DET_LOW
+            try:
+                if ee:
+                    ar.STABLE_SEL_ERODE = int(ee)
+                if ll:
+                    ar.STABLE_DET_LOW = int(ll) / 100.0
+                sl = [None] * n if ss else S
+                out = np.stack([ar.stable_frame(det[i], sl[i], None if tr is None else tr[i],
+                                                None if H is None else H[i], **kw,
+                                                low=ar.STABLE_DET_LOW, sel_erode=ar.STABLE_SEL_ERODE)
+                                for i in range(n)])
+            finally:
+                ar.STABLE_SEL_ERODE, ar.STABLE_DET_LOW = old_e, old_l
+            if not nn:
+                out, _fixed = ar.temporal_guard(out, paths, det, shot_cuts(root, sid))
+            return out
+        run.detector = ["birefnet", sel] + ([] if tt else [track_name])
+        return run
     raise SystemExit(f"unknown method {name}")
+
+
+def shot_cuts(root: Path, sid: str) -> list[tuple[int, int]]:
+    """[start, end) ranges between the hard cuts of a shot (the app's cut
+    detection, auto_roto.split_shots), cached in <root>/cuts.json."""
+    cache = root / "cuts.json"
+    allc = json.loads(cache.read_text()) if cache.exists() else {}
+    if sid not in allc:
+        from backend.models.auto_roto import split_shots
+        paths = frame_paths(root, sid)
+        small = [np.asarray(Image.open(p).convert("RGB").resize((256, 144))) for p in paths]
+        allc[sid] = [list(r) for r in split_shots(small, len(paths))]
+        cache.write_text(json.dumps(allc))
+    return [tuple(r) for r in allc[sid]]
 
 
 def cmd_run(args) -> None:
@@ -816,6 +981,19 @@ def bg_metrics(a: np.ndarray, gt: np.ndarray) -> dict:
            "eaten": float((1 - a[band_in]).mean() * 100) if band_in.sum() >= 50 else float("nan"),
            "bg_in": float(a[pockets].mean() * 100) if pockets.sum() >= 200 else float("nan")}
     return out
+
+
+def held_kept(a: np.ndarray, ref: Path) -> float:
+    """Held object kept (%): mean exported alpha on the reference mask of the
+    objects the characters hold or wear (<root>/gt_held, a subset of the
+    reference), its outer REF_TOL_PX px not scored; nan without one."""
+    import cv2
+    if not ref.exists():
+        return float("nan")
+    m = (read_alpha(ref) > 0.5).astype(np.uint8)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * REF_TOL_PX + 1, 2 * REF_TOL_PX + 1))
+    m = cv2.erode(m, k) > 0
+    return float(a[m].mean() * 100) if m.sum() >= 30 else float("nan")
 
 
 def contamination(rgb_out: np.ndarray, rgb_src: np.ndarray, a: np.ndarray, gt: np.ndarray) -> float:
@@ -1001,7 +1179,8 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             continue  # excluded: reference found wrong during the visual review
         paths = frame_paths(root, sid)
         js, fs, es, fails = [], [], [], 0
-        bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": [], "contam_true": [], "colerr": [], "contam_col": []}
+        bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": [], "contam_true": [], "colerr": [], "contam_col": [],
+               "held": []}
         for idx in scored_frames(root, sid, len(paths)):
             gt = read_alpha(root / "gt" / sid / f"{idx:05d}.png") > 0.5
             a = read_alpha(rd / f"{idx:05d}.png")
@@ -1009,6 +1188,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             rgb_e, a_e = export_post(export, rgb, a)
             for k_, v_ in bg_metrics(a_e, gt).items():
                 bgs[k_].append(v_)
+            bgs["held"].append(held_kept(a_e, root / "gt_held" / sid / f"{idx:05d}.png"))
             bgs["contam"].append(contamination(rgb_e, rgb, a_e, gt))
             # ground-truth contamination: the same export run on a composite
             # of this frame whose true colours are known (method's alpha)
@@ -1034,14 +1214,47 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             fails += j < 0.5
         sub = list(range(min(len(paths), 96)))  # flicker on up to 95 consecutive pairs
         alphas = [read_alpha(rd / f"{i:05d}.png") for i in sub]
+        # stability on EVERY frame, no reference needed (roto stable)
+        stab = stability(root, sid, rd, len(paths))
         st = json.loads((rd / "stats.json").read_text())
         res[sid] = {"J": float(np.mean(js)), "F": float(np.mean(fs)),
                     "edge": float(np.mean(es)) if es else float("nan"),
                     "flicker": flicker(alphas, shot_flows(root, sid, sub)), "fail": fails, "n_scored": len(js),
+                    **stab,
                     **{k_: float(np.nanmean(v_)) if np.isfinite(v_).any() else float("nan")
                        for k_, v_ in ((k, np.array(v, float)) for k, v in bgs.items())},
                     **st}
     return res
+
+
+def stability(root: Path, sid: str, rd: Path, n: int) -> dict:
+    """Stability of a method's mattes on every frame of a shot, no reference
+    needed: ``lost`` frames (matte area < 60 % of the rolling median of the
+    shot, +-12 frames: the character vanished or was eaten), ``jumps``
+    (area change > 25 % between neighbouring frames), ``lost_ids`` /
+    ``jump_ids`` (frame numbers, for the visual check), and ``held_seq`` /
+    ``held_min``: the held object kept on every frame that has a held
+    reference in <root>/gt_held_seq (mean / worst %)."""
+    from backend.models.auto_roto import area_jumps, lost_frames
+    a = np.stack([read_alpha(rd / f"{i:05d}.png") for i in range(n)])
+    cuts = shot_cuts(root, sid)
+    lost = lost_frames(a, cuts)
+    jumps = area_jumps(a, cuts)
+    out = {"lost": len(lost), "jumps": len(jumps), "lost_ids": lost, "jump_ids": jumps, "n_frames": n,
+           "area_med": float(np.median([(x > 0.5).mean() * 100 for x in a]))}
+    hs = []
+    hd = root / "gt_held_seq" / sid
+    if hd.exists():
+        for p in sorted(hd.glob("*.png")):
+            i = int(p.stem)
+            if i < n:
+                hs.append(held_kept(a[i], p))
+    hs = [x for x in hs if np.isfinite(x)]
+    out["held_seq"] = float(np.mean(hs)) if hs else float("nan")
+    out["held_min"] = float(np.min(hs)) if hs else float("nan")
+    out["held_seq_n"] = len(hs)
+    out["held_seq_lost"] = int(sum(x < 50 for x in hs))
+    return out
 
 
 def cmd_score(args) -> None:
@@ -1057,6 +1270,8 @@ def cmd_score(args) -> None:
         print("scored", m, flush=True)
     out.write_text(json.dumps(prev, indent=1))
     print(table(prev, shots))
+    print()
+    print(stable_table(prev, shots))
 
 
 def table(scores: dict, shots: list[dict]) -> str:
@@ -1065,8 +1280,8 @@ def table(scores: dict, shots: list[dict]) -> str:
         if s["cat"] not in cats:
             cats.append(s["cat"])
     lines = ["| méthode | catégorie | J | F | J&F | bord | scint. % | échecs | fond contour % | fond intérieur % "
-             "| mangé % | contam. % | ms/img | VRAM Mo |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| mangé % | contam. % | objet tenu % | ms/img | VRAM Mo |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for m, per in scores.items():
         for cat in cats + ["TOUT"]:
             ids = [s["id"] for s in shots if (cat == "TOUT" or s["cat"] == cat) and s["id"] in per]
@@ -1078,7 +1293,34 @@ def table(scores: dict, shots: list[dict]) -> str:
             vram = max(per[i]["vram_mb"] for i in ids)
             lines.append(f"| {m} | {cat} | {g('J'):.3f} | {g('F'):.3f} | {(g('J') + g('F')) / 2:.3f} | "
                          f"{g('edge'):.1f} | {g('flicker'):.1f} | {fails}/{nsc} | {g('bg_band'):.1f} | {g('bg_in'):.1f} | "
-                         f"{g('eaten'):.1f} | {g('contam'):.1f} | {g('ms_per_frame'):.0f} | {vram} |")
+                         f"{g('eaten'):.1f} | {g('contam'):.1f} | {g('held'):.1f} | {g('ms_per_frame'):.0f} | {vram} |")
+    return "\n".join(lines)
+
+
+def stable_table(scores: dict, shots: list[dict]) -> str:
+    """Roto stable table: stability on every frame first (lost frames,
+    jumps), then the outline error with the eaten character weighing as
+    much as the background kept (``contour`` = fond contour + mangé)."""
+    cats = []
+    for s in shots:
+        if s["cat"] not in cats:
+            cats.append(s["cat"])
+    lines = ["| méthode | catégorie | images | perdues | sauts > 25 % | scint. % | J | fond contour % | mangé % "
+             "| contour (fond + mangé) | fond intérieur % | objet tenu % | objet tenu, toutes images % "
+             "| images sans l'objet |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for m, per in scores.items():
+        for cat in cats + ["TOUT"]:
+            ids = [s["id"] for s in shots if (cat == "TOUT" or s["cat"] == cat) and s["id"] in per
+                   and "lost" in per[s["id"]]]
+            if not ids:
+                continue
+            g = lambda k: float(np.nanmean([per[i].get(k, np.nan) for i in ids]))  # noqa: E731
+            tot = lambda k: int(sum(per[i].get(k, 0) for i in ids))  # noqa: E731
+            lines.append(f"| {m} | {cat} | {tot('n_frames')} | {tot('lost')} | {tot('jumps')} | {g('flicker'):.1f} | "
+                         f"{g('J'):.3f} | {g('bg_band'):.1f} | {g('eaten'):.1f} | {g('bg_band') + g('eaten'):.1f} | "
+                         f"{g('bg_in'):.1f} | {g('held'):.1f} | {g('held_seq'):.1f} | "
+                         f"{tot('held_seq_lost')}/{tot('held_seq_n')} |")
     return "\n".join(lines)
 
 

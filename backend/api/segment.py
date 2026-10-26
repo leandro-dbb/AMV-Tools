@@ -786,13 +786,21 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
         for j, a in enumerate(alphas):
             det[c0 + j] = np.clip(np.rint(a * 255.0), 0, 255).astype(np.uint8)
         progress(int(min(n_frames, c0 + chunk) * span), n_frames)
-    from ..models.auto_roto import tighten
+    from ..models.auto_roto import split_shots, stable_masks, tighten
     sel_masks: list = []
+    held: Optional[list] = [] if _keep_held(models_cfg) else None
+    stable = _quality(models_cfg) == "stable"
+    raw = det.copy() if stable else None   # the stable mode's floor: BiRefNet as it is
     det = _select_characters(det, sess.frame_paths, models_cfg,
                              lambda seen, total: progress(int(n_frames * span * seen / max(1, total)), n_frames),
-                             keep=sel_masks)
+                             keep=sel_masks, held=held)
+    if stable and not sel_masks:
+        stable = False   # no SAM 3 (gated weights, failure): the standard pipeline
+    if stable and not use_tracker:
+        masks = stable_masks(raw, sel_masks, None, held, frames=sess.frame_paths)
+        return _postprocess(sess, masks, strength_scale=1.0)
     if not use_tracker:
-        masks = tighten(det.astype(np.float32) / 255.0, sel_masks, quality=_quality(models_cfg))
+        masks = tighten(det.astype(np.float32) / 255.0, sel_masks, quality=_quality(models_cfg), held=held)
         # Per-frame inference re-decides the silhouette on every frame:
         # a flow-aligned temporal median removes the flicker without
         # ghosting moving edges (see finish/matte.py for the numbers).
@@ -806,8 +814,16 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
         progress_cb=lambda seen, total: progress(n_frames // 2 + seen // 2, n_frames),
     )
     del det
-    masks = tighten(masks, sel_masks, quality=_quality(models_cfg))
-    del sel_masks
+    if stable:
+        # BiRefNet's pieces that touch a character kept whole, SAM 3 only
+        # drops detached ones, collapsed frames refilled from their
+        # neighbours (backend/models/auto_roto.stable_masks)
+        masks = stable_masks(raw, sel_masks, masks, held, frames=sess.frame_paths,
+                             shots=split_shots(small, n_frames) if small else None,
+                             only_tracked=clicks is not None or _auto_target(body.auto_target) == "main")
+    else:
+        masks = tighten(masks, sel_masks, quality=_quality(models_cfg), held=held)
+    del sel_masks, held, raw
     # SAM 2's memory already keeps identity stable; a lighter stabilisation
     # pass only removes residual edge shimmer from the detector.
     return _postprocess(sess, masks, strength_scale=0.5)
@@ -826,27 +842,40 @@ def _edge_mode(models_cfg: dict) -> str:
     mode = str(models_cfg.get("mask_edge_mode", "auto"))
     if mode in ("fg", "legacy", "max"):
         return mode
-    return "max" if _quality(models_cfg) == "max" else "fg"
+    return "max" if _quality(models_cfg) in ("max", "stable") else "fg"
+
+
+def _keep_held(models_cfg: dict) -> bool:
+    """Max quality only: give back what the characters hold or wear (staff,
+    halo, bowl, weapons) — SAM 3 object prompts kept where they touch a
+    character and BiRefNet sees them as foreground."""
+    from ..models.auto_roto import HELD_DEFAULT
+    v = models_cfg.get("mask_keep_held", "auto")
+    on = HELD_DEFAULT if v in (None, "auto") else bool(v)
+    return on and _quality(models_cfg) in ("max", "stable")
 
 
 def _select_characters(det: np.ndarray, frames, models_cfg: dict, progress=None,
-                       keep: Optional[list] = None) -> np.ndarray:
+                       keep: Optional[list] = None, held: Optional[list] = None) -> np.ndarray:
     """0.6: the tier's character selector (SAM 3, concept "anime character")
     keeps the detector's matte only on what it calls a character — auras,
     props and set pieces the detector found salient are cut. No selector in
     the tier, the setting off, or the gated weights not accessible: the
     detector matte as in 0.5. ``keep`` receives SAM 3's masks for
-    :func:`~backend.models.auto_roto.tighten` after tracking."""
-    from ..models.auto_roto import apply_selector, mask_models
+    :func:`~backend.models.auto_roto.tighten` after tracking, ``held`` the
+    mattes of the objects they hold (:func:`_keep_held`)."""
+    from ..models.auto_roto import GATE_FRAC, STABLE_REACH, apply_selector, mask_models
     state = get_state()
     if not models_cfg.get("mask_selector_enabled", True) or mask_models(state).get("selector") != "sam3":
         return det
     sam3 = state.get_sam3()
     if sam3 is None:
         return det
+    quality = _quality(models_cfg)
     try:
         return apply_selector(det, frames, sam3, progress_cb=progress, keep=keep,
-                              zoom=_quality(models_cfg) == "max")
+                              zoom=quality == "max", held=held,
+                              reach_frac=STABLE_REACH if quality == "stable" else GATE_FRAC)
     finally:
         from ..models.sam3_concept import KEEP_LOADED_GB, total_vram_gb
         if total_vram_gb() < KEEP_LOADED_GB:   # small cards: free the room for SAM 2

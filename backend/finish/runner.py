@@ -622,12 +622,15 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                 ctx.progress(min(span, span * (i + 1) / total), f"matting {i + 1}/{total}")
         if not frames:
             raise RuntimeError("no frames decoded")
-        from ..api.segment import _select_characters
+        from ..api.segment import _keep_held, _select_characters
         sel_masks = np.stack(masks)
         if sel_masks.dtype != np.uint8:
             sel_masks = np.clip(np.rint(sel_masks * 255.0), 0, 255).astype(np.uint8)
         selector_masks: list = []
-        gated = _select_characters(sel_masks, frames, models_cfg, keep=selector_masks)
+        held = [] if _keep_held(models_cfg) else None
+        from ..api.segment import _quality
+        raw = sel_masks.copy() if _quality(models_cfg) == "stable" else None
+        gated = _select_characters(sel_masks, frames, models_cfg, keep=selector_masks, held=held)
         if gated is not sel_masks:
             masks = list(gated) if tracker else [m.astype(np.float32) / 255.0 for m in gated]
         del sel_masks, gated
@@ -645,12 +648,23 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                 progress_cb=lambda seen, n: ctx.progress(0.4 + 0.4 * seen / max(1, n), f"tracking {seen}/{n}"),
             ))
             del det
-        if selector_masks:
+        if selector_masks and raw is not None:
+            # "stable": BiRefNet's pieces that touch a character kept whole,
+            # collapsed frames refilled from their neighbours
+            from ..models.auto_roto import split_shots, stable_masks
+            hh, ww = frames[0].shape[:2]
+            track = np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
+                              for m in masks]) if tracker else None
+            small = [cv2.resize(f, (256, max(2, round(256 * hh / ww))), interpolation=cv2.INTER_AREA) for f in frames]
+            masks = list(stable_masks(raw, selector_masks, track, held, frames=frames,
+                                      shots=split_shots(small, len(frames)),
+                                      only_tracked=(p.get("target") or models_cfg.get("mask_auto_target", "all")) == "main"))
+        elif selector_masks:
             from ..models.auto_roto import tighten
-            from ..api.segment import _quality
             masks = list(tighten(np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
-                                           for m in masks]), selector_masks, quality=_quality(models_cfg)))
-        del selector_masks
+                                           for m in masks]), selector_masks, quality=_quality(models_cfg),
+                                 held=held))
+        del selector_masks, held, raw
     finally:
         if jpg_dir is not None:
             shutil.rmtree(jpg_dir, ignore_errors=True)

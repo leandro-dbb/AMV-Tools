@@ -4,6 +4,29 @@ All notable changes to AMV Tools are documented here.
 
 ## 0.5.0-alpha — unreleased
 
+### Mask Mode — held objects stay in the cutout (roto held)
+
+- **Max quality keeps what the characters hold or wear**: the SAM 3 pass that
+  finds the characters also looks for a few objects (weapon, sword, staff,
+  halo, bowl, hammer, cup; the image encoder is shared). An object is put back
+  — with BiRefNet's own outline — when it touches a character, BiRefNet sees
+  it as foreground, it is not bigger than twice the character, it does not
+  glow (energy beams and ki flames are effects, not props) and it is found on
+  a neighbouring frame too. Whis's staff and halo, Beerus's bowl, a hammer, a
+  katana at the hip, a cigarette are no longer cut. On the 7 benchmark shots
+  with a held object: held object kept 22.7 % -> 95.2 %, J 0.839 ->
+  0.928, failures 2 -> 1 of 35; on all 27 shots J 0.902 -> 0.926,
+  character eaten 11.7 -> 7.3 %, action shots unchanged; the SAM 3 pass is
+  44 % slower (+0.1 GB of VRAM). On by default
+  with max quality; *Settings > Models > Keep held objects*.
+- Benchmark: 5 new shots with held objects (27 scored shots, 132 key frames),
+  references of s05/s19 completed with their staff, halo and bowl, new metric
+  "held object kept". Measured and not kept: a flow-warped fill of SAM 3's
+  mask on motion-blurred frames (35 frames of 2058 touched, no change on the
+  scores), giving back characters SAM 3 sees but the tracker dropped (worse),
+  filling the object's interior (no change). Report:
+  `docs/reports/chantier-roto-held.md`.
+
 ### Mask Mode — background out of the hair (roto 2)
 
 - **New benchmark metric, "background in the matte"**: background kept along
