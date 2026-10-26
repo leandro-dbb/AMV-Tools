@@ -348,7 +348,8 @@ INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diag
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
 INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
-INK_FILL_MAX_REL = 0.03  # what matte + outline enclose is filled up to this share of the matte's area
+INK_FILL_MAX_REL = 0.0   # what matte + outline enclose filled up to this share of the matte (0: off — it filled
+                         # background between two spikes; tips now come from the full-resolution edge solve)
 
 
 def _ink_context(rgb: np.ndarray, alpha: np.ndarray, band: int):
@@ -487,7 +488,9 @@ def outline_ink(rgb: np.ndarray, ref: np.ndarray, band_px: int = 4) -> np.ndarra
 
 
 HOLE_EXPORT_FRAC = 0.0005   # enclosed transparent holes the export opened, up to this share of the frame: closed
-HOLE_FILL_FRAC = 0.0002     # enclosed holes already in the matte, up to this share: filled (gaps in the fill)
+HOLE_FILL_FRAC = 0.00003    # enclosed holes already in the matte filled up to this share (60 px at 1080p: specks; once a tip
+                            # is completed, the background between two spikes is an enclosed hole too)
+EDGE_SMOOTH_SIGMA = 0.8     # final antialiasing of the outline band (px at the export resolution)
 
 
 def fill_small_holes(a: np.ndarray, before: Optional[np.ndarray] = None) -> np.ndarray:
@@ -506,7 +509,7 @@ def fill_small_holes(a: np.ndarray, before: Optional[np.ndarray] = None) -> np.n
     border = np.zeros(n, bool)
     border[np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))] = True
     area = st[:, 4]
-    small = ~border & (area < HOLE_FILL_FRAC * h * w)
+    small = ~border & (area < HOLE_FILL_FRAC * h * w) if HOLE_FILL_FRAC > 0 else np.zeros(n, bool)
     if before is not None:
         was = np.bincount(lab.ravel(), weights=(before >= 0.5).ravel().astype(np.float64), minlength=n)
         small |= ~border & (area < HOLE_EXPORT_FRAC * h * w) & (was >= 0.5 * area)
@@ -514,6 +517,24 @@ def fill_small_holes(a: np.ndarray, before: Optional[np.ndarray] = None) -> np.n
     fill = small[lab]
     if fill.any():
         out[fill] = 1.0
+    return out
+
+
+def smooth_outline(a: np.ndarray, ink: Optional[np.ndarray] = None, sigma: float = EDGE_SMOOTH_SIGMA) -> np.ndarray:
+    """Light antialiasing of the outline: the alpha of the 2 px band around
+    the 0.5 contour replaced by its Gaussian blur (``sigma`` px) — no hard
+    pixel steps; the ink line itself stays opaque."""
+    import cv2
+    if sigma <= 0:
+        return a
+    m = (a > 0.5).astype(np.uint8)
+    zone = cv2.dilate(cv2.morphologyEx(m, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)), np.ones((3, 3), np.uint8)) > 0
+    if not zone.any():
+        return a
+    b = cv2.GaussianBlur(a.astype(np.float32), (0, 0), sigma)
+    out = np.where(zone, b, a).astype(np.float32)
+    if ink is not None and ink.any():
+        out[ink] = 1.0   # the ink line itself stays opaque; its antialiasing is outside it
     return out
 
 
@@ -547,9 +568,9 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
             a = np.where(protect, a, a_cs).astype(np.float32)
         else:
             a = a_cs
-        a = fill_small_holes(a, before)
+        a = fill_small_holes(smooth_outline(a, ink), before)
         return unmix_with_background(rgb, a, faint=MAX_UNMIX_FAINT, solid=MAX_UNMIX_SOLID), a
-    a = fill_small_holes(a, before)
+    a = fill_small_holes(smooth_outline(a, ink), before)
     return estimate_foreground(rgb, a), a
 
 
