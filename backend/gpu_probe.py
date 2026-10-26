@@ -4,7 +4,7 @@ Runs BEFORE any GPU wheel is installed (the base venv has CPU torch only),
 so it cannot ask torch. It asks the OS instead:
 
 * NVIDIA: ``nvidia-smi`` (ships with every driver, on PATH on Windows and
-  Linux). CUDA 13 wheels need driver >= 580 and a Turing or newer card
+  Linux). CUDA 13 wheels need driver >= 580 (581 on Windows) and a Turing or newer card
   (compute capability >= 7.5); anything older gets the CUDA 12.6 wheels.
 * Windows without NVIDIA: the display adapters from WMI. A real AMD/Intel
   GPU gets DirectML; only the "Microsoft Basic Display Adapter" (VMs,
@@ -114,8 +114,10 @@ def recommend(nvidia: list[dict[str, Any]], adapters: list[str], system: str, ma
         major = _driver_major(gpu.get("driver"))
         if cap is not None and cap < 7.5:
             return "cu126", f"{gpu['name']} predates RTX 20xx (CUDA 13 needs compute 7.5+)"
-        if major and major < 580:
-            return "cu126", f"NVIDIA driver {gpu.get('driver')} is older than 580 (CUDA 13)"
+        # CUDA 13 wheels: driver 580+ on Linux, 581+ on Windows (README).
+        minimum = 581 if system == "Windows" else 580
+        if major and major < minimum:
+            return "cu126", f"NVIDIA driver {gpu.get('driver')} is older than {minimum} (CUDA 13)"
         return "cu130", gpu["name"]
     if system == "Windows":
         real = [a for a in adapters if _vendor(a) in ("amd", "intel", "nvidia", "other")]

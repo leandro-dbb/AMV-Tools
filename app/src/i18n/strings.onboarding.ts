@@ -30,8 +30,8 @@ export const onboardingStrings: Dict = {
   'onboarding.opt.cu126.title': { en: 'NVIDIA CUDA 12.6', fr: 'NVIDIA CUDA 12.6' },
   'onboarding.opt.cu126.subtitle': { en: 'GTX 10xx · older drivers', fr: 'GTX 10xx · pilotes plus anciens' },
   'onboarding.opt.cu126.detail': {
-    en: 'Use this if your driver is older than 555.',
-    fr: 'À utiliser si votre pilote est antérieur à la version 555.',
+    en: 'Use this if your driver is older than 581 (CUDA 13 needs 581+; this one needs 555+).',
+    fr: 'À utiliser si votre pilote est antérieur à la version 581 (CUDA 13 exige 581+ ; celui-ci 555+).',
   },
   'onboarding.opt.dml.title': { en: 'DirectML (AMD / Intel)', fr: 'DirectML (AMD / Intel)' },
   'onboarding.opt.dml.subtitle': { en: 'Windows only', fr: 'Windows uniquement' },
