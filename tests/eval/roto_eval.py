@@ -452,6 +452,23 @@ def method_runner(name: str, args, dev):
         from backend.models.sam3_concept import Sam3Concept
         m = Sam3Concept(dev)
         return lambda paths, gt0, k0: np.stack([m.segment(read_rgb(p), prompt) for p in paths])
+    if name.startswith("sam3z-"):
+        # SAM 3 image + a zoomed second pass on each character's crop
+        prompt = name.split("-", 1)[1].replace("+", " ")
+        from backend.models.sam3_concept import Sam3Concept
+        m = Sam3Concept(dev)
+        return lambda paths, gt0, k0: np.stack([m.segment_zoomed(read_rgb(p), prompt) for p in paths])
+    if name.startswith("union-"):
+        # union-<a>,<b>,...: pixel max of several runs (prompt fusion)
+        parts = name[len("union-"):].split(",")
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            return np.stack([np.max([read_alpha(root / "runs" / q / sid / f"{i:05d}.png") for q in parts], axis=0)
+                             for i in range(len(paths))])
+        run.detector = parts
+        return run
     if name.startswith("sam3v-"):
         # SAM 3 video: concept detection + its own tracker over the shot
         prompt = name.split("-", 1)[1].replace("+", " ")
@@ -494,7 +511,11 @@ def method_runner(name: str, args, dev):
         # tgate<k>[c<cov>]-<base>-<selector> (or ~-separated when the base
         # name has dashes): tight gate (k thousandths of the diagonal) where
         # the selector covers the base matte, wide gate else
-        head, base, sel = name.split("~", 2) if "~" in name else name.split("-", 2)
+        if "~" in name:
+            head, rest = name.split("~", 1)
+            base, sel = rest.rsplit("~", 1)
+        else:
+            head, base, sel = name.split("-", 2)
         k, _, cov = head[5:].partition("c")
         from backend.models.auto_roto import gate_alpha
         root = Path(args.root)
@@ -510,11 +531,71 @@ def method_runner(name: str, args, dev):
             return np.stack(out)
         run.detector = [base, sel]
         return run
-    if name.startswith("gate-") or name.startswith("gatef-"):
-        # gate-<base>-<selector>: the base matte (edges) kept only where the
-        # selector (a detector that knows what a character is) sees one,
-        # softly dilated; reads both runs back
-        _, base, sel = name.split("-", 2)
+    if name.startswith("hug"):
+        # hug<k>[t<touch>][o<opaque>]~<base>~<selector>: tight gate (k thousandths)
+        # + opaque tips sticking out of the selector given back
+        import re
+        head, rest = name.split("~", 1)
+        base, sel = rest.rsplit("~", 1)
+        mm = re.match(r"hug(\d+)(?:t(\d+))?(?:o(\d+))?(f)?", head)
+        k, tt, oo, ff = int(mm.group(1)), mm.group(2), mm.group(3), mm.group(4)
+        from backend.models.auto_roto import drop_fragments, hug_with_tips
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            out = []
+            for i in range(len(paths)):
+                b = read_alpha(root / "runs" / base / sid / f"{i:05d}.png")
+                g = read_alpha(root / "runs" / sel / sid / f"{i:05d}.png")
+                o = hug_with_tips(b, g, tight_frac=k / 1000.0,
+                                  max_touch=int(tt) / 100.0 if tt else 0.45,
+                                  opaque=int(oo) / 100.0 if oo else 0.9)
+                out.append(drop_fragments(o, g) if ff else o)
+            return np.stack(out)
+        run.detector = [base, sel]
+        return run
+    if name.startswith(("votefill-", "votemaj-")):
+        # vote<fill|maj>-<sel>: temporal vote of a selector over t-1, t, t+1
+        # (fill: S_t or (S_t-1 and S_t+1); maj: at least 2 of 3); never across
+        # a hard cut
+        kind, sel = name.split("-", 1)
+        root = Path(args.root)
+        from backend.models.auto_roto import split_shots
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            S = np.stack([read_alpha(root / "runs" / sel / sid / f"{i:05d}.png") > 0.5 for i in range(len(paths))])
+            small = [np.asarray(Image.open(p).convert("RGB").resize((256, 144))) for p in paths]
+            out = S.copy()
+            for a, b in split_shots(small, len(paths)):
+                for t in range(a + 1, b - 1):
+                    if kind == "votefill":
+                        out[t] = S[t] | (S[t - 1] & S[t + 1])
+                    else:
+                        out[t] = (S[t - 1].astype(np.uint8) + S[t] + S[t + 1]) >= 2
+            return out.astype(np.float32)
+        run.detector = [sel]
+        return run
+    if name.startswith("avg-"):
+        # avg-<a>,<b>,...: mean of several detector mattes (ensemble)
+        parts = name[len("avg-"):].split(",")
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            return np.stack([np.mean([read_alpha(root / "runs" / q / sid / f"{i:05d}.png") for q in parts], axis=0)
+                             for i in range(len(paths))])
+        run.detector = parts
+        return run
+    if name.startswith(("gate-", "gatef-", "gate~", "gatef~")):
+        # gate-<base>-<selector> (or gatef~<base>~<selector>): the base matte
+        # (edges) kept only where the selector (a detector that knows what a
+        # character is) sees one, softly dilated; reads both runs back
+        if "~" in name:
+            _, base, sel = name.split("~", 2)
+        else:
+            _, base, sel = name.split("-", 2)
         from backend.models.auto_roto import gate_alpha
         root = Path(args.root)
 
@@ -524,7 +605,7 @@ def method_runner(name: str, args, dev):
             for i in range(len(paths)):
                 b = read_alpha(root / "runs" / base / sid / f"{i:05d}.png")
                 g = read_alpha(root / "runs" / sel / sid / f"{i:05d}.png")
-                out.append(gate_alpha(b, g, box=sel.startswith("pdet"), keep_if_empty=name.startswith("gatef-")))
+                out.append(gate_alpha(b, g, box=sel.startswith("pdet"), keep_if_empty=name.startswith("gatef")))
             return np.stack(out)
         run.detector = [base, sel]
         return run
@@ -778,6 +859,30 @@ def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, 
         nb = [float(x[1:]) for x in ps[2:] if x.startswith("n")]
         return estimate_foreground(rgb, a, int(ps[0]), int(ps[1]), unmix="u" in ps,
                                    nearest_below=nb[0] if nb else 0.0), a
+    if name in ("cs", "cs2"):  # colour-solved alpha (cs2: ink protected) + foreground estimation
+        from backend.models import edge_refine as er
+        a2 = er.colour_solve(rgb, a) if name == "cs" else er.colour_solve_safe(rgb, a)
+        return er.estimate_foreground(rgb, a2), a2
+    if name.startswith("csi"):  # csi<in>_<out>[_<ink%>][n<near%>]: asymmetric band, ink lines protected
+        from backend.models import edge_refine as er
+        near = 0.0
+        if "n" in name:
+            name, _, nn = name.partition("n")
+            near = int(nn) / 100.0
+        ps = name[3:].split("_")
+        a2 = er.colour_solve_safe(rgb, a, band_frac=int(ps[1]) / 1000.0, in_frac=int(ps[0]) / 1000.0,
+                                  ink_margin=int(ps[2]) / 100.0 if len(ps) > 2 else 0.12)
+        return er.estimate_foreground(rgb, a2, nearest_below=near), a2
+    if name.startswith("csa"):  # csa<in>_<out> (thousandths of the diagonal): asymmetric band
+        from backend.models import edge_refine as er
+        ri, ro = (int(x) / 1000.0 for x in name[3:].split("_"))
+        a2 = er.colour_solve(rgb, a, band_frac=ro, in_frac=ri)
+        return er.estimate_foreground(rgb, a2), a2
+    if name.startswith("lv"):  # lv<lo>_<hi> (percent): alpha levels + foreground estimation
+        from backend.models import edge_refine as er
+        lo, hi = (int(x) / 100.0 for x in name[2:].split("_"))
+        a2 = er.alpha_levels(a, lo, hi)
+        return er.estimate_foreground(rgb, a2), a2
     if name == "ce":  # 0.5 colour cleanup without the guided filter
         return mp.clean_edges_with_background(rgb, a, resolve_alpha=False)
     if name == "kb":  # background kill + foreground estimation
@@ -965,13 +1070,14 @@ def cmd_zoom(args) -> None:
                         a = read_alpha(ap) if ap.exists() else np.zeros(gt.shape, np.float32)
                         col, a = export_post(export or "v05", rgb, a)
                     mag = np.zeros_like(rgb, dtype=np.float32)
-                    mag[...] = (255, 0, 255)
+                    mag[...] = {"magenta": (255, 0, 255), "black": (0, 0, 0), "white": (255, 255, 255),
+                                "green": (0, 200, 0)}[getattr(args, "bg", "magenta")]
                     cell = composite(col.astype(np.float32), a, mag)
                     if m == "ref":  # reference outline in cyan
                         e = _boundary(gt > 0.5)
                         cell = cell.copy()
                         cell[e] = (0, 255, 255)
-                crop = cv2.resize(np.ascontiguousarray(cell[y0:y1, x0:x1]), None, fx=3, fy=3,
+                crop = cv2.resize(np.ascontiguousarray(cell[y0:y1, x0:x1]), None, fx=args.scale, fy=args.scale,
                                   interpolation=cv2.INTER_NEAREST)
                 cv2.putText(crop, f"{m} #{idx}", (6, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 3)
                 cv2.putText(crop, f"{m} #{idx}", (6, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
@@ -1005,6 +1111,9 @@ def main(argv=None) -> None:
                                             "to score methods in parallel")
         if name in ("boards", "zoom"):
             p.add_argument("--out", required=True)
+        if name == "zoom":
+            p.add_argument("--bg", default="magenta", choices=["magenta", "black", "white", "green"])
+            p.add_argument("--scale", type=int, default=3)
             p.add_argument("--width", type=int, default=2400)
     args = ap.parse_args(argv)
     {"extract": cmd_extract, "propose": cmd_propose, "run": cmd_run,
