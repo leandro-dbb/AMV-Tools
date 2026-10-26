@@ -347,6 +347,7 @@ MAX_UNMIX_SOLID = 0.30   # full unmix from this alpha up
 INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diagonal (6 px at 1080p, 3 px at 608p)
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
+INK_MAX_HALF_FRAC = 0.0014  # ink line half-width at most this share of the diagonal (3 px at 1080p)
 INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
 INK_FILL_MAX_REL = 0.0   # what matte + outline enclose filled up to this share of the matte (0: off — it filled
                          # background between two spikes; tips now come from the full-resolution edge solve)
@@ -409,6 +410,13 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
     lum, lb, _lf, solid, d_out, d_in = _ink_context(rgb, a, band)
     has_bg = lb > 0
     dark = (lum < lb - INK_DARK) & (lum < INK_MAX_LUMA) & has_bg
+    # an ink line is thin: a dark area thicker than INK_MAX_HALF_FRAC on each
+    # side of its middle (a glow band, a shadow, dark scenery) is not one
+    half = max(2.5, INK_MAX_HALF_FRAC * diag)
+    thick = cv2.distanceTransform(dark.astype(np.uint8), cv2.DIST_L2, 3) > half
+    if thick.any():
+        r = int(np.ceil(half)) + 1
+        dark &= ~(cv2.dilate(thick.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0)
     # 1. outline: dark pixels connected to the solid matte, within reach
     cand = dark & (d_out <= reach) & ~solid
     far_dark = dark & (d_out > reach)

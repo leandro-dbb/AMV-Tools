@@ -396,17 +396,17 @@ def test_finish_edges_max_keeps_the_ink_line_and_drops_the_glow():
     rgb = np.zeros((h, w, 3), np.uint8)
     rgb[:] = (60, 120, 230)                       # blue sky
     rgb[:, :500] = (240, 220, 120)                # blonde hair
-    rgb[:, 497:502] = (20, 15, 10)                # ink outline
+    rgb[:, 498:502] = (20, 15, 10)                # ink outline (4 px)
     rgb[:, 502:510] = (150, 170, 175)             # pale glow (half sky, half hair colour)
     alpha = np.zeros((h, w), np.float32)
     alpha[:, :502] = 1.0
     alpha[:, 502:510] = 0.5                       # the model kept the glow at half alpha
     col, a = finish_edges(rgb, alpha, "max")
-    assert (a[300, 497:502] == 1.0).all()         # ink untouched
+    assert (a[300, 498:502] == 1.0).all()         # ink untouched
     assert a[300, 506] < 0.3                      # glow fades
     col_fg, a_fg = finish_edges(rgb, alpha, "fg")
     assert np.array_equal(a_fg[:, :497], alpha[:, :497])          # fg: the matte inside the outline as is
-    assert (a_fg[300, 497:502] == 1.0).all() and a_fg[300, 503] < 0.3   # ink kept, no fringe right beyond it
+    assert (a_fg[300, 498:502] == 1.0).all() and a_fg[300, 503] < 0.3   # ink kept, no fringe right beyond it
 
 
 def test_quality_by_tier_and_setting():
