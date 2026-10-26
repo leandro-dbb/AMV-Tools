@@ -19,7 +19,6 @@ from typing import Optional
 
 from .model import Timeline, TimelineOptions
 from .paths import is_windows_path
-from .timecode import nominal_rate
 
 _HEADER = "#target aftereffects\n"
 
@@ -175,6 +174,3 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
     ]
     return "\n".join(lines) + "\n"
 
-
-def nominal_fps(timeline: Timeline) -> int:  # pragma: no cover - convenience for docs
-    return nominal_rate(timeline.sequence_fps)
