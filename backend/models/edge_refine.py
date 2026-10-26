@@ -348,7 +348,12 @@ INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diag
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
 INK_MAX_HALF_FRAC = 0.0014  # ink line half-width at most this share of the diagonal (3 px at 1080p)
-SOFT_INK_MIN_ALPHA = 0.15   # "soft" export: ink absorbed only where the matte already has this much alpha
+SOFT_INK_GAIN = 2.0         # "soft" export: gain on the smoothed ink coverage (a thin line still reaches opaque)
+SOFT_INK_SIGMA = 0.8        # "soft" export: smoothing of the added ink coverage (px)
+SOFT_LF_MARGIN = 0.04      # "soft": an ink pixel no lighter than the bordering fill plus this
+SOFT_CORE_PX = 5.0          # "soft": dark edge pixels raised within this of the solid character (px)
+SOFT_EDGE_DARK = 0.10       # ... when this much darker than the local background
+SOFT_INK_MIN_ALPHA = 0.03   # "soft" export: ink absorbed only where the matte already has this much alpha
 INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
 INK_FILL_MAX_REL = 0.0   # what matte + outline enclose filled up to this share of the matte (0: off — it filled
                          # background between two spikes; tips now come from the full-resolution edge solve)
@@ -432,7 +437,7 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
         # lighter than the character it borders (a dark green leaf next to
         # black hair is scenery)
         lf = _lf
-        cand &= (a >= SOFT_INK_MIN_ALPHA) & (lum <= lf + 0.04)
+        cand &= (a >= SOFT_INK_MIN_ALPHA) & (lum <= lf + SOFT_LF_MARGIN)
     far_dark = dark & (d_out > reach)
     if far_dark.any():
         cand &= ~(cv2.dilate(far_dark.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
@@ -503,6 +508,23 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
             ok[0] = False
             stray = (lab > 0) & ~ok[lab]
             out[stray] = np.minimum(out[stray], a[stray])
+    if not cut_fringe and keep.any():
+        # v5 "soft": the ink is added as a continuous coverage, not pixel by
+        # pixel — gaps along the line closed, coverage from luma, lightly
+        # smoothed — so the outline stays as smooth as the drawing's
+        zone = cv2.morphologyEx(keep.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)) > 0
+        zone = cv2.dilate(zone.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        # the dark edge the matte already half-covers (alpha 0.5-0.95), next
+        # to the solid character (not a see-through aura area)
+        core = (a >= 0.95).astype(np.uint8)
+        if core.any():
+            near_core = cv2.distanceTransform(1 - core, cv2.DIST_L2, 3) <= SOFT_CORE_PX
+            zone |= (lum < lb - SOFT_EDGE_DARK) & (a >= 0.5) & (d_in <= band) & near_core
+        zone &= (lum < lb - 0.05)
+        ink_l = cv2.erode(np.where(keep, lum, 1.0).astype(np.float32), np.ones((7, 7), np.uint8))
+        cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)
+        add = cv2.GaussianBlur(np.where(zone, cov, 0.0).astype(np.float32), (0, 0), SOFT_INK_SIGMA)
+        out = np.maximum(a, np.clip(add * SOFT_INK_GAIN, 0, 1)).astype(np.float32)
     return out.astype(np.float32), (ink | edge_ink | filled)
 
 
