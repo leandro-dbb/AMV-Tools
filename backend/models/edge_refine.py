@@ -289,8 +289,8 @@ def _ink_context(rgb: np.ndarray, alpha: np.ndarray, band: int):
     lum = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32) / 255.0
     solid = alpha > 0.5
     m8 = solid.astype(np.uint8)
-    d_out = cv2.distanceTransform(1 - m8, cv2.DIST_L2, 3)
-    d_in = cv2.distanceTransform(m8, cv2.DIST_L2, 3)
+    d_out = cv2.distanceTransform(1 - m8, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    d_in = cv2.distanceTransform(m8, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
     k = (8 * band + 9) | 1
     bgw = ((d_out > band + 2) & (d_out <= 3 * band + 10) & (alpha < 0.05)).astype(np.float32)
     fgw = ((d_in > band + 2) & (d_in <= 3 * band + 10)).astype(np.float32)
@@ -338,7 +338,7 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
         # scenery texture (foliage, mortar) touching the matte goes on being
         # dark farther out: absorbed pixels next to dark pixels beyond the
         # band are left out
-        far_dark = dark & (d_out > band)
+        far_dark = dark & (d_out > band + 1.5)
         if far_dark.any():
             r = 1
             near_far = cv2.dilate(far_dark.astype(np.uint8),
@@ -349,7 +349,7 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
     out[ink] = 1.0
     if ink.any():
         # antialiasing ring just beyond the absorbed ink: coverage from luma
-        ring = (cv2.dilate(ink.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~ink & (out < 0.99) & ~solid
+        ring = (cv2.dilate(ink.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~ink & (out < 0.99) & ~solid & ~dark
         if ring.any():
             ink_l = cv2.erode(np.where(ink, lum, 1.0).astype(np.float32), np.ones((5, 5), np.uint8))
             cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)

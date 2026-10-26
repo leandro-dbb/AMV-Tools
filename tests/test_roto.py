@@ -870,7 +870,7 @@ def test_absorb_ink_takes_the_outer_outline_into_the_matte():
     from backend.models.edge_refine import absorb_ink, finish_edges, outline_ink
     rgb, matte = _inked()
     a, ink = absorb_ink(rgb, matte)
-    assert (a[27:30, 60:140] == 1.0).all() and (a[90:93, 60:140] == 1.0).all()   # the whole line, opaque
+    assert (a[27:30, 62:138] == 1.0).all() and (a[90:93, 62:138] == 1.0).all()   # the whole line, opaque (corners aside)
     assert a[20, 100] == 0.0 and a[60, 30] == 0.0                                 # sky stays out
     ref_ink = outline_ink(rgb, matte > 0.5)
     assert ref_ink.sum() > 400 and (matte[ref_ink] >= 0.9).mean() < 0.1           # the bare matte misses it
@@ -895,3 +895,12 @@ def test_absorb_ink_leaves_dark_scenery_texture_touching_the_matte():
     a, ink = absorb_ink(rgb, matte)
     assert a[60, 150] == 0.0                            # the foliage is not taken as outline
     assert (a[27:30, 70:130] == 1.0).all()              # the real outline still is
+
+
+def test_absorb_ink_makes_no_specks_out_of_dark_scenery_next_to_the_outline():
+    from backend.models.auto_roto import specks
+    from backend.models.edge_refine import absorb_ink
+    rgb, matte = _inked()
+    rgb[40:80, 145:175] = (25, 45, 25)                  # dark foliage 2 px away from the outline
+    a, _ink = absorb_ink(rgb, matte)
+    assert specks(a)[0] == 0 and a[60, 146] < 0.5

@@ -1205,6 +1205,10 @@ def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, 
         fa, so = (int(x) / 100.0 for x in body.split("_")) if body else (0.15, 0.5)
         a2 = er.colour_solve_safe(rgb, a, band_frac=0.012, in_frac=0.002) if cs else a
         return er.unmix_with_background(rgb, a2, faint=fa, solid=so), a2
+    if name == "max0":  # the max-quality export before the ink absorption (examples v2, night)
+        from backend.models import edge_refine as er
+        a2 = er.colour_solve_safe(rgb, a, band_frac=er.MAX_EDGE_OUT, in_frac=er.MAX_EDGE_IN)
+        return er.unmix_with_background(rgb, a2, faint=er.MAX_UNMIX_FAINT, solid=er.MAX_UNMIX_SOLID), a2
     if name == "max":  # the max-quality export of the app (edge_refine.finish_edges)
         from backend.models.edge_refine import finish_edges
         return finish_edges(rgb, a, "max")
