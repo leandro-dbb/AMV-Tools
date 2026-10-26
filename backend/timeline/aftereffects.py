@@ -12,10 +12,13 @@ survives any Windows code page.
 """
 from __future__ import annotations
 
+import ntpath
+import posixpath
 from fractions import Fraction
 from typing import Optional
 
 from .model import Timeline, TimelineOptions
+from .paths import is_windows_path
 from .timecode import nominal_rate
 
 _HEADER = "#target aftereffects\n"
@@ -55,6 +58,18 @@ def _seconds_expr(frames: int, rate: Fraction) -> str:
 def _path_for_extendscript(path: str) -> str:
     # ExtendScript's File() accepts forward slashes on Windows and macOS.
     return path.replace("\\", "/")
+
+
+def _relative_to(path: str, base_dir: Optional[str]) -> str:
+    """Forward-slash path of ``path`` relative to the script's folder ('' if none)."""
+    if not base_dir:
+        return ""
+    module = ntpath if is_windows_path(path) and is_windows_path(base_dir) else posixpath
+    try:
+        rel = module.relpath(path, base_dir)
+    except ValueError:   # another drive
+        return ""
+    return rel.replace("\\", "/")
 
 
 def _marker_lines(clip, timeline: Timeline, layer_var: str) -> list[str]:
@@ -98,8 +113,12 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
         "(function () {",
         "    app.beginUndoGroup('AMV Tools timeline');",
         "    var missing = [];",
-        "    function importMedia(path, label) {",
+        "    // Next to this script: a moved project folder (or collected media)",
+        "    // is found again through the path relative to the script.",
+        "    var here = new File($.fileName).parent;",
+        "    function importMedia(path, rel) {",
         "        var f = new File(path);",
+        "        if (!f.exists && rel) { f = new File(here.fsName + '/' + rel); }",
         "        if (!f.exists) { missing.push(path); return null; }",
         "        try {",
         "            var io = new ImportOptions(f);",
@@ -114,7 +133,7 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
         lines.append(
             f"    var media{position} = importMedia("
             f"{_js_str(_path_for_extendscript(info.path))}, "
-            f"{_js_str(_path_for_extendscript(info.path))});"
+            f"{_js_str(_relative_to(info.path, timeline.base_dir))});"
         )
 
     lines += [

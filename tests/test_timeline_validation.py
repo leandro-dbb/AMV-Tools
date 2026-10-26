@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.timeline import aftereffects, edl, fcp7, fcpxml, otio
+from backend.timeline import aftereffects, edl, fcp7, fcpxml, otio, vegas
 from backend.timeline.model import (
     ClipSpec,
     TimelineOptions,
@@ -129,7 +129,8 @@ def test_fcp7_xml_imported_by_opentimelineio():
 
     # Windows path + apostrophe + accents + Japanese survived as a file URL.
     urls = [c.media_reference.target_url for c in video]
-    assert urls[0] == to_file_url(_sources()["win"].path)
+    assert urls[0] == fcp7.xmeml_pathurl(to_file_url(_sources()["win"].path))
+    assert urls[0].startswith("file://localhost/C%3a/Users/")
     assert "%27" in urls[1]  # the apostrophe
     assert "Sc%C3%A8ne" in urls[0]
 
@@ -207,19 +208,31 @@ def test_otio_converts_to_xges():
     assert xges.count("GESUriClip") >= 3
 
 
-# ── Vegas Pro (.txt CMX3600) ────────────────────────────────────────────────
-def test_vegas_edl_is_cmx3600_and_importable():
-    otio_lib = pytest.importorskip("opentimelineio")
-    text = edl.dumps_vegas(_timeline())
-    assert text.splitlines()[-1].startswith("* AMV Tools - Vegas Pro")
-    assert text.splitlines()[0].startswith("TITLE:")
-    assert "FCM: NON-DROP FRAME" in text
-    events = _edl_events(text)
-    assert len(events) == 4  # 3 video + 1 audio event
-    assert all(line.isascii() is False or len(line) <= 80 for line in text.splitlines())
-    timeline = otio_lib.adapters.read_from_string(text, "cmx_3600")
-    clips = [item for item in list(timeline.tracks)[0] if isinstance(item, otio_lib.schema.Clip)]
-    assert len(clips) == 3
+# ── Vegas Pro (.txt "EDL Text File") ────────────────────────────────────────
+def test_vegas_edl_text_layout_and_exact_times():
+    text = vegas.dumps(_timeline())
+    assert "\r\n" in text and "\r\r" not in text
+    rows = text.rstrip("\r\n").split("\r\n")
+    header = [h.strip('"') for h in rows[0].split(";")]
+    assert header == list(vegas.FIELDS) and len(header) == 28
+    events = [dict(zip(header, r.split(";"))) for r in rows[1:]]
+    for e in events:
+        assert len(e) == 28
+    video = [e for e in events if e["MediaType"] == "VIDEO"]
+    audio = [e for e in events if e["MediaType"] == "AUDIO"]
+    assert len(video) == 3 and len(audio) == 1   # only the first source has audio
+    assert [int(e["ID"]) for e in events] == list(range(1, 5))
+    assert {e["Track"] for e in video} == {"0"} and {e["Track"] for e in audio} == {"1"}
+    tl = _timeline()
+    seq = tl.sequence_fps
+    for clip, e in zip(tl.clips, video):
+        assert float(e["StartTime"]) == pytest.approx(float(clip.record_start / seq * 1000), abs=1e-5)
+        assert float(e["Length"]) == pytest.approx(float(clip.record_duration / seq * 1000), abs=1e-5)
+        assert float(e["StreamStart"]) == pytest.approx(float(clip.in_frame / clip.source.fps * 1000), abs=1e-5)
+        assert e["FileName"] == '"' + clip.source.path + '"'
+        assert float(e["Length"]) > 0
+    # 23.976: clip 1 starts 24 source frames in = 1001 ms exactly.
+    assert video[0]["StreamStart"] == "1001.000000"
 
 
 # ── After Effects .jsx ──────────────────────────────────────────────────────
@@ -271,13 +284,13 @@ def test_windows_and_posix_paths_are_encoded_everywhere():
         "otio": otio.dumps(_timeline()),
         "fcp7xml": fcp7.dumps(_timeline()),
         "edl": edl.dumps(_timeline()),
-        "vegas": edl.dumps_vegas(_timeline()),
+        "vegas": vegas.dumps(_timeline()),
         "aftereffects": aftereffects.dumps(_timeline()),
     }
     win = sources["win"].path
     assert "file:///C:/Users/L%C3%A9o/AMV%20clips/" in files["fcpxml"]
     assert "file:///C:/Users/L%C3%A9o/AMV%20clips/" in files["otio"]
-    assert "file:///C:/Users/L%C3%A9o/AMV%20clips/" in files["fcp7xml"]
+    assert "file://localhost/C%3a/Users/L%C3%A9o/AMV%20clips/" in files["fcp7xml"]
     assert win in files["edl"] and win in files["vegas"]
     assert "C:/Users/L\\u00e9o/AMV clips/Sc\\u00e8ne 01" in files["aftereffects"]
     # Apostrophes are percent-encoded in URLs but stay readable in comments.
