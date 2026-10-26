@@ -1,8 +1,265 @@
 # Chantier roto : rendre le détourage (Mask Mode) utilisable sur de vrais épisodes
 
-Ce rapport a quatre parties, la plus récente en tête : **partie 4 (objectifs 5 % et 1 s, audit de la
-métrique de contamination)**, partie 3 (qualité max), partie 2 (SAM 3 et fond dans les cheveux),
-partie 1 (chantier roto, 0.5, le banc).
+Ce rapport a cinq parties, la plus récente en tête : **partie 5 (stabilité : rien ne disparaît, trait
+d'encre gardé — le mode Stable par défaut)**, partie 4 (objectifs 5 % et 1 s, audit de la métrique de
+contamination), partie 3 (qualité max), partie 2 (SAM 3 et fond dans les cheveux), partie 1 (chantier
+roto, 0.5, le banc).
+
+# Partie 5 — Stabilité : rien ne doit disparaître
+
+Date : 26 octobre 2026, matin. Point de départ : le verdict de Léandro sur les exemples de la nuit
+(`reports/roto/exemples/`) — **échec**, l'ancien mode est meilleur :
+
+1. exemple 01 (Black Clover, plan calme) : la cigarette disparaît en permanence de la main ;
+2. les contours sont souvent rognés (bord du personnage mangé) ;
+3. exemple 03 (Goku SSJ3, caméra qui tremble) : tout le personnage disparaît régulièrement.
+   Mesuré : couverture médiane 12,5 %, minimum 0 %, 8 images sur 76 sous 60 % de la médiane.
+
+Sa priorité, à la lettre : « le plus important est d'avoir un truc STABLE, qui permet de retravailler
+dessus derrière ». Un peu de fond en trop est acceptable (retouche au pinceau) ; un personnage, un objet
+tenu ou un bord qui disparaît ne l'est pas. Précision ajoutée en cours de route : pas non plus « la
+blinde de pixels parasites » — fond le long du contour nettement sous l'ancien mode (vise ≤ 8-10 % en
+moyenne, médiane ≤ 3 %), fond enfermé sous ~8 %, et les petits îlots / pixels isolés nettoyés d'une
+façon qui ne clignote pas.
+
+## 1. Pourquoi le banc ne l'avait pas vu
+
+- Il notait **6 images clés par plan** (~107 au total) : une disparition entre deux images clés était
+  invisible. Les 8 images floues du SSJ3 (23 à 30) tombaient entre les images clés 15 et 45.
+- Ses métriques de fond poussaient à **serrer** le contour : le serrage sur SAM 3 (« hug ») gagnait
+  des points de fond et perdait, sans que le score le montre assez, des bords et des objets.
+- La cigarette de b1 n'était dans aucune référence (ni personnage, ni objet tenu).
+
+Diagnostic des deux pannes visibles :
+
+- **SSJ3** : sur les images 23 à 30 (flou de bougé, caméra qui tremble), BiRefNet ne voit plus rien
+  (masque vide) alors que SAM 3 voit Goku (14 % de l'image). Le suivi SAM 2 se fiait au détecteur et
+  rendait le vide ; l'ancien mode 0.4 perdait d'ailleurs les mêmes images.
+- **Cigarette** : SAM 3 (« anime character ») ne la compte pas dans le personnage ; le contour serré à
+  0,4 % de la diagonale autour de SAM 3 la coupait au ras des doigts. BiRefNet, lui, la voit.
+
+## 2. Le banc refondu
+
+Racine `/srv/data/amv-tools/roto-stable/bench` (27 plans notés : les 22 du banc + les 5 plans à objets
+de la branche « objets tenus » ; s08 reste exclu). Ce qui change (`tests/eval/roto_eval.py`) :
+
+- **Stabilité sur toutes les images** (2 058 images), sans référence :
+  - *images perdues* : aire du masque (alpha > 0,5) sous 60 % de la médiane glissante du plan (±12
+    images, ~1 s, sans traverser une coupe détectée par l'appli) ;
+  - *sauts* : variation d'aire de plus de 25 % entre deux images voisines (même plan) ;
+  - *scintillement* (inchangé, compensé par le flot optique) ;
+  - *parasites* : îlots détachés de moins de 0,1 % de l'image (hors plus gros morceau) et pixels pâles
+    (alpha > 0,02) à plus de 3 px de toute zone pleine, par image ;
+  - les numéros des images perdues / des sauts sont gardés pour la vérification à l'œil.
+- **Bord mangé et objet perdu pèsent autant que le fond** : colonne « contour = fond le long du contour
+  + mangé » ; « objet tenu conservé » sur les images clés, et **cigarette de b1 sur ses 84 images**
+  (`gt_held_seq`, part de la cigarette gardée par image, pire image, images où il en reste < 50 %).
+- **Références ajoutées**, vérifiées à l'œil sur planches : cigarette de b1 sur les 84 images (SAM 2.1
+  large amorcé par 6 boîtes placées à la main, contrôlée image par image) ; personnages sur 8 images
+  supplémentaires de s13 (dont les 5 images floues 23 à 30), 5 de b1 et 5 de s04 (SAM 2.1 large amorcé
+  par les références existantes). La cigarette est ajoutée à la référence personnage de b1 (règle du
+  banc : un objet tenu fait partie du personnage) et à sa référence « objet tenu ». Toutes les images
+  ayant une référence sont notées (plus seulement les 6 images clés).
+- Méthodes ajoutées : `stable…` (le mode Stable rejoué sur les sorties en cache de BiRefNet, SAM 3, du
+  suivi et des objets, pour comparer les réglages), `clean~…`, et `app_stable` / `app_max` : **la chaîne
+  complète de l'appli** avec les vrais modèles (BiRefNet, SAM 3 personnage + objets en un seul passage
+  par lots, SAM 2.1 tiny, Stable ou serrage, stabilisation 0,25, nettoyage).
+
+## 3. Le mode « Stable » (`backend/models/auto_roto.py`, `stable_masks`)
+
+Même chaîne de modèles que la qualité max (BiRefNet, SAM 3, SAM 2.1), décision différente. Par image :
+
+1. **Plancher = BiRefNet.** Les « preuves de personnage » sont l'union de SAM 3 (« anime character »),
+   du suivi SAM 2 et des objets tenus (option de la branche `jarvis/v05-roto-held`, activée dans ce
+   mode). Tout morceau de BiRefNet (alpha > 0,3) qui touche une preuve est gardé ; un morceau qui n'en
+   touche aucune (décor détaché) est retiré. Un morceau du suivi éloigné des personnages de SAM 3 ne
+   compte que s'il a la taille d'un personnage (sinon c'est un rocher que SAM 2 a suivi).
+2. **Portée** : jusqu'à 2,5 % de la diagonale de SAM 3 tout est gardé, au-delà fondu jusqu'à 5 % ; les
+   pixels pleins (alpha > 0,8 : trait, mèche, objet) portent deux fois plus loin (une cigarette qui
+   dépasse des doigts reste entière).
+3. **Pas de bulle molle** : dans un morceau gardé, les pixels semi-transparents ne restent qu'à 3 px au
+   plus d'un pixel plein ou de SAM 3 (le bord antialiasé) ; le halo mou de ciel autour des cheveux part.
+4. **Excroissances** (ce qui dépasse de SAM 3 de plus de 4 px) triées : jusqu'à 2 % de l'aire des
+   personnages (mèche, cigarette, doigt oublié par SAM 3) gardées ; plus grosses, retirées si elles
+   dépassent 15 % (flamme d'aura) ou si 35 % de leurs pixels ont les couleurs du fond autour du
+   personnage (palette k-moyennes d'un anneau de fond) : morceau de ciel ou de cristaux collé au
+   contour, poche de fond entre les bras. La décision de l'image précédente pèse (seuils × 1,5 pour un
+   morceau qu'elle gardait) : pas de clignotement. Objets tenus et personnages manqués par SAM 3 mais
+   suivis ne sont jamais triés.
+5. **SAM 3 ajouté** (érodé de 2 px) seulement sur les images où BiRefNet perd le personnage (aire
+   effondrée par rapport aux voisines : flou) ou pour un personnage que BiRefNet ne voit pas du tout ; ses
+   fausses détections d'une seule image et ses masques qui enflent (aura collée) sont filtrés par les
+   images voisines.
+6. **Garde temporelle** : une image dont l'aire tombe sous 60 % de la médiane glissante reprend le
+   masque de sa voisine porté par le flot optique (Farneback), seulement là où BiRefNet ou SAM 3 voient
+   encore quelque chose (à 2 % de la diagonale) et s'ils en voient au moins 30 % — un personnage parti
+   derrière un mur ou hors champ n'est pas redessiné.
+7. **Trait d'encre puis parasites** : après la stabilisation temporelle de l'appli, le trait d'encre
+   extérieur est absorbé (§6), puis îlots détachés de moins
+   de 0,02 % de l'image retirés, de 0,02 à 0,1 % gardés seulement si l'image précédente les gardait,
+   pixels pâles à plus de 3 px du masque plein retirés ; objets tenus jamais retirés.
+
+Export : celui de la qualité max (bords recalculés à partir des couleurs locales, décontamination),
+précédé de l'absorption du trait d'encre à pleine résolution, qu'il ne peut plus rendre transparent (§6).
+
+## 4. Réglages mesurés (banc refondu, mode Stable rejoué sur les sorties en cache)
+
+Mesures sur l'alpha sans export (`quick`), 27 plans, sauf mention :
+
+- **Stable v1** (plancher BiRefNet, portée, bord semi-transparent limité à 3 px, nettoyage, sans tri
+  des excroissances), score complet avec export : 6 images perdues, 52 sauts, mangé 2,9 %, cigarette
+  ≥ 98,6 % sur ses 84 images — mais fond le long du contour 12,7 % (médiane 12,4 %) et fond enfermé
+  17,7 % : la « bulle » que Léandro ne veut pas. Les sauts viennent surtout des auras (s13, s15) que
+  BiRefNet garde une image sur deux, des éclairs (s09) et de la fumée (s16).
+- Sans nettoyage des parasites : 2,46 îlots et 1 895 pixels pâles isolés par image (contre 0,13 et 0).
+- **Tri des excroissances par taille seule** (k4) : 3 perdues, 26 sauts, fond contour 11,8 % (médiane
+  11,6 %), fond enfermé 14,2 %, mangé 2,6 %. Les plans calmes sont à 1-2 % ; les plans hauts sont ceux
+  où BiRefNet colle du décor au personnage (b6 cristaux 48 %, s09 éclairs, s20 tracteur, b2, h5, s16
+  fumée, s17 mur).
+- D'où le **tri par couleur** (§3, point 4), puis trois corrections vues en regardant le SSJ3 image par
+  image : des rochers suivis par SAM 2 (images 0-10), trois rochers que SAM 3 appelle « personnage »
+  sur une seule image floue (28), et l'aura entière que SAM 3 colle à Goku sur deux images floues
+  (25-26 : masque ×3). Chaque correction a son test unitaire.
+
+Une dernière série plus serrée (bord semi-transparent limité à 2 px, excroissances comptées au-delà de
+3 px, seuils 10 % / 25 %) gagnait peu sur les sorties en cache (fond contour 11,1 → 10,3 %, fond enfermé
+12,9 → 12,1 %) ; adoptée un moment, elle a été **retirée** : dans la chaîne réelle elle coupait l'aile du
+démon de b2 sur plusieurs images (grosse excroissance sombre aux couleurs du fond sombre ; mangé 16 →
+47 % sur ce plan, 2 sauts). Réglages gardés : 3 px, 4 px, 15 % / 35 %. Rien ne disparaît passe avant
+moins de fond.
+
+Deux corrections encore, trouvées en regardant les images : sur s15, SAM 3 (passe non zoomée de l'appli)
+colle toute l'aura à Goku sur 8 images que BiRefNet découpe bien → le masque SAM 3 n'est plus ajouté que
+sur les images où BiRefNet perd le personnage (aire effondrée par rapport aux voisines), ou pour un
+personnage que BiRefNet ne voit pas du tout ; sur s13, la même aura collée sur 2 images floues
+(masque ×3) → un masque SAM 3 qui enfle de plus de 1,6 × sa médiane glissante est recoupé sur le masque
+de la voisine normale porté par le flot optique.
+
+## 5. Résultats — chaîne complète de l'appli (`app_stable`), 27 plans, 2 058 images
+
+« perdues » et « sauts » : sur toutes les images. Fond, mangé, objet tenu : sur toutes les images ayant
+une référence, après l'export de l'appli. Contamination : nouvelle mesure à vérité connue (partie 4,
+§1), étape de couleur seule.
+
+| mode | images | perdues | sauts > 25 % | **encre de contour % (pire plan ; plans ≥ 97 %)** | îlots / img | px pâles isolés / img | fond contour % (méd.) | mangé % | contour (fond + mangé) | fond enfermé % | objet tenu % | cigarette b1 : moy. / pire image / images < 50 % | J | scint. % | contam. couleur % |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ancien 0,4 (BiRefNet seul, export 0,5) | 2058 | **30** | **60** | **62,2** (29,7 ; 0/27) | 2,08 | 451 | 17,2 (14,5) | 10,5 | 27,7 | 17,9 | 93,5 | 99,8 / 98,6 / 0 | 0,861 | 4,2 | nan |
+| 0,5 (BiRefNet + suivi, export 0,5) | 2058 | **23** | **44** | **60,3** (28,4 ; 0/27) | 0,24 | 89 | 15,7 (12,4) | 11,2 | 26,9 | 18,1 | 93,0 | 99,8 / 98,6 / 0 | 0,864 | 3,8 | nan |
+| qualité max de la nuit | 2058 | **28** | **33** | **64,4** (28,7 ; 0/27) | 0,18 | 433 | 5,8 (1,5) | 12,7 | 18,5 | 4,2 | 28,7 | 67,5 / 11,1 / 22 | 0,889 | 2,6 | nan |
+| qualité max + objets tenus | 2058 | **20** | **26** | **67,9** (28,7 ; 0/27) | 0,17 | 380 | 6,0 (2,2) | 8,3 | 14,4 | 6,0 | 94,5 | 85,6 / 11,6 / 13 | 0,911 | 2,5 | nan |
+| Stable v2 (exemples v2) | 2058 | **10** | **18** | **73,1** (35,5 ; 0/27) | 0,16 | 121 | 10,1 (6,8) | 3,1 | 13,2 | 12,6 | 99,8 | 99,8 / 98,5 / 0 | 0,910 | 2,4 | 2,4 |
+| Stable v3, réglages serrés (retirés : aile de b2) | 2058 | **10** | **18** | **94,9** (48,7 ; 20/27) | 0,12 | 121 | 11,0 (9,6) | 4,4 | 15,3 | 12,5 | 99,8 | 99,9 / 99,0 / 0 | 0,906 | 2,6 | 16,2 |
+
+Lecture : « perdues » = images dont l'aire tombe sous 60 % de la médiane glissante ; « sauts » = variation
+d'aire > 25 % entre voisines ; « encre de contour » = moyenne des plans (pire plan ; nombre de plans
+≥ 97 %), mesurée après l'export de chaque version telle que livrée (nuit et v2 : export sans absorption) ;
+« contam. couleur » = contamination à vérité connue, étape de couleur seule (partie 4, §1).
+
+- La ligne **v3** du tableau a été mesurée avec des réglages d'excroissances plus serrés (§4), retirés
+  ensuite parce qu'ils coupaient l'aile du démon de b2 (mangé 47 % et 2 sauts sur ce plan ; sauts b2 5 et
+  14). Le passage complet du banc avec les réglages finaux (ceux de la v2 + le trait d'encre) n'a pas pu
+  finir avant l'échéance : voir §5 bis pour les plans terminés.
+- Encre de contour de la v3 sous 97 % : b2 49 % (forme démoniaque noire sur fond sombre, aile coupée par ces
+  réglages), s13 57 % (mesure non fiable : sol et fond noir autour de l'aura, §6), s15 93 %, L1 94 %,
+  b5 96 %, h5 96 %, b6 97 % ; tous les autres plans ≥ 97 %.
+- Contamination couleur v3 : 2,4 → 16,2 %. Les pixels du trait rendus opaques gardent leur couleur
+  d'origine, qui contient un peu du fond à l'anticrénelage ; c'est le choix « le trait d'abord » ; à l'œil
+  sur blanc et sur rouge, pas de liseré de fond visible sur les 3 exemples.
+
+**Vérification à l'œil de chaque image « perdue » du mode Stable** : s10 [0], s12 [0, 1, 3], s16 [0, 2, 3, 9, 10, 11] — toutes regardées : s10 image 0, Goku entre dans le
+champ par le bord (il est gardé) ; s12, images de pur flou de vitesse où Vegeta n'est pas dessiné ; s16,
+fumée qui cache entièrement Goku. Aucune n'est un personnage visible perdu (ancien 0.4 : 30, dont les 13 de
+s13 où Goku est visible ; nuit : 28).
+
+**Sauts du mode Stable** : s09 [2, 18, 48, 50] suit la vraie animation (gros plan sur le poing, changements de pose) ; s10 [1, 26]
+l'entrée de Goku et une action rapide ; s12 [2, 3, 4] et s16 [1, 2, 4, 9, 11, 12, 16] le flou de vitesse
+et la fumée ; b2 [5, 14] l'aile coupée par les réglages serrés (corrigé, §5 bis).
+
+## 5 bis. Réglages finaux (v2 + trait d'encre) — plans terminés à l'échéance
+
+Le passage du banc avec les réglages finaux tournait encore à l'échéance (13 h 15). Les exemples v3
+(§7) sont produits avec ces réglages finaux.
+
+## 6. Le trait d'encre extérieur (verdict de Léandro sur les exemples v2)
+
+Verdict sur les exemples v2 : « extrêmement mauvais, les traits noirs disparaissent même dans les scènes
+calmes ». Confirmé : composé sur blanc, le contour d'encre extérieur est coupé presque partout (cheveux,
+manche, main, cape de b1 ; bas de tunique, antennes, épaules, pieds, dos, robe sur s04) ; les traits
+intérieurs restent.
+
+**Diagnostic, étage par étage** (b1, images clés ; part des pixels du trait extérieur gardés à alpha ≥ 0,9
+— métrique ci-dessous — à la taille de travail) :
+
+| étage | b1 (4 images clés) | s04 (4 images clés) |
+|---|---|---|
+| BiRefNet brut | 76-79 % | 73-74 % |
+| SAM 3 | ~84 % sur l'image 42 (masque binaire, bord à la limite aplat/encre) | – |
+| masque Stable (fusion, stabilisation, nettoyage) | 75-78 % | 73-74 % |
+| après l'export « max » de la nuit (recalcul du bord par couleur + décontamination) | ~85 % sur l'image 42, et sur le ProRes 1080p : **69 %** (v2) | **67 %** (v2) |
+| ancien mode 0.4 (export 0.5) | 54-65 % ; ProRes 1080p : 62,5 % | 57-60 % ; ProRes : 63 % |
+
+Le trait part **dès BiRefNet** : son masque s'arrête à la limite entre l'aplat et l'encre, ou au milieu du
+trait (le contour d'un personnage d'anime est sombre comme… rien de ce que le modèle a appris à garder) ;
+SAM 3 fait pareil. L'agrandissement du masque de 1080×608 à 1080p rend ce bord semi-transparent, et l'export
+« max » finit le travail : le recalcul de l'alpha par les couleurs et la décontamination (la couleur des
+pixels semi-transparents est remplacée par celle du pixel opaque le plus proche sous 5 % d'alpha) changent
+un trait fin et semi-transparent en liseré de couleur d'aplat. L'ancien mode n'était pas meilleur sur la
+métrique (62,5 %), mais son halo de fond gardait un liseré sombre visible à l'œil.
+
+**Correction à la source** (`edge_refine.absorb_ink`, appelée par l'export — à pleine résolution — et à la
+fin du mode Stable) : les pixels sombres (luminance ≥ 0,15 sous le fond local et < 0,55) reliés au bord du
+masque par des pixels sombres, sur une bande de 0,28 % de la diagonale (6 px en 1080p, 3 px en 608p), sont
+rendus **opaques**, ainsi que les pixels sombres du bord déjà dans le masque ; l'anneau d'anticrénelage
+juste au-delà reçoit l'alpha que sa luminance implique (entre l'encre et le fond). L'export ne les rend plus
+jamais transparents ni ne les recolore (le recalcul par couleur est annulé sur eux ; la décontamination ne
+touche que les pixels semi-transparents). Rien ne change là où le fond est aussi sombre que l'encre (nuit) ;
+un pixel sombre collé à du sombre au-delà de la bande (feuillage, joints de pierres du décor) n'est pas pris
+— vu sur s04, où la première version happait des bouts de texture.
+
+**Nouvelle métrique, « encre de contour conservée »** (`roto_eval.ink_kept`, `edge_refine.outline_ink`) :
+part des pixels du trait extérieur — pixels sombres (même définition) à 4 px au plus du contour de
+référence, de part et d'autre, là où le fond local est plus clair — gardés à alpha ≥ 0,9 après l'export.
+Objectif ≥ 97 % sur chaque plan. Limite connue : sur un plan à effets (SSJ3 : fond noir, aura claire), le
+sol et les rochers sombres au pied du personnage comptent aussi comme « encre » : la mesure y est basse sans
+que le trait du personnage manque (vérifié à l'œil, §7).
+
+## 7. Les 3 exemples v3 (`reports/roto/exemples-v3/`, mêmes plans, ProRes 1080p de l'appli)
+
+| | 01 cigarette (b1) | 02 plan large (s04) | 03 SSJ3 caméra qui tremble (s13) |
+|---|---|---|---|
+| encre de contour conservée (ProRes, moyenne / pire image) : ancien 0.4 → nuit → v2 → **v3** | 62,4 → 67,8 → 69,3 → **99,2 / 98,9 %** | 63,1 → 64,5 → 66,6 → **98,5 / 98,3 %** | 30,3 → 17,3 → 23,2 → 60,4 % (mesure non fiable sur ce plan, voir ci-dessous) |
+| images perdues : ancien → nuit → v3 | 0 → 0 → **0** | 0 → 0 → **0** | 17 → 8 → **0** |
+| sauts > 25 % : ancien → nuit → v3 | 0 → 0 → **0** | 0 → 0 → **0** | 37 → 4 → **1** (image 7 : sol d'aura qui part, justifié) |
+| couverture minimale v3 | 19,6 % | 42,8 % | 11,7 % (0 % avant) |
+| parasites v3 (îlots / pixels pâles par image) | 0 / 0 | 0 / 0 | 0 / 0 |
+| cigarette (84 images) : pire image | 99,0 % (nuit 11 %) | – | – |
+
+Vérifié à l'œil sur `contour-sur-blanc.png` (3 images par plan, zoom ×3) et sur des captures sur blanc et
+sur rouge : le trait brun des cheveux, de la manche, des doigts et de la cigarette (01) ; le contour de
+Kaio, ses antennes, Goku, Beerus et Whis (02) ; le trait noir des mèches de Goku (03) sont continus et
+opaques. Sur 03, la mesure d'encre est basse parce que le sol, les rochers et le fond noir entre les
+flammes d'aura, sombres et collés au contour, comptent comme « encre » : le masque a raison de les
+laisser dehors. Sur 02, l'arche de pierre derrière Kaio (déjà gardée par l'ancien mode) a récupéré de
+petits traits de fissures le long de son bord.
+
+## 8. Vitesse (RTX 3090)
+
+Passe au calme sur les 3 plans (chaîne v2) : masques 0,60-0,64 s/image (BiRefNet 108-116 ms, SAM 3
+personnage + 7 objets en un passage par lots 278-317 ms, suivi 86-92 ms, Stable + stabilisation
+98-135 ms), export ProRes 1080p 0,37-0,47 s, total **0,97-1,11 s/image**. La v3 ajoute l'absorption du
+trait à l'export 1080p (~0,12 s/image mesuré sous charge) et à la taille de travail : **~1,1-1,2 s/image**
+au total, un peu au-dessus de l'objectif de 1 s ; la stabilité et le trait ont primé.
+
+## 9. Ce qui reste
+
+- Le fond le long du contour et le fond enfermé restent au-dessus des cibles de Léandro sur les plans
+  où BiRefNet colle le décor au personnage (cristaux de b6, éclairs de s09, tracteur de s20, fumée de
+  s16, palais sombre de s18-s19) : c'est le prix de « ne rien couper » ; à retoucher au pinceau.
+- Plans à effets (s13, s15) : une bande de lueur sombre peut rester à l'extérieur des cheveux.
+- La mesure « encre de contour » n'est pas fiable sur fond noir à effets lumineux (s13).
+- Texture sombre du décor collée à un morceau de décor déjà gardé (arche de s04) : de petits traits
+  peuvent y être absorbés.
+- Un peu plus d'une seconde par image avec l'export.
 
 # Partie 4 — Objectifs chiffrés : ≤ 5 % de fond et de contamination, < 1 s par image
 
