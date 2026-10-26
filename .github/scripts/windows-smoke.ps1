@@ -134,8 +134,6 @@ try {
   if (-not $healthy) { throw 'Sidecar /health never answered within 15 min' }
   $summary.first_boot_s = [int]((Get-Date) - $t0).TotalSeconds
   Write-Host "Sidecar healthy after $($summary.first_boot_s) s"
-  Start-Sleep -Seconds 3
-  Shot 'onboarding'
 
   # ── 3. GPU probe before setup ──────────────────────────────────────────────
   Step 'GPU detection before setup'
@@ -144,6 +142,9 @@ try {
   Write-Host "hardware: $($hw | ConvertTo-Json -Compress -Depth 5)"
   if ($hw.recommended -ne 'cpu') { throw "No GPU on this runner, but setup recommends '$($hw.recommended)'" }
   $summary.recommended_backend = $hw.recommended
+  # The onboarding screen runs the same probe: give it time to preselect.
+  Start-Sleep -Seconds 4
+  Shot 'onboarding'
 
   # ── 4. CPU backend ─────────────────────────────────────────────────────────
   Step 'Install the CPU backend (same call as the onboarding screen)'
