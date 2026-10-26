@@ -20,6 +20,8 @@ on:
   workflow_dispatch:
   push:
     branches: ['jarvis/**']
+    # Docs-only commits don't need a 10-20 min Windows run.
+    paths-ignore: ['docs/**', '**/*.md']
 
 permissions:
   contents: read
