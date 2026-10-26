@@ -169,6 +169,49 @@ def colour_solve(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008,
     return res
 
 
+EDGE_SOLVE_OUT = 0.006   # full-resolution edge solve: band outside the matte (share of the diagonal, 13 px at 1080p)
+EDGE_SOLVE_IN = 0.0015   # ... and inside it (3 px at 1080p)
+
+
+def edge_solve(rgb: np.ndarray, alpha: np.ndarray, out_frac: float = EDGE_SOLVE_OUT,
+               in_frac: float = EDGE_SOLVE_IN) -> np.ndarray:
+    """Alpha of the outline band re-solved at the resolution of ``rgb`` from
+    the colours (nearest character / background colours, compositing
+    equation), in both directions: a matte computed at a lower resolution and
+    scaled up leaves a staircase and stops short of thin tips; here the edge
+    follows the drawing's own antialiasing. Inside / outside the band the
+    matte is unchanged. Computed on the bounding box of the band."""
+    import cv2
+    from .mask_postprocess import clean_edges_with_background
+    a = np.clip(alpha.astype(np.float32), 0, 1)
+    m = (a > 0.5).astype(np.uint8)
+    if not m.any():
+        return a
+    h, w = m.shape
+    dg = float(np.hypot(h, w))
+    ro = max(2, int(round(out_frac * dg)))
+    ri = max(1, int(round(in_frac * dg)))
+    ys, xs = np.nonzero(cv2.morphologyEx(m, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)))
+    pad = 3 * ro + 30
+    y0, y1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1)
+    x0, x1 = max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
+    mb = m[y0:y1, x0:x1]
+    core = cv2.erode(mb, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ri + 1, 2 * ri + 1))) > 0
+    out_bg = cv2.dilate(mb, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ro + 1, 2 * ro + 1))) == 0
+    t = np.where(core, 1.0, np.where(out_bg, 0.0, 0.5)).astype(np.float32)
+    _, a2 = clean_edges_with_background(np.ascontiguousarray(rgb[y0:y1, x0:x1]), t, resolve_alpha=True)
+    band = ~core & ~out_bg
+    res = a.copy()
+    sub = res[y0:y1, x0:x1]
+    a2 = np.clip(a2, 0, 1)
+    cur = sub[band]
+    new = a2[band]
+    # lowering: the drawing's antialiasing, no halo; raising only to solid
+    # (a tip the matte stopped short of), never a half-alpha pocket of glow
+    sub[band] = np.where(new < cur, new, np.where(new >= 0.9, new, cur))
+    return res
+
+
 def colour_solve_safe(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008,
                       ink_margin: float = 0.12, in_frac: Optional[float] = None) -> np.ndarray:
     """:func:`colour_solve` that never lowers the alpha of an ink pixel: a
@@ -419,6 +462,37 @@ def outline_ink(rgb: np.ndarray, ref: np.ndarray, band_px: int = 4) -> np.ndarra
     return band & (lum < lb - INK_DARK) & (lum < INK_MAX_LUMA)
 
 
+HOLE_EXPORT_FRAC = 0.0005   # enclosed transparent holes the export opened, up to this share of the frame: closed
+HOLE_FILL_FRAC = 0.0002     # enclosed holes already in the matte, up to this share: filled (gaps in the fill)
+
+
+def fill_small_holes(a: np.ndarray, before: Optional[np.ndarray] = None) -> np.ndarray:
+    """Small transparent holes enclosed in the matte (alpha < 0.5, not
+    touching the frame border) closed: those under :data:`HOLE_FILL_FRAC`
+    of the frame always (a missing piece of fill or line inside the
+    character), those under :data:`HOLE_EXPORT_FRAC` where ``before`` (the
+    matte before the export's edge work) was opaque."""
+    import cv2
+    out = a.copy()
+    inv = (a < 0.5).astype(np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(inv, connectivity=4)
+    if n <= 2:
+        return out
+    h, w = a.shape
+    border = np.zeros(n, bool)
+    border[np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))] = True
+    area = st[:, 4]
+    small = ~border & (area < HOLE_FILL_FRAC * h * w)
+    if before is not None:
+        was = np.bincount(lab.ravel(), weights=(before >= 0.5).ravel().astype(np.float64), minlength=n)
+        small |= ~border & (area < HOLE_EXPORT_FRAC * h * w) & (was >= 0.5 * area)
+    small[0] = False
+    fill = small[lab]
+    if fill.any():
+        out[fill] = 1.0
+    return out
+
+
 def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[np.ndarray, np.ndarray]:
     """Export-time edge finishing, ``(rgb_uint8, alpha_float32)``.
 
@@ -434,7 +508,10 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
     a = np.clip(alpha.astype(np.float32, copy=False), 0.0, 1.0)
     # the outer ink line belongs to the character: absorbed, opaque, and
     # never made transparent or recoloured afterwards
+    if mode == "max":
+        a = edge_solve(rgb, a)
     a, ink = absorb_ink(rgb, a)
+    before = a.copy()
     if mode == "max":
         # the colour re-solve (glows, halos) never acts inside or right on the
         # inked contour: a yellow hair tip next to a yellow aura is character
@@ -446,7 +523,9 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
             a = np.where(protect, a, a_cs).astype(np.float32)
         else:
             a = a_cs
+        a = fill_small_holes(a, before)
         return unmix_with_background(rgb, a, faint=MAX_UNMIX_FAINT, solid=MAX_UNMIX_SOLID), a
+    a = fill_small_holes(a, before)
     return estimate_foreground(rgb, a), a
 
 
