@@ -465,7 +465,11 @@ def _apply_overrides(sess: SegmentSession, masks: np.ndarray) -> np.ndarray:
     return out
 
 
-def _postprocess(sess: SegmentSession, masks: np.ndarray, *, strength_scale: float) -> np.ndarray:
+def _postprocess(sess: SegmentSession, masks: np.ndarray, *, strength_scale: float,
+                 clean: Optional[dict] = None) -> np.ndarray:
+    """Temporal stabilisation, then the user's brush corrections. ``clean``
+    (stable mode, ``{"shots", "held"}``): background specks cleaned after the
+    stabilisation, before the corrections."""
     from ..finish.matte import postprocess_stack
 
     models_cfg = get_state().settings.get("models", {})
@@ -473,6 +477,9 @@ def _postprocess(sess: SegmentSession, masks: np.ndarray, *, strength_scale: flo
     strength = float(models_cfg.get("mask_temporal_smooth_strength", 0.5)) * strength_scale
     frames = [_load_rgb(p) for p in sess.frame_paths]
     out = postprocess_stack(masks.astype(np.float32), frames, stabilize=stabilize, strength=strength)
+    if clean is not None:
+        from ..models.auto_roto import clean_masks
+        out = clean_masks(out, clean.get("shots"), clean.get("held"))
     return _apply_overrides(sess, out)
 
 
@@ -798,7 +805,7 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
         stable = False   # no SAM 3 (gated weights, failure): the standard pipeline
     if stable and not use_tracker:
         masks = stable_masks(raw, sel_masks, None, held, frames=sess.frame_paths)
-        return _postprocess(sess, masks, strength_scale=1.0)
+        return _postprocess(sess, masks, strength_scale=1.0, clean={"held": held})
     if not use_tracker:
         masks = tighten(det.astype(np.float32) / 255.0, sel_masks, quality=_quality(models_cfg), held=held)
         # Per-frame inference re-decides the silhouette on every frame:
@@ -814,19 +821,21 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
         progress_cb=lambda seen, total: progress(n_frames // 2 + seen // 2, n_frames),
     )
     del det
+    clean = None
     if stable:
-        # BiRefNet's pieces that touch a character kept whole, SAM 3 only
-        # drops detached ones, collapsed frames refilled from their
-        # neighbours (backend/models/auto_roto.stable_masks)
-        masks = stable_masks(raw, sel_masks, masks, held, frames=sess.frame_paths,
-                             shots=split_shots(small, n_frames) if small else None,
+        # BiRefNet's pieces that touch a character kept, SAM 3 only drops
+        # detached ones and oversized extras, collapsed frames refilled from
+        # their neighbours, specks cleaned (backend/models/auto_roto.stable_masks)
+        shots = split_shots(small, n_frames) if small else None
+        masks = stable_masks(raw, sel_masks, masks, held, frames=sess.frame_paths, shots=shots,
                              only_tracked=clicks is not None or _auto_target(body.auto_target) == "main")
+        clean = {"shots": shots, "held": held}
     else:
         masks = tighten(masks, sel_masks, quality=_quality(models_cfg), held=held)
-    del sel_masks, held, raw
+    del sel_masks, raw
     # SAM 2's memory already keeps identity stable; a lighter stabilisation
     # pass only removes residual edge shimmer from the detector.
-    return _postprocess(sess, masks, strength_scale=0.5)
+    return _postprocess(sess, masks, strength_scale=0.5, clean=clean)
 
 
 def _quality(models_cfg: dict) -> str:

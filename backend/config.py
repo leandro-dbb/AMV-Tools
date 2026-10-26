@@ -125,9 +125,11 @@ DEFAULT_SETTINGS = {
         # in "legacy" mode (they added background along hair, see
         # docs/reports/chantier-roto.md).
         "mask_edge_mode": "auto",
-        # Auto engine quality: "auto" = the memory tier's pick ("max" on
-        # NVIDIA 8 GB+ with SAM 3: tips-aware hug + colour-solved export
-        # edges), "max", or "standard" (the first 0.6 pipeline).
+        # Auto engine quality: "auto" = the memory tier's pick ("stable" on
+        # NVIDIA 8 GB+ with SAM 3: BiRefNet's outline kept wherever it
+        # touches a character, temporal guard, speck cleanup), "stable",
+        # "max" (tips-aware SAM 3 hug + colour-solved export edges), or
+        # "standard" (the first 0.6 pipeline).
         "mask_quality": "auto",
         # Auto engine: SAM 3 ("anime character") picks what is a character
         # before the detector's matte is used, when the tier has it and the

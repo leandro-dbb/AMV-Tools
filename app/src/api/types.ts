@@ -241,7 +241,7 @@ export interface AppSettings {
     mask_edge_refine_enabled: boolean;
     mask_bg_aware_cleanup_enabled: boolean;
     mask_edge_mode?: 'auto' | 'fg' | 'max' | 'legacy';
-    mask_quality?: 'auto' | 'max' | 'standard';
+    mask_quality?: 'auto' | 'stable' | 'max' | 'standard';
     mask_selector_enabled?: boolean;
     mask_keep_held?: 'auto' | boolean;
     mask_temporal_smooth_enabled: boolean;

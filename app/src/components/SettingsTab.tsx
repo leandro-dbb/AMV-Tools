@@ -374,7 +374,11 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
         <Toggle on={(s.mask_edge_mode ?? 'auto') !== 'legacy'} onChange={(v) => patch('models', { mask_edge_mode: v ? 'auto' : 'legacy' })} />
       </Row>
       <Row label={t('settings.models.maskQuality.label')} hint={t('settings.models.maskQuality.hint')}>
-        <Toggle on={(s.mask_quality ?? 'auto') !== 'standard'} onChange={(v) => patch('models', { mask_quality: v ? 'auto' : 'standard' })} />
+        <select value={(s.mask_quality ?? 'auto') === 'auto' ? 'stable' : s.mask_quality} onChange={(e) => patch('models', { mask_quality: e.target.value === 'stable' ? 'auto' : e.target.value as any })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+          <option value="stable">{t('settings.models.maskQuality.stable')}</option>
+          <option value="max">{t('settings.models.maskQuality.max')}</option>
+          <option value="standard">{t('settings.models.maskQuality.standard')}</option>
+        </select>
       </Row>
       <Row label={t('settings.models.selector.label')} hint={t('settings.models.selector.hint')}>
         <Toggle on={s.mask_selector_enabled ?? true} onChange={(v) => patch('models', { mask_selector_enabled: v })} />
