@@ -326,6 +326,34 @@ class BiRefNetModel:
         out = Image.fromarray(crop, mode="F").resize((w, h), Image.BILINEAR)
         return np.clip(np.asarray(out, dtype=np.float32), 0.0, 1.0)
 
+    def alpha_batch(self, frames: list[np.ndarray], batch: int = 4) -> list[np.ndarray]:
+        """Float alpha of several same-size RGB frames, ``batch`` at a time on
+        CUDA (same resize / normalisation as :meth:`mask_image`, one forward
+        pass per batch); one frame at a time elsewhere."""
+        if self.variant == "anime" or self.device.backend != "cuda":
+            return [self.mask_image(Image.fromarray(f)) for f in frames]
+        import torch
+        import torch.nn.functional as F
+        self._ensure_loaded()
+        self._touch()
+        out: list[np.ndarray] = []
+        mean = torch.tensor(_IMAGENET_MEAN, device=self.device.torch_device).view(1, 3, 1, 1)
+        std = torch.tensor(_IMAGENET_STD, device=self.device.torch_device).view(1, 3, 1, 1)
+        for i in range(0, len(frames), batch):
+            chunk = frames[i:i + batch]
+            h, w = chunk[0].shape[:2]
+            with torch.inference_mode():
+                x = torch.from_numpy(np.stack(chunk)).to(self.device.torch_device)
+                x = x.permute(0, 3, 1, 2).float() / 255.0
+                x = F.interpolate(x, size=(self.input_size, self.input_size), mode="bilinear",
+                                  align_corners=False, antialias=True)
+                tensor = ((x - mean) / std).to(self._model_dtype)
+                preds = self._model(tensor)[-1].sigmoid()
+                pred = F.interpolate(preds.float(), size=(h, w), mode="bilinear",
+                                     align_corners=False).clamp(0.0, 1.0)[:, 0].cpu().numpy()
+            out.extend(p.astype(np.float32, copy=False) for p in pred)
+        return out
+
     def mask_images(self, images: list[Image.Image], threshold: float = 0.5) -> np.ndarray:
         """Run BiRefNet on a list of frames sequentially. Returns ``(T, H, W)``
         bool where H/W are the first frame's size — all frames must share the

@@ -458,7 +458,7 @@ def _export_alpha_raw(src_path: str, start_ms: int, end_ms: int, masks: np.ndarr
 
     written = 0
     try:
-        workers = max(1, min(4, (os.cpu_count() or 2) - 1))
+        workers = max(1, min(6, (os.cpu_count() or 2) - 1))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="alpha-export") as pool:
             pending = []
             for i, rgb in enumerate(frames()):

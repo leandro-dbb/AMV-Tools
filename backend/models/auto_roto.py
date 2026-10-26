@@ -91,6 +91,7 @@ TIGHT_FRAC = 0.008           # final matte hugged to SAM 3's outline at this rea
 # from the local colours with the ink line protected. See
 # docs/reports/chantier-roto.md.
 MAX_TIGHT_FRAC = 0.004
+SELECTOR_CHUNK = 16          # frames handed to the batched SAM 3 at once
 MAX_TIP_TOUCH = 0.30
 
 
@@ -474,29 +475,42 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
     from PIL import Image
     out = np.empty_like(det)
     T = len(det)
+    many = getattr(selector, "segment_zoomed_many" if zoom else "segment_many", None)
+    chunk = SELECTOR_CHUNK if many is not None else 1
     try:
-        for t in range(T):
-            f = frames[t]
-            if not isinstance(f, np.ndarray):
-                with Image.open(f) as im:
-                    f = np.asarray(im.convert("RGB"))
-            if zoom and hasattr(selector, "segment_zoomed"):
-                sel = selector.segment_zoomed(f, prompt)
+        for c0 in range(0, T, chunk):
+            imgs = []
+            for t in range(c0, min(T, c0 + chunk)):
+                f = frames[t]
+                if not isinstance(f, np.ndarray):
+                    with Image.open(f) as im:
+                        f = np.asarray(im.convert("RGB"))
+                imgs.append(f)
+            if many is not None:
+                # batched SAM 3: text encoded once, images in batches
+                sels = many(imgs, prompt)
+            elif zoom and hasattr(selector, "segment_zoomed"):
+                sels = [selector.segment_zoomed(imgs[0], prompt)]
             else:
-                sel = selector.segment(f, prompt)
-            if keep is not None:
-                keep.append((sel > 0.5).astype(np.uint8))
-            d = det[t].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[t]
-            g = gate_alpha(d, sel, keep_if_empty=True)
-            out[t] = np.clip(np.rint(g * 255.0), 0, 255).astype(np.uint8) if det.dtype == np.uint8 else g
+                sels = [selector.segment(imgs[0], prompt)]
+            for j, sel in enumerate(sels):
+                _gate_one(det, out, c0 + j, sel, keep)
             if progress_cb is not None:
-                progress_cb(t + 1, T)
+                progress_cb(min(T, c0 + chunk), T)
     except Exception as exc:  # OOM, gated weights, ...: keep the 0.5 behaviour
         log.warning("auto roto: character selector failed (%s), detector matte kept", exc)
         if keep is not None:
             keep.clear()
         return det
     return out
+
+
+def _gate_one(det: np.ndarray, out: np.ndarray, t: int, sel: np.ndarray, keep: Optional[list]) -> None:
+    if keep is not None:
+        keep.append((sel > 0.5).astype(np.uint8))
+    d = det[t].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[t]
+    g = gate_alpha(d, sel, keep_if_empty=True)
+    out[t] = np.clip(np.rint(g * 255.0), 0, 255).astype(np.uint8) if det.dtype == np.uint8 else g
 
 
 def _fill_holes(m: np.ndarray) -> np.ndarray:

@@ -425,9 +425,12 @@ class AppState:
         """Drop every loaded mask engine except ``keep``. Used by ``get_<X>()``
         so only one engine sits in VRAM at a time — fits 8 GB cards once
         SigLIP/tagger are evicted too."""
+        from .models.sam3_concept import KEEP_LOADED_GB, total_vram_gb
         for attr in ("_sam2", "_birefnet", "_matanyone", "_sam3"):
             if attr == keep:
                 continue
+            if attr == "_sam3" and total_vram_gb() >= KEEP_LOADED_GB:
+                continue   # ~2 GB, compiled once: kept between clips on big cards
             m = getattr(self, attr, None)
             if m is not None:
                 try: m.offload()
