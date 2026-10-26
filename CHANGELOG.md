@@ -30,6 +30,17 @@ All notable changes to AMV Tools are documented here.
   in, opaque, with their antialiasing; the export never makes them
   transparent or recolours them. Nothing changes where the background is as
   dark as the ink.
+- **v5 — BiRefNet's soft edge is the base again** (verdict on v4: stacking
+  fixes on SAM 3's low-resolution outline does not hold — staircase, grey
+  fringes, holes at the SSJ3 tips): every BiRefNet piece touching a
+  character is kept as it is, with its antialiased gradient, only pieces
+  detached from the characters are dropped, and SAM 3 is a backup that
+  fills where BiRefNet loses the character or most of one (blur, dark
+  characters), with a soft join, never on BiRefNet's own edge. The export
+  ("soft" edge mode) scales the matte up with a guided filter as the old
+  mode did, adds the outer ink line without ever lowering alpha, closes
+  tiny holes and decontaminates the edge colours. The temporal guard, held
+  objects and the speck cleanup stay.
 - **Smooth, complete outline at export** (the v3 examples had staircase
   edges, background fringes at the hair tips and holes in them): the alpha
   of the outline band is re-solved at the source resolution from the local
