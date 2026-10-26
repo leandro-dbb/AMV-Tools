@@ -843,8 +843,10 @@ def test_persist_selector_brings_a_swollen_mask_back_to_its_neighbours_shape():
     assert out[4][60, 100] == 1.0 and out[4][60, 40] == 0.0
 
 
-def test_stable_frame_does_not_add_an_aura_sam3_glued_to_a_character_birefnet_sees():
+def test_stable_frame_does_not_add_an_aura_sam3_glued_to_a_character_birefnet_sees(monkeypatch):
+    from backend.models import auto_roto
     from backend.models.auto_roto import det_seen, stable_frame
+    monkeypatch.setattr(auto_roto, "SEL_FILL_ALWAYS", False)
     h, w = 400, 600
     body = _blob(h, w, 250, 100, 350, 350)
     sam3 = _blob(h, w, 150, 20, 450, 390)               # SAM 3 swallowed the aura around him
@@ -906,8 +908,10 @@ def test_absorb_ink_makes_no_specks_out_of_dark_scenery_next_to_the_outline():
     assert specks(a)[0] == 0 and a[60, 146] < 0.5
 
 
-def test_stable_frame_keeps_a_part_birefnet_drops_for_one_frame_when_sam3_and_the_previous_frame_have_it():
+def test_stable_frame_keeps_a_part_birefnet_drops_for_one_frame_when_sam3_and_the_previous_frame_have_it(monkeypatch):
+    from backend.models import auto_roto
     from backend.models.auto_roto import stable_frame
+    monkeypatch.setattr(auto_roto, "SEL_FILL_ALWAYS", False)
     h, w = 400, 600
     body = _blob(h, w, 250, 100, 350, 350)
     wing = _blob(h, w, 350, 100, 480, 250)

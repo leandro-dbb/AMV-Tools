@@ -121,6 +121,8 @@ JUMP_FRAC = 0.25             # area change between neighbours counted as a jump
 STABLE_OPAQUE = 0.8          # BiRefNet pixels above: solid (ink, hair, props), always kept in a kept piece
 STABLE_SOLID_REACH = 2.0     # solid pixels reach this x farther (props, long strands)
 STABLE_CORE_PX = 4.0         # matte beyond this distance from SAM 3's character: "extras", sorted by size
+SEL_FILL_ALWAYS = True       # SAM 3's mask always added: BiRefNet misses whole parts of dark characters
+                             # (b2: eaten 14 -> 44 % otherwise); swollen masks are cut by persist_selector
 SEL_FILL_SEEN = 0.1          # SAM 3 adds a character BiRefNet sees less than this share of
 SEL_SPIKE = 1.6              # SAM 3 mask over this x its rolling median: swollen (aura taken for the character)
 TRACK_MIN_REL = 0.3          # a track piece away from SAM 3's characters counts if >= this x their area
@@ -1016,8 +1018,8 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
         out = _drop_big_extras(out, s, protect, core_px, extra_lo, extra_hi, prev, rgb)
     if s is not None:
         se = s.astype(np.uint8)
-        if not det_ok:
-            pass   # BiRefNet lost the character on this frame (blur): SAM 3 fills it all
+        if not det_ok or SEL_FILL_ALWAYS:
+            pass   # SAM 3 fills it all (BiRefNet lost the character on this frame: blur)
         else:
             # BiRefNet sees the characters: SAM 3 only adds one it does not
             # see at all (SAM 3 sometimes glues an aura to the character)
