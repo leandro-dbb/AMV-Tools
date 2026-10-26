@@ -678,7 +678,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
     )
     if stable_clean is not None:   # stable mode: specks cleaned after the stabilisation
         from ..models.auto_roto import clean_masks
-        stack = clean_masks(stack, stable_clean["shots"], stable_clean["held"])
+        stack = clean_masks(stack, stable_clean["shots"], stable_clean["held"], frames=frames)
     ctx.progress(0.85, "encoding alpha", force=True)
     target = unique_path(out_dir, f"{stem}_cutout", ".mov" if codec == "prores_4444_alpha" else ".webm")
     ctx.on_cancel_cleanup(lambda: (Path(target).unlink(missing_ok=True),

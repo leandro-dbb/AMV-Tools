@@ -771,7 +771,7 @@ def method_runner(name: str, args, dev):
             else:
                 m = ar.tighten(track, keep, quality="max", held=held)
             m = postprocess_stack(m.astype(np.float32), frames, stabilize=True, strength=0.25)
-            return ar.clean_masks(m, shots, held) if stable else m
+            return ar.clean_masks(m, shots, held, frames=frames) if stable else m
         return run
     if name.startswith("clean~"):
         # clean~<base>: the stable mode's last step, background specks cleaned

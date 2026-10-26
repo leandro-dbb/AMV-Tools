@@ -1098,16 +1098,27 @@ def _drop_big_extras(out: np.ndarray, s: np.ndarray, hm: Optional[np.ndarray], c
 
 
 def clean_masks(masks: np.ndarray, shots: Optional[List[tuple[int, int]]] = None,
-                held: Optional[Sequence[Optional[np.ndarray]]] = None) -> np.ndarray:
+                held: Optional[Sequence[Optional[np.ndarray]]] = None,
+                frames: Optional[Sequence] = None) -> np.ndarray:
     """:func:`clean_specks` on every frame, each decided with the previous
     frame's cleaned matte (not across a cut) — run last, after the temporal
-    stabilisation (its median leaves faint pixels of its own)."""
+    stabilisation (its median leaves faint pixels of its own). With the
+    ``frames``: the character's outer ink line is then absorbed, opaque
+    (:func:`~backend.models.edge_refine.absorb_ink`)."""
     T = len(masks)
     out = np.asarray(masks, np.float32).copy()
     starts = {a for a, _b in (shots or [(0, T)])}
     hl = list(held) if held is not None and len(held) == T else [None] * T
     for t in range(T):
         out[t] = clean_specks(out[t], None if t in starts else out[t - 1], hl[t])
+    if frames is not None and len(frames) == T:
+        import cv2
+        from .edge_refine import absorb_ink
+        for t in range(T):
+            rgb = _rgb_of(frames[t])
+            if rgb.shape[:2] != out[t].shape:
+                rgb = cv2.resize(rgb, (out[t].shape[1], out[t].shape[0]), interpolation=cv2.INTER_AREA)
+            out[t] = absorb_ink(rgb, out[t])[0]
     return out
 
 

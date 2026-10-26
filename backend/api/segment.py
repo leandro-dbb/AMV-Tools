@@ -479,7 +479,7 @@ def _postprocess(sess: SegmentSession, masks: np.ndarray, *, strength_scale: flo
     out = postprocess_stack(masks.astype(np.float32), frames, stabilize=stabilize, strength=strength)
     if clean is not None:
         from ..models.auto_roto import clean_masks
-        out = clean_masks(out, clean.get("shots"), clean.get("held"))
+        out = clean_masks(out, clean.get("shots"), clean.get("held"), frames=frames)
     return _apply_overrides(sess, out)
 
 
