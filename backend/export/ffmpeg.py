@@ -55,7 +55,10 @@ def _available_encoders() -> set[str]:
 
 
 def _has_nvenc_h264() -> bool:
-    return "h264_nvenc" in _available_encoders()
+    # The Windows ffmpeg build lists h264_nvenc on every PC: it only works
+    # with an NVIDIA GPU (GPU-less/AMD/Intel PCs got a 500 on every export).
+    from ..indexing.cuts import _nvidia_gpu_present
+    return "h264_nvenc" in _available_encoders() and _nvidia_gpu_present()
 
 
 def _has_videotoolbox_h264() -> bool:
@@ -242,13 +245,25 @@ def export_scene(
 
     cmd.extend(["-map", "0:v:0", "-map", "0:a?", "-avoid_negative_ts", "make_zero", "-y", output_path])
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, creationflags=_creation_flags())
+    # ffmpeg writes UTF-8; the Windows default (cp1252) can't decode every
+    # byte of a Japanese file name in its error output.
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          creationflags=_creation_flags())
     if proc.returncode != 0 and gpu_frames:
         # A stream NVDEC can't take (old codec, odd profile): same export
         # with a software decode.
         log.warning("NVDEC export failed for %s (%s); retrying with a software decode",
                     src_path, (proc.stderr or "").strip()[-200:])
         return export_scene(src_path, start_ms, end_ms, output_path, codec=codec, crf=crf, audio=audio,
+                            resolution=resolution, audio_bitrate_kbps=audio_bitrate_kbps,
+                            _gpu_decode=False)
+    if proc.returncode != 0 and encoder in _HW_H264_CODECS:
+        # The hardware encoder exists in the build but not on this machine
+        # (driver too old, GPU busy or missing): CPU H.264 rather than an
+        # error, the clip is what the user wants.
+        log.warning("%s export failed for %s (%s); retrying with libx264",
+                    encoder, src_path, (proc.stderr or "").strip()[-200:])
+        return export_scene(src_path, start_ms, end_ms, output_path, codec="libx264", crf=crf, audio=audio,
                             resolution=resolution, audio_bitrate_kbps=audio_bitrate_kbps,
                             _gpu_decode=False)
     if proc.returncode != 0:
