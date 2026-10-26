@@ -41,7 +41,7 @@ All notable changes to AMV Tools are documented here.
   with the ink line protected, unmixed against the nearest background, then
   foreground estimation. On the 22 shots vs the first 0.6 pipeline:
   background along the outline 10.6 -> 6.1 %, enclosed 7.8 -> 5.1 %, edge
-  colour contamination 30.9 -> 19.1 %, flicker 2.8 -> 2.5 %, J 0.920 ->
+  colour contamination 30.9 -> 19.1 % (old estimate, see below), flicker 2.8 -> 2.5 %, J 0.920 ->
   0.924, failures 1/107; simple shots: 2.7 -> 1.7 % and 3.0 -> 2.5 %.
   0.65 s per frame on an RTX 3090 (0.44 s standard), same VRAM.
   Measured and refused on the zoomed boards: a 0.4 % hug without tips (clips
@@ -49,6 +49,20 @@ All notable changes to AMV Tools are documented here.
   line), a detector ensemble (half-transparent "ghost" wings), prompt
   unions, temporal votes, SAM 3 video as selector. *Settings > Models > Max
   quality cutout*.
+- **Edge colour contamination measured against ground truth**: the old
+  estimate guessed the character colour and counted correct ink pixels as
+  background (a perfect answer scored 26 %). Key frames are now
+  recomposited with known colours and the export is measured exactly. The
+  max-quality export unmixes the edge colours against the local visible
+  background after the ink-protected colour solve: colour contamination on
+  the 22 shots 13.5 % (standard export) -> 2.6 % (median 2.7 %, worst shot
+  4.6 %). Background along the outline / enclosed stay at 6.1 % / 5.1 %
+  on average (medians 1.9 % / 0.5 %), pulled up by two night shots.
+- **Faster max quality**: SAM 3 batched with cached text features and a
+  compiled vision encoder (16 GB+ cards, kept loaded between clips), BiRefNet
+  batched, export work restricted to the outline band: 775 -> 539 ms per frame
+  for the mattes, 1.20 -> 0.70 s with the 1080p export (RTX 3090, 22 shots,
+  1 638 frames), same quality within 0.1 point.
 - Measured and rejected: SAM 3 alone (image or video: stair-step edges that
   drop the ink line, losses in the dark), the deepghs anime person detector,
   BiRefNet HR (2048), ViTMatte on the outline band, colour-solved alpha over a

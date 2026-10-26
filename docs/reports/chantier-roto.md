@@ -1,7 +1,166 @@
 # Chantier roto : rendre le détourage (Mask Mode) utilisable sur de vrais épisodes
 
-Ce rapport a trois parties, la plus récente en tête : **partie 3 (qualité max)**, partie 2 (SAM 3 et
-fond dans les cheveux), partie 1 (chantier roto, 0.5, le banc).
+Ce rapport a quatre parties, la plus récente en tête : **partie 4 (objectifs 5 % et 1 s, audit de la
+métrique de contamination)**, partie 3 (qualité max), partie 2 (SAM 3 et fond dans les cheveux),
+partie 1 (chantier roto, 0.5, le banc).
+
+# Partie 4 — Objectifs chiffrés : ≤ 5 % de fond et de contamination, < 1 s par image
+
+Date : 26 octobre 2026, 2 h – 7 h. Objectifs fixés : fond le long du contour ≤ 5 %, fond enfermé
+≤ 5 %, contamination couleur ≤ 5 % (moyenne des 22 plans, sans plan aberrant), puis moins d'une
+seconde par image sur la RTX 3090 sans perdre plus de 0,3 point.
+
+## 1. Audit de la métrique de contamination
+
+**Ce qu'elle mesurait** (parties 2 et 3) : pour chaque pixel semi-transparent près du contour, la
+couleur exportée C est projetée sur l'axe F → B, où B est la couleur moyenne du fond de référence
+autour et **F est deviné** : la couleur du pixel de référence le plus proche situé 3 px ou plus à
+l'intérieur du contour.
+
+**Le défaut, prouvé de trois façons :**
+
+1. **Décomposition** des 19,0 % de la qualité max (104 images clés) : **52,7 %** de la contamination
+   comptée vient de pixels exportés *plus sombres que F et que B* — du trait d'encre. Un pixel de bord
+   correctement exporté en noir d'encre, sur un fond plus sombre que les cheveux, se projette vers le
+   fond : il est compté comme « couleur du fond » alors qu'il est juste.
+2. **Plancher sur une réponse parfaite** : chaque image clé est recomposée avec des couleurs connues
+   (personnage tel qu'il est dans la référence, prolongé vers l'extérieur par la couleur de son pixel
+   le plus proche ; fond réel de l'image ; alpha connu, la référence adoucie sur ~2 px). Exporter
+   exactement les vraies couleurs donne une contamination vraie de 0 — l'ancienne mesure y affiche
+   **25,9 %** (médiane 24,4 %), et une variante qui ajoute l'encre comme couleur candidate encore
+   12,2 %. Pire : l'export qualité max y obtient un *meilleur* score (8,4 %) que la réponse parfaite,
+   la mesure récompensait la sur-correction.
+3. Conséquence : les 19 % de la partie 3 ne mesuraient pas la couleur de fond restante.
+
+**Nouvelle mesure (à vérité connue)** : l'export du pipeline est appliqué au composite de chaque
+image clé ; on connaît la vraie couleur F et le vrai fond B de chaque pixel, la part de fond de la
+couleur exportée est exacte (0 pour une réponse parfaite) ; on mesure aussi l'erreur de couleur
+|C − F| pour attraper une sur-correction. Deux variantes :
+
+- **contamination couleur** (l'export reçoit l'alpha vrai) : ce que l'étape de couleur laisse de fond ;
+- contamination avec l'alpha du pipeline (calculé sur la vraie image) : y ajoute les erreurs de
+  *position* de l'alpha. Celle-ci a un plancher de mesure prouvé : avec un alpha **parfait décalé de
+  1 px vers l'extérieur**, l'export retenu passe de 2,5 % à **20,2 %** (38,9 % à 2 px) ; or la
+  référence n'est juste qu'à ~2 px (partie 2, §1). Elle est donnée à titre indicatif, pas comme
+  objectif.
+
+L'ancienne mesure reste dans les tableaux (« contam. ancienne ») pour la comparaison.
+
+## 2. Phase 1 — résultats (22 plans, 104 à 107 images clés)
+
+Moyenne / médiane / pire plan. « contam. couleur » = nouvelle mesure, alpha exact (§1) ; « contam.
+alpha pipeline » = même mesure avec l'alpha du pipeline (plancher de mesure ≈ 20 % pour 1 px
+d'écart) ; « contam. ancienne » = l'estimation des parties 2-3, gardée pour comparaison.
+
+| méthode | J | échecs | scint. % | fond contour % | fond intérieur % | mangé % | contam. couleur % | contam. alpha pipeline % | contam. ancienne % |
+|---|---|---|---|---|---|---|---|---|---|
+| Auto 0.5 (export 0.5) | 0,853 | 7/107 | 4,2 | 18,6 / 14,2 / 48,2 (b6) | 24,8 / 17,1 / 79,6 (s09) | 10,6 | 13,0 / 14,4 / 22,3 | 26,6 | 28,4 |
+| filtre SAM 3 (0.6 standard) | 0,920 | 1/107 | 2,8 | 10,6 / 8,1 / 44,5 (b6) | 7,8 / 2,8 / 26,5 (b6) | 7,6 | 13,5 / 13,8 / 26,1 | 33,2 | 30,9 |
+| qualité max, sans décontamination | 0,924 | 1/107 | 2,5 | 6,7 / 2,2 / 38,3 (b6) | 5,3 / 0,7 / 25,0 (s18) | 8,0 | 32,3 / 32,4 / 33,1 | 38,9 | 37,4 |
+| qualité max, export standard (estimation du premier plan) | 0,924 | 1/107 | 2,5 | 6,7 / 2,2 / 38,3 | 5,3 / 0,7 / 25,0 | 8,0 | 13,5 / 13,8 / 26,1 | 32,2 | 27,4 |
+| qualité max, export de la partie 3 | 0,924 | 1/107 | 2,5 | 6,1 / 1,9 / 36,0 (b6) | 5,1 / 0,5 / 25,0 (s18) | 8,4 | 4,7 / 4,6 / 9,3 (b5) | 20,0 | 19,1 |
+| **qualité max, export démélangé (partie 4)** | **0,924** | **1/107** | **2,5** | **6,1 / 1,9 / 36,0 (b6)** | **5,1 / 0,5 / 25,0 (s18)** | 8,4 | **2,6 / 2,7 / 4,6 (s20)** | 22,2 | 22,3 |
+
+**Export de la partie 4** : après la résolution de l'alpha par la couleur (encre protégée), la couleur
+de chaque pixel semi-transparent est **démélangée contre le fond visible autour** (moyenne des
+pixels de fond à moins de 5 px ; le plus proche au-delà) : F = (C − (1 − α) B) / α, jusqu'à α = 0,05,
+avec la couleur opaque voisine en dessous. Vérifié sur les zooms fond noir et blanc (b1, s06, s01,
+s13) : même rendu que l'export de la partie 3, aucun trait mangé ni pointillé. Variantes mesurées :
+démélange sans résolution de l'alpha (2,5 → 4,9 %), seuils α 0,10-0,40 (2,9 %), 0,15-0,50 (4,1 %).
+
+**Objectifs de la phase 1 :**
+
+- **contamination couleur ≤ 5 % : atteint** — 2,6 % en moyenne, 2,7 % en médiane, **4,6 % au pire
+  plan** (aucun plan au-dessus de 5 %) ;
+- **fond le long du contour ≤ 5 % : non atteint en moyenne (6,1 %)**, atteint en médiane (1,9 %) ;
+- **fond enfermé ≤ 5 % : non atteint de justesse en moyenne (5,1 %)**, médiane 0,5 %.
+
+Les moyennes sont tirées par les plans de nuit, d'action floue et d'effets (10 plans sur 22 au-dessus
+de 5 % de fond contour, 7 au-dessus de 5 % de fond enfermé, liste au §4), avec deux extrêmes :
+**b6** (fond contour 36 % : cheveux presque noirs sur fond presque noir — le détecteur, SAM 3 et la
+couleur ne séparent pas les deux, et la référence y est elle-même incertaine de plusieurs pixels,
+partie 1 §2) et **s18** (fond enfermé 25 % : couloir de nuit). Aucune des variantes essayées en
+partie 3 (rayons, seuils, prompts, votes, ensembles) ne les fait baisser sans manger le personnage
+ailleurs.
+
+## 3. Phase 2 — moins d'une seconde par image
+
+**Mesure** : le pipeline qualité max tel que l'application l'enchaîne (BiRefNet → SAM 3 zoomé →
+suivi SAM 2.1 tiny → contour serré → stabilisation temporelle), sur **les 22 plans, toutes les
+images sorties** (chaque image a son masque, aucune n'est sautée), plus l'export « max » à la
+résolution source (1920 × 1080, mêmes threads que l'application, mesuré sur 24 images par plan et
+ramené à toutes les images). Ancien et nouveau code ont tourné l'un après l'autre, jamais en même
+temps, et la VRAM des autres processus a été relevée au début et à la fin de chaque mesure (une autre
+session partage la carte). Temps en ms par image, sur toutes les images des 22 plans :
+
+| étape | ancien code (partie 3) | **nouveau code** |
+|---|---|---|
+| BiRefNet | 135 | 107 |
+| SAM 3, deux passes (image entière + zoom par personnage) | 433 | 276 (dont ≈ 43 de compilation, 71 s une fois, amortie sur les 1 638 images) |
+| suivi SAM 2.1 tiny | 130 | 94 |
+| contour serré + fragments | 21 | 16 |
+| stabilisation temporelle | 55 | 45 |
+| **pipeline (masques de toutes les images)** | **775** | **539** |
+| export « max » 1920 × 1080 (CPU) | 426 | 166 |
+| **total, export compris** | **1 201** | **705** |
+| pic de VRAM du processus (les trois modèles chargés ensemble) | 3,8 Go | 7,2 Go |
+
+Conditions : 22 plans, 1 638 images ; aucune autre application sur la carte au début ni à la fin des
+deux mesures (l'autre session était arrêtée à ce moment-là ; pendant les essais précédents elle
+occupait 0,8 à 5 Go et les temps variaient de 20 à 60 %). Le suivi et la stabilisation, dont le code
+n'a pas changé, sont 20 à 30 % plus rapides dans la seconde mesure : c'est l'ordre de grandeur du
+bruit de mesure de cette machine (charge CPU de l'hôte), à garder en tête pour ces deux lignes. Les
+gains de SAM 3 (× 1,6) et de l'export (× 2,6) sont nettement au-dessus. Dans l'application, sur les
+cartes de 16 Go et plus, la compilation de SAM 3 (~1 min) n'est payée qu'au premier clip de la
+session ; sur 8 et 12 Go il n'y a pas de compilation et les lots sont de 2 (non mesuré sur ces
+cartes).
+
+**Ce qui a fait gagner** :
+
+- SAM 3 : texte encodé une fois par prompt au lieu de chaque image, images et recadrages du zoom
+  traités par lots (8 sur les cartes de 12 Go et plus), encodeur d'image compilé (`torch.compile`,
+  lots toujours pleins pour une seule compilation ; ≈ 1 min une fois par chargement, le modèle reste
+  chargé entre les clips sur les cartes de 16 Go et plus ; retour automatique au mode normal en cas
+  d'erreur). Masques identiques (IoU ≥ 0,993 contre la version image par image).
+- BiRefNet : 4 images par passage.
+- Export : la résolution de l'alpha par la couleur ne travaille que sur le cadre de la bande de
+  contour (alpha identique au pixel près), le démélange uniquement sur les pixels semi-transparents,
+  jusqu'à 5 threads.
+- **Refusé** : ne zoomer que les recadrages de moins des deux tiers de l'image (SAM 3 deux fois plus
+  rapide encore) — le gros plan sombre s19 perdait la passe zoomée et son fond enfermé passait de
+  2,9 à 14,5 % (moyenne 5,1 → 5,7 %, au-delà des 0,3 point tolérés).
+
+**Qualité inchangée** (même banc, même mesure, moyenne / médiane / pire plan) :
+
+| | J | F | échecs | scint. % | fond contour % | fond intérieur % | mangé % | contam. couleur % |
+|---|---|---|---|---|---|---|---|---|
+| avant optimisation | 0,924 | 0,863 | 1/107 | 2,5 | 6,1 / 1,9 / 36,0 | 5,1 / 0,5 / 25,0 | 8,4 | 2,6 / 2,7 / 4,6 |
+| **après optimisation** | **0,924** | **0,862** | **1/107** | **2,6** | **6,1 / 1,9 / 35,8** | **5,1 / 0,5 / 25,0** | **8,4** | **2,7 / 2,7 / 4,6** |
+
+Écart maximal 0,1 point.
+
+## 4. Bilan des objectifs
+
+| objectif | atteint ? | chiffre | pourquoi, si non |
+|---|---|---|---|
+| contamination couleur ≤ 5 % | **oui** | 2,7 % (médiane 2,7 %, pire plan 4,6 %) | — |
+| fond le long du contour ≤ 5 % | **non** | 6,1 % (médiane 1,9 %) ; au-dessus de 5 % sur 10 plans : b6 35,8, s20 12,3, s18 11,6, s09 10,7, s17 10,0, b4 9,8, b2 9,4, s11 7,6, s19 7,1, L1 6,1 | les plans calmes, de dialogue et de cheveux sont sous 5 % (sauf le plan long, 6,1) ; au-dessus : nuit (b6, s18, b4 : cheveux ou vêtements sombres sur fond sombre, que ni BiRefNet, ni SAM 3, ni la couleur ne séparent, et où la référence est incertaine de plusieurs pixels), action floue et effets (flou de mouvement, éclairs, particules mêlés au contour), le tracteur (s20) |
+| fond enfermé ≤ 5 % | **non, de justesse** | 5,1 % (médiane 0,5 %) ; au-dessus de 5 % sur 7 plans : s18 25,0, L1 20,0, b6 13,4, s11 12,8, s20 10,5, b2 9,9, s09 9,7 | nuit (s18, b6), rayon et éclairs (s11, s09), particules (b2), tracteur (s20) ; sur le plan long, la référence marque les mains jointes de Goku comme « fond » (§ partie 3) |
+| contamination couleur, aucun plan > 5 % | **oui** | pire plan 4,6 % (s20) | — |
+| < 1 s par image sur RTX 3090 | **oui** | 539 ms (masques), 705 ms export 1080p compris | — |
+| qualité à ± 0,3 point | **oui** | écart max 0,1 point | — |
+
+Planches de la partie 4 (sur la machine de mesure, `reports/roto/roto4/`) : `black/` et `white/`,
+zooms ×4 sur le contour le plus découpé de 3 images clés par plan — export de la partie 3 contre
+export final démélangé, sur fond noir et sur fond blanc.
+
+Ce qui n'a pas été fait faute de temps : matting appris sur la bande de contour (ViTMatte, BiRefNet
+HR-matting, MatAnyone 2) combiné à l'encre protégée — inutile pour la contamination couleur une fois
+le démélange en place (2,7 %), mais pas essayé contre le fond des plans de nuit ; plaque de fond
+temporelle (décor reconstruit sur la durée du plan) ; TensorRT.
+
+
+
 
 # Partie 3 — Qualité max : le moins de fond possible, sans contrainte de temps
 
