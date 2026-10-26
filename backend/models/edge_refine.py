@@ -280,6 +280,8 @@ MAX_UNMIX_SOLID = 0.30   # full unmix from this alpha up
 INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diagonal (6 px at 1080p, 3 px at 608p)
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
+INK_REACH_FRAC = 0.03    # outline followed this far from the matte (a hair spike to its tip; 66 px at 1080p)
+INK_FILL_MAX_REL = 0.03  # what matte + outline enclose is filled up to this share of the matte's area
 
 
 def _ink_context(rgb: np.ndarray, alpha: np.ndarray, band: int):
@@ -300,62 +302,107 @@ def _ink_context(rgb: np.ndarray, alpha: np.ndarray, band: int):
     return lum, np.where(has_bg, lb, 0.0), lf, solid, d_out, d_in
 
 
-def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_FRAC) -> tuple[np.ndarray, np.ndarray]:
-    """Matte grown outwards over the character's outer ink line.
+def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_FRAC,
+               reach_frac: float = INK_REACH_FRAC, fill_max_rel: float = INK_FILL_MAX_REL) -> tuple[np.ndarray, np.ndarray]:
+    """Matte completed along the character's outer ink line, at the
+    resolution of ``rgb``.
 
-    Mattes (BiRefNet, SAM 3) often stop at the boundary between the fill
-    colour and the outline, or halfway through the outline: composited, the
-    character loses its black contour. Here every dark pixel (luma at least
-    :data:`INK_DARK` under the local background and under
-    :data:`INK_MAX_LUMA`) connected to the solid matte through dark pixels,
-    within ``band_frac`` of the diagonal outside it, is made opaque, the
-    dark pixels already in the matte's edge too — a piece is taken only if
-    the lighter background lies right beyond it (an outline), not more dark
-    texture (foliage, mortar between stones); the 1-2 px antialiasing
-    ring beyond the ink gets the alpha its luma implies (between the ink and
-    the background). Where the background is as dark as the ink (night)
-    nothing is changed. Returns (alpha, ink mask made opaque)."""
+    Mattes (BiRefNet, SAM 3) stop at the boundary between the fill colour
+    and the outline, halfway through it, or short of a hair spike: composited,
+    the character loses its black contour and its tips. Here:
+
+    1. the dark pixels (luma at least :data:`INK_DARK` under the local
+       background and under :data:`INK_MAX_LUMA`) connected to the solid
+       matte through dark pixels, up to ``reach_frac`` of the diagonal
+       outside it, are the outline (a spike's two sides, followed to its
+       tip); dark pixels next to dark pixels beyond that reach are scenery
+       texture (foliage, mortar) and stay out;
+    2. what the matte and that outline enclose (a spike's fill, a gap of the
+       matte inside the contour) is filled when it is small (under
+       ``fill_max_rel`` of the matte's area) and does not have the luma of
+       the background around;
+    3. far outline pieces that close nothing are dropped; the outline kept
+       (and the dark pixels of the matte's edge) is opaque;
+    4. just beyond the outline, the alpha is the coverage the luma implies
+       (between the ink and the background: the drawing's own
+       antialiasing), and light background pixels there go to 0 — no
+       staircase, no fringe of background.
+
+    Where the background is as dark as the ink (night) nothing changes.
+    Returns (alpha, outline pixels made opaque)."""
     import cv2
     a = np.clip(alpha.astype(np.float32), 0.0, 1.0)
     h, w = a.shape
-    band = max(2, int(round(band_frac * float(np.hypot(h, w)))))
+    diag = float(np.hypot(h, w))
+    band = max(2, int(round(band_frac * diag)))
+    reach = max(band + 2, int(round(reach_frac * diag)))
     if not (a > 0.5).any():
         return a, np.zeros_like(a, dtype=bool)
     lum, lb, _lf, solid, d_out, d_in = _ink_context(rgb, a, band)
-    dark = (lum < lb - INK_DARK) & (lum < INK_MAX_LUMA)
-    near = (d_out <= band) | ((d_in <= band) & solid)
-    cand = dark & near
-    region = solid.copy()
-    k3 = np.ones((3, 3), np.uint8)
-    for _ in range(band + 1):
-        grown = (cv2.dilate(region.astype(np.uint8), k3) > 0) & (cand | region)
-        if (grown == region).all():
-            break
-        region = grown
-    ink = region & cand & ~solid
+    has_bg = lb > 0
+    dark = (lum < lb - INK_DARK) & (lum < INK_MAX_LUMA) & has_bg
+    # 1. outline: dark pixels connected to the solid matte, within reach
+    cand = dark & (d_out <= reach) & ~solid
+    far_dark = dark & (d_out > reach)
+    if far_dark.any():
+        cand &= ~(cv2.dilate(far_dark.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+    edge_ink = dark & solid & (d_in <= band)
+    ink = np.zeros_like(solid)
+    if cand.any():
+        seed = cv2.dilate(solid.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        n, lab = cv2.connectedComponents(cand.astype(np.uint8), connectivity=8)
+        touch = np.zeros(n, bool)
+        touch[np.unique(lab[seed & cand])] = True
+        touch[0] = False
+        ink = touch[lab]
+    # 2. what matte + outline enclose
+    U = solid | ink
+    filled = np.zeros_like(solid)
     if ink.any():
-        # an outline has the lighter background right beyond it; dark
-        # scenery texture (foliage, mortar) touching the matte goes on being
-        # dark farther out: absorbed pixels next to dark pixels beyond the
-        # band are left out
-        far_dark = dark & (d_out > band + 1.5)
-        if far_dark.any():
-            r = 1
-            near_far = cv2.dilate(far_dark.astype(np.uint8),
-                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
-            ink &= ~near_far
-    ink |= cand & solid & region
+        inv = (~U).astype(np.uint8)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(inv, connectivity=4)
+        border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])).tolist())
+        ns = float(solid.sum())
+        sums = np.bincount(lab.ravel(), weights=np.abs(lum - lb).ravel(), minlength=n)
+        for i in range(1, n):
+            if i in border or st[i, 4] > fill_max_rel * ns:
+                continue
+            if sums[i] / max(1, st[i, 4]) < INK_DARK * 0.5:
+                continue   # the background's own luma: a real gap, not the character
+            filled |= lab == i
+    # 3. far outline pieces that close nothing go
+    if ink.any():
+        near_ink = ink & (d_out <= band)
+        closing = cv2.dilate(filled.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        n, lab = cv2.connectedComponents(ink.astype(np.uint8), connectivity=8)
+        ok = np.zeros(n, bool)
+        ok[np.unique(lab[near_ink | (closing & ink)])] = True
+        ok[0] = False
+        ink = ok[lab] | near_ink
+    inside = solid | ink | filled
     out = a.copy()
-    out[ink] = 1.0
-    if ink.any():
-        # antialiasing ring just beyond the absorbed ink: coverage from luma
-        ring = (cv2.dilate(ink.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & ~ink & (out < 0.99) & ~solid & ~dark
+    out[ink | filled | edge_ink] = 1.0
+    keep = ink | edge_ink
+    if keep.any():
+        # 4. the drawing's antialiasing just beyond the outline; no fringe
+        k = 2 * band + 1
+        ring = (cv2.dilate(keep.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 0) \
+            & ~inside & ~dark
         if ring.any():
-            ink_l = cv2.erode(np.where(ink, lum, 1.0).astype(np.float32), np.ones((5, 5), np.uint8))
+            ink_l = cv2.erode(np.where(keep, lum, 1.0).astype(np.float32), np.ones((5, 5), np.uint8))
             cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)
-            cov = np.where(lum < lb - 0.03, cov, 0.0)
-            out[ring] = np.maximum(out[ring], cov[ring])
-    return out.astype(np.float32), ink
+            # background-luma pixels: the fringe of background, out; darker
+            # ones: the drawing's antialiasing (never lowered)
+            out[ring] = np.where(lum[ring] >= lb[ring] - 0.03, 0.0, np.maximum(out[ring], cov[ring]))
+        # nothing new may stand detached from the character
+        n, lab = cv2.connectedComponents((out > 0.5).astype(np.uint8), connectivity=8)
+        if n > 2:
+            ok = np.zeros(n, bool)
+            ok[np.unique(lab[(a > 0.5) | ink | filled])] = True
+            ok[0] = False
+            stray = (lab > 0) & ~ok[lab]
+            out[stray] = np.minimum(out[stray], a[stray])
+    return out.astype(np.float32), (ink | edge_ink | filled)
 
 
 def outline_ink(rgb: np.ndarray, ref: np.ndarray, band_px: int = 4) -> np.ndarray:
@@ -389,8 +436,16 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
     # never made transparent or recoloured afterwards
     a, ink = absorb_ink(rgb, a)
     if mode == "max":
-        a = colour_solve_safe(rgb, a, band_frac=MAX_EDGE_OUT, in_frac=MAX_EDGE_IN)
-        a[ink] = 1.0
+        # the colour re-solve (glows, halos) never acts inside or right on the
+        # inked contour: a yellow hair tip next to a yellow aura is character
+        import cv2
+        a_cs = colour_solve_safe(rgb, a, band_frac=MAX_EDGE_OUT, in_frac=MAX_EDGE_IN)
+        if ink.any():
+            near = cv2.dilate(ink.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+            protect = ink | ((a >= 0.98) & near)
+            a = np.where(protect, a, a_cs).astype(np.float32)
+        else:
+            a = a_cs
         return unmix_with_background(rgb, a, faint=MAX_UNMIX_FAINT, solid=MAX_UNMIX_SOLID), a
     return estimate_foreground(rgb, a), a
 

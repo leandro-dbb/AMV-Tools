@@ -132,6 +132,9 @@ EXTRA_LO = 0.02              # extras under this x the characters' area stay (st
 EXTRA_HI = 0.15              # ... over it go (aura flares, fused scenery)
 EXTRA_BG_SHARE = 0.35        # ... in between, they go when this share of their pixels has the background's colours
 EXTRA_BG_DIST = 0.12         # colour distance (0..1 RGB) to the background palette counted as "background colour"
+ABSORB_AT_WORK_RES = False   # the ink line is absorbed at export, at full resolution (a 608p one, scaled
+                             # up, made staircase edges)
+TIP_KEEP_PX = 10.0           # solid pixels of a dropped extra this close to SAM 3 stay (hair tips)
 STABLE_SOFT_PX = 3.0         # semi-transparent pixels kept within this of a solid one / SAM 3 (px)
 SPECK_LO = 0.0002            # detached islands under this share of the frame: background specks
 SPECK_HI = 0.001             # ... above: kept; in between: as on the previous frame
@@ -1101,6 +1104,16 @@ def _drop_big_extras(out: np.ndarray, s: np.ndarray, hm: Optional[np.ndarray], c
         return out
     gone = cv2.dilate(drop[lab].astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
     gone &= d_s > core_px
+    # the hair tips SAM 3 under-segments are solid and close to it; the glow
+    # or the scenery fused with them is softer or farther: solid pixels
+    # within TIP_KEEP_PX of SAM 3's character, connected to it, stay
+    tip_zone = (out > STABLE_OPAQUE) & (d_s <= TIP_KEEP_PX)
+    if (gone & tip_zone).any():
+        n_t, lab_t = cv2.connectedComponents(((d_s <= core_px) | tip_zone).astype(np.uint8), connectivity=8)
+        ok = np.zeros(n_t, bool)
+        ok[np.unique(lab_t[d_s <= core_px])] = True
+        ok[0] = False
+        gone &= ~(ok[lab_t] & tip_zone)
     o = out.copy()
     o[gone] = 0.0
     return o
@@ -1112,13 +1125,14 @@ def clean_masks(masks: np.ndarray, shots: Optional[List[tuple[int, int]]] = None
     """:func:`clean_specks` on every frame, each decided with the previous
     frame's cleaned matte (not across a cut) — run last, after the temporal
     stabilisation (its median leaves faint pixels of its own). With the
-    ``frames``: the character's outer ink line is absorbed first, opaque
-    (:func:`~backend.models.edge_refine.absorb_ink`)."""
+    ``frames`` and :data:`ABSORB_AT_WORK_RES`: the character's outer ink
+    line is absorbed first (:func:`~backend.models.edge_refine.absorb_ink`;
+    by default this is done at export, at full resolution)."""
     T = len(masks)
     out = np.asarray(masks, np.float32).copy()
     starts = {a for a, _b in (shots or [(0, T)])}
     hl = list(held) if held is not None and len(held) == T else [None] * T
-    if frames is not None and len(frames) == T:
+    if frames is not None and len(frames) == T and ABSORB_AT_WORK_RES:
         import cv2
         from .edge_refine import absorb_ink
         for t in range(T):
