@@ -348,12 +348,14 @@ INK_BAND_FRAC = 0.0028   # outer ink line absorbed within this share of the diag
 INK_DARK = 0.15          # ink: at least this much darker (luma 0..1) than the local background ...
 INK_MAX_LUMA = 0.55      # ... and darker than this
 INK_MAX_HALF_FRAC = 0.0014  # ink line half-width at most this share of the diagonal (3 px at 1080p)
-SOFT_INK_GAIN = 3.0         # "soft" export: gain on the smoothed ink coverage (a thin line still reaches opaque)
-SOFT_INK_SIGMA = 2.0        # "soft" export: smoothing of the added ink coverage (px)
+SOFT_INK_GAIN = 2.5         # "soft" export: gain on the smoothed ink coverage (a thin line still reaches opaque)
+SOFT_INK_SIGMA = 1.4        # "soft" export: smoothing of the added ink coverage (px)
 SOFT_LF_MARGIN = 0.04      # "soft": an ink pixel no lighter than the bordering fill plus this
 SOFT_CORE_PX = 5.0          # "soft": dark edge pixels raised within this of the solid character (px)
 SOFT_EDGE_DARK = 0.10       # ... when this much darker than the local background
 SOFT_INK_MIN_ALPHA = 0.03   # "soft" export: ink absorbed only where the matte already has this much alpha
+SOFT_BLACK_LUMA = 0.10      # "soft": black this dark ...
+SOFT_BLACK_BG_FRAC = 0.002  # ... connected to this share of the frame left transparent is background
 SOFT_THICK_REACH = 1.0      # "soft": no ink within this many half-line widths of a dark area thicker than a line
 INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
 INK_FILL_MAX_REL = 0.0   # what matte + outline enclose filled up to this share of the matte (0: off — it filled
@@ -527,10 +529,25 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
             near_core = cv2.distanceTransform(1 - core, cv2.DIST_L2, 3) <= SOFT_CORE_PX
             zone |= (lum < lb - SOFT_EDGE_DARK) & (a >= 0.5) & (d_in <= band) & near_core
         zone &= (lum < lb - 0.05) & ~thick_near
+        # black reaching in from a large black background the matte left out
+        # (between aura flames) is that background, not an ink line
+        blk = (lum < SOFT_BLACK_LUMA).astype(np.uint8)
+        bg_black = np.zeros_like(zone)
+        if blk.any():
+            n, lab = cv2.connectedComponents(blk, connectivity=8)
+            bg_cnt = np.bincount(lab.ravel(), weights=(a < 0.5).ravel().astype(np.float64), minlength=n)
+            big = bg_cnt > SOFT_BLACK_BG_FRAC * a.size
+            big[0] = False
+            bg_black = cv2.dilate(big[lab].astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+            zone &= ~bg_black
         ink_l = cv2.erode(np.where(keep, lum, 1.0).astype(np.float32), np.ones((7, 7), np.uint8))
         cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)
         add = cv2.GaussianBlur(np.where(zone, cov, 0.0).astype(np.float32), (0, 0), SOFT_INK_SIGMA)
-        out = np.maximum(a, np.clip(add * SOFT_INK_GAIN, 0, 1)).astype(np.float32)
+        # the smoothing fills the gaps along the line, it does not spread the
+        # line outward onto the background (a fringe)
+        near = cv2.dilate(zone.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        add = np.where(near & ~bg_black, np.clip(add * SOFT_INK_GAIN, 0, 1), 0.0)
+        out = np.maximum(a, add).astype(np.float32)
     return out.astype(np.float32), (ink | edge_ink | filled)
 
 
