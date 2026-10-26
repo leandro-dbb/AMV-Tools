@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
+    "@playwright/test": "^1.49.1",
     "@tailwindcss/vite": "4.1.12",
     "@types/node": "22.10.5",
     "@types/react": "18.3.18",
@@ -74,7 +75,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "../assets/logo/amv-tools-logo.ico",
@@ -89,11 +92,15 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "icon": "../assets/logo/amv-tools-logo.icns",
@@ -113,11 +120,15 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "../assets/logo/amv-tools-logo.png",
