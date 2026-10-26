@@ -454,6 +454,15 @@ def _segments(y: np.ndarray, sr: int) -> dict:
         _label(segs, bars)
         segs = _merge_same(segs)
         segs = _split_build(segs, bars)
+        # A near-silent tail is not a section: it ends the outro.
+        if len(segs) > 1:
+            a, b = segs[-1]["bar_start"], segs[-1]["bar_end"]
+            if float(np.mean(bars["intensity"][a:b])) < 0.06:
+                tail = segs.pop()
+                segs[-1] = dict(segs[-1], bar_end=tail["bar_end"])
+                last = segs[-1]
+                if last["type"] in ("verse", "bridge") and tail["bar_start"] - last["bar_start"] <= 8:
+                    last["type"] = "outro"
         _label_energy = bars["intensity"]
         for s in segs:
             a, b = s["bar_start"], s["bar_end"]
