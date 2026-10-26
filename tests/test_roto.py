@@ -904,3 +904,15 @@ def test_absorb_ink_makes_no_specks_out_of_dark_scenery_next_to_the_outline():
     rgb[40:80, 145:175] = (25, 45, 25)                  # dark foliage 2 px away from the outline
     a, _ink = absorb_ink(rgb, matte)
     assert specks(a)[0] == 0 and a[60, 146] < 0.5
+
+
+def test_stable_frame_keeps_a_part_birefnet_drops_for_one_frame_when_sam3_and_the_previous_frame_have_it():
+    from backend.models.auto_roto import stable_frame
+    h, w = 400, 600
+    body = _blob(h, w, 250, 100, 350, 350)
+    wing = _blob(h, w, 350, 100, 480, 250)
+    sam3 = np.maximum(body, wing)                       # SAM 3 sees body + wing
+    prev = np.maximum(body, wing)                       # the previous frame had the wing
+    out = stable_frame(body, sam3, prev=prev)           # BiRefNet dropped the wing on this frame
+    assert out[150, 420] == 1.0
+    assert stable_frame(body, sam3)[150, 420] == 0.0    # no previous frame having it: not added (aura case)
