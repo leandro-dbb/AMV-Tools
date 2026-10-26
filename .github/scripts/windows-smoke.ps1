@@ -307,9 +307,10 @@ print("OK")
   $env:HF_HUB_OFFLINE = '0'
   $env:HF_HOME = Join-Path $ArtDir 'hf-offline'
   $env:AMV_DATA_DIR = Join-Path $ArtDir 'offline-data'
+  $env:PYTHONPATH = $resources   # the script lives elsewhere: sys.path[0] is not the cwd
   & $venvPy -X utf8 $check 2>&1 | Tee-Object -FilePath (Join-Path $ArtDir 'degradation-check.log')
   $rc = $LASTEXITCODE
-  foreach ($v in 'HF_ENDPOINT', 'HF_HUB_OFFLINE', 'HF_HOME', 'AMV_DATA_DIR') { Remove-Item "Env:$v" }
+  foreach ($v in 'HF_ENDPOINT', 'HF_HUB_OFFLINE', 'HF_HOME', 'AMV_DATA_DIR', 'PYTHONPATH') { Remove-Item "Env:$v" }
   Pop-Location
   if ($rc -ne 0) { throw "Degradation check failed (exit $rc)" }
 
