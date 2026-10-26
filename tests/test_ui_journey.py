@@ -104,3 +104,9 @@ def test_settings_refuse_a_read_only_export_folder(client, state, tmp_path):
         assert client.put("/api/settings", json={"export": {"output_folder": str(ok), "crf": 20}}).status_code == 200
     finally:
         os.chmod(locked, 0o700)
+
+
+def test_cpu_chosen_on_purpose_is_not_labelled_a_fallback():
+    from backend.models.device import detect_device
+
+    assert detect_device("cpu").name == "CPU"

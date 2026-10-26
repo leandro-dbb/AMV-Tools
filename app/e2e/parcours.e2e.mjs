@@ -80,7 +80,10 @@ test('2. bibliothèque : ajout d’un dossier piège, indexation suivie jusqu’
 
 test('3. recherche : texte FR / EN, aperçu au survol, filtres, plans similaires', async () => {
   const { win } = ctx;
-  await win.getByRole('button', { name: 'Recherche', exact: true }).click();
+  await win.getByRole('button', { name: 'Recherche', exact: true }).first().click();
+  // Regression: an indexed library used to greet with "index a folder first".
+  await expect(win.getByTestId('search-ready')).toBeVisible();
+  await expect(win.getByText("Indexez un dossier d'animes pour commencer la recherche.")).toHaveCount(0);
   const box = win.getByPlaceholder(/./).first();
   // Synthetic test patterns match no anime prompt well: search the whole
   // library (threshold 0) so the UI path is what gets tested.
@@ -120,7 +123,7 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   expect(fs.readdirSync(exportDir).some((f) => /\.(mp4|mov|mkv)$/.test(f))).toBe(true);
 
   // Derush: keep two scenes of the first episode, they land in the basket.
-  await win.getByRole('button', { name: 'Dérushage', exact: true }).click();
+  await win.getByRole('button', { name: 'Dérushage', exact: true }).first().click();
   await win.getByText(media.files[0].replace(/\.[^.]+$/, ''), { exact: false }).first().click();
   const keep = win.getByRole('button', { name: /Garder la scène/ });
   await expect(keep).toBeVisible({ timeout: 60_000 });
@@ -149,13 +152,41 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   }
 });
 
+test('6. paramètres : dossier d’export refusé, langue FR ⇄ EN', async () => {
+  const { win, app } = ctx;
+  const locked = path.join(makeTempDir('amv-e2e-ro-'), 'Lecture seule');
+  fs.mkdirSync(locked);
+  fs.chmodSync(locked, 0o500);
+  try {
+    await stubDialogs(app, { open: [locked] });
+    await win.getByRole('button', { name: 'Paramètres', exact: true }).first().click();
+    await win.locator('div.w-64').getByRole('button', { name: 'Export' }).click();
+    await win.getByRole('button', { name: /Exports AMV été/ }).click();
+    const alert = win.getByRole('alert');
+    // Refused in plain words, visible without scrolling back up, old value kept.
+    await expect(alert).toContainText('ne peut pas écrire');
+    await expect(alert).toBeInViewport();
+    await expect(win.getByRole('button', { name: /Exports AMV été/ })).toBeVisible();
+    await capture(win, 'e2e-06-dossier-refuse');
+  } finally {
+    fs.chmodSync(locked, 0o700);
+    await stubDialogs(app, { open: [media.dir] });
+  }
+  await win.locator('div.w-64').getByRole('button', { name: 'Interface' }).click();
+  await win.locator('select').filter({ hasText: 'Français' }).first().selectOption('en');
+  await expect(win.getByRole('button', { name: 'Library', exact: true }).first()).toBeVisible();
+  await capture(win, 'e2e-06-anglais');
+  await win.locator('select').filter({ hasText: 'Français' }).first().selectOption('fr');
+  await expect(win.getByRole('button', { name: 'Bibliothèque', exact: true }).first()).toBeVisible();
+});
+
 test('7. cas d’erreur : fichier source supprimé après indexation', async () => {
   test.skip(!media.synthetic, 'never delete real footage');
   const { win } = ctx;
   const victim = path.join(media.dir, media.files[1]);
   fs.renameSync(victim, `${victim}.moved`);
   try {
-    await win.getByRole('button', { name: 'Dérushage', exact: true }).click();
+    await win.getByRole('button', { name: 'Dérushage', exact: true }).first().click();
     await win.getByRole('button', { name: /^Lecteur$/ }).click().catch(() => {});
     await win.getByText(media.files[1].replace(/\.[^.]+$/, ''), { exact: false }).first().click();
     await expect(win.getByText('Fichier source introuvable')).toBeVisible({ timeout: 60_000 });

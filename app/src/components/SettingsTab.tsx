@@ -86,7 +86,8 @@ export default function SettingsTab({ runtimeDevice, gpuName, vramGb }: { runtim
           {saving && <div className="text-xs text-[#71717A] flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {t('common.saving')}</div>}
         </div>
 
-        {error && <div className="relative z-10 mb-4 bg-red-500/10 border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2">{error}</div>}
+        {/* Sticky: the rows that fail (e.g. the export folder) sit far below. */}
+        {error && <div role="alert" className="sticky top-0 z-20 mb-4 bg-[#2a1215] border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2 shadow-lg">{error}</div>}
 
         {!settings ? (
           <div className="relative z-10 text-[#71717A] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t('settings.loading')}</div>

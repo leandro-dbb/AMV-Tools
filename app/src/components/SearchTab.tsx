@@ -34,6 +34,12 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
   const [threshold, setThreshold] = useState(10);
   const [sort, setSort] = useState<'relevance' | 'duration' | 'video' | 'random'>('relevance');
   const [maxResults, setMaxResults] = useState(200);
+  // The "index a folder first" hint used to show on every fresh Search tab,
+  // even with an indexed library. null = not known yet (show neither).
+  const [libraryScenes, setLibraryScenes] = useState<number | null>(null);
+  useEffect(() => {
+    api.listVideos().then((r) => setLibraryScenes(r.videos.reduce((n, v) => n + (v.scene_count || 0), 0))).catch(() => {});
+  }, []);
   // Start from Settings > Search (threshold, max results, sort): the tab used
   // to ignore them and always search with 10 % / 200 / relevance.
   useEffect(() => {
@@ -298,7 +304,15 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
         <div className="max-w-[750px] mx-auto mb-4 bg-red-500/10 border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2">{error}</div>
       )}
 
-      {!submitted && !loading && results.length === 0 && (
+      {!submitted && !loading && results.length === 0 && libraryScenes !== null && libraryScenes > 0 && (
+        <div data-testid="search-ready" className="flex flex-col items-center justify-center text-center max-w-md mx-auto mt-12 text-[#71717A]">
+          <Search size={40} className="mb-3 text-[#8B5CF6]/60" />
+          <div className="text-[#A1A1AA] mb-1">{t('journey.search.ready', { n: (libraryScenes ?? 0).toLocaleString() })}</div>
+          <div className="text-xs">{t('journey.search.readyHint')}</div>
+        </div>
+      )}
+
+      {!submitted && !loading && results.length === 0 && libraryScenes === 0 && (
         <div className="flex flex-col items-center justify-center text-center max-w-md mx-auto mt-12 text-[#71717A]">
           <FolderPlus size={40} className="mb-3 text-[#8B5CF6]/60" />
           <div className="text-[#A1A1AA] mb-1">{t('search.emptyIndexHint')}</div>

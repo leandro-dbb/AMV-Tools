@@ -54,5 +54,14 @@ export const journeyStrings: Dict = {
   },
   'journey.derush.exported': { en: 'Export finished: {n} clip(s)', fr: 'Export terminé : {n} clip(s)' },
   'journey.derush.exportFailed': { en: '{n} failed', fr: '{n} en échec' },
+  'journey.search.ready': { en: '{n} scenes indexed, ready to search.', fr: '{n} scènes indexées, prêtes à être cherchées.' },
+  'journey.search.readyHint': {
+    en: 'Describe the shot in French or English ("Goku screaming", "gros plan visage"), or drop a reference image.',
+    fr: 'Décris le plan en français ou en anglais (« Goku qui crie », « close-up face »), ou dépose une image de référence.',
+  },
+  'journey.unreachable.app': {
+    en: 'The analysis engine of AMV Tools stopped responding. Wait a few seconds (it reconnects by itself), otherwise close and reopen the app. If it keeps happening, send the logs folder (Settings > Diagnostic) with a bug report.',
+    fr: "Le moteur d'analyse d'AMV Tools ne répond plus. Attends quelques secondes (il se reconnecte tout seul), sinon ferme et rouvre l'appli. Si ça se répète, joins le dossier des logs (Paramètres > Diagnostic) à un rapport de bug.",
+  },
   'journey.library.removeQueued': { en: 'Remove from the queue', fr: 'Retirer de la file' },
 };
