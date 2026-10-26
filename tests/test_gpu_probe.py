@@ -18,6 +18,8 @@ def test_recommend_matrix():
     assert recommend(_nv("NVIDIA GeForce GTX 1060", "581.57", 6.1), [], "Windows", "AMD64")[0] == "cu126"
     # Old driver that cannot report compute_cap: driver version decides.
     assert recommend(_nv("NVIDIA GeForce GTX 970", "472.12", None), [], "Windows", "AMD64")[0] == "cu126"
+    assert recommend(_nv("NVIDIA GeForce RTX 3060", "580.88", 8.6), [], "Windows", "AMD64")[0] == "cu126"
+    assert recommend(_nv("NVIDIA GeForce RTX 3060", "580.95.05", 8.6), [], "Linux", "x86_64")[0] == "cu130"
     assert recommend([], [], "Darwin", "arm64")[0] == "mps"
     assert recommend([], [], "Darwin", "x86_64")[0] == "cpu"
     assert recommend([], [], "Linux", "x86_64")[0] == "cpu"
