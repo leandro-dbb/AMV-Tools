@@ -129,6 +129,48 @@ class Sam3Concept:
                 out = np.maximum(out, m.any(0).float().cpu().numpy())
         return out
 
+    def segment_zoomed(self, rgb: np.ndarray, prompts: str | Sequence[str] = DEFAULT_PROMPTS,
+                       threshold: float = SCORE_THRESHOLD, margin: float = 0.12,
+                       min_frac: float = 0.004) -> np.ndarray:
+        """:meth:`segment`, then every character found is cropped (with a
+        margin) and segmented again: SAM 3 works at a fixed 1008 px input, so
+        a crop of one character gets 1.5-3x the resolution — finer outline,
+        hair tips that the full-frame pass under-segments. Inside each crop
+        the zoomed mask replaces the full-frame one; outside, the full-frame
+        mask stays."""
+        import cv2
+        full = self.segment(rgb, prompts, threshold)
+        m = (full > 0.5).astype(np.uint8)
+        if not m.any():
+            return full
+        h, w = m.shape
+        n, _lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+        boxes = []
+        for i in range(1, n):
+            x, y, bw, bh, area = stats[i]
+            if area < min_frac * h * w:
+                continue
+            mx, my = int(margin * bw) + 8, int(margin * bh) + 8
+            boxes.append([max(0, x - mx), max(0, y - my), min(w, x + bw + mx), min(h, y + bh + my)])
+        # merge overlapping crops
+        merged = []
+        for b in sorted(boxes):
+            for mb in merged:
+                if b[0] < mb[2] and b[2] > mb[0] and b[1] < mb[3] and b[3] > mb[1]:
+                    mb[:] = [min(mb[0], b[0]), min(mb[1], b[1]), max(mb[2], b[2]), max(mb[3], b[3])]
+                    break
+            else:
+                merged.append(list(b))
+        out = full.copy()
+        for x0, y0, x1, y1 in merged:
+            if (x1 - x0) > 0.85 * w and (y1 - y0) > 0.85 * h:
+                continue   # the crop is the frame: nothing to gain
+            sub = self.segment(np.ascontiguousarray(rgb[y0:y1, x0:x1]), prompts, threshold)
+            if (sub > 0.5).sum() < 0.3 * (m[y0:y1, x0:x1] > 0).sum():
+                continue   # the zoomed pass lost the character: keep the full-frame mask
+            out[y0:y1, x0:x1] = sub
+        return out
+
     def segment_video(self, frames: Sequence[np.ndarray], prompts: str | Sequence[str] = DEFAULT_PROMPTS
                       ) -> np.ndarray:
         """Concept detection + SAM 3 tracking over a shot, (T, H, W) float32."""
