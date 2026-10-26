@@ -827,7 +827,7 @@ def method_runner(name: str, args, dev):
                       extra_hi=(int(jj) / 100.0 if int(jj) else None) if jj else ar.EXTRA_HI,
                       extra_lo=(int(ii) / 1000.0 if ii else min(ar.EXTRA_LO, int(jj) / 100.0) if jj and int(jj)
                                 else ar.EXTRA_LO))
-            sl = [None] * n if ss else ar.persist_selector(S, shot_cuts(root, sid))
+            sl = [None] * n if ss else ar.persist_selector(S, shot_cuts(root, sid), frames=paths)
             cuts = shot_cuts(root, sid)
             starts = {a for a, _b in cuts}
             out = np.zeros(det.shape, np.float32)
