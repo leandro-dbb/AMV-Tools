@@ -8,6 +8,9 @@ import DiagnosticSection from './DiagnosticSection';
 import FinishModelsSection from './FinishModelsSection';
 import ModelTiersSection from './ModelTiersSection';
 
+// mirrors backend/models/auto_roto.HELD_DEFAULT ("auto" value of mask_keep_held)
+const KEEP_HELD_DEFAULT = true;
+
 const sections = [
   { name: 'Indexing', icon: Cpu },
   { name: 'Models', icon: Zap },
@@ -375,6 +378,9 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
       </Row>
       <Row label={t('settings.models.selector.label')} hint={t('settings.models.selector.hint')}>
         <Toggle on={s.mask_selector_enabled ?? true} onChange={(v) => patch('models', { mask_selector_enabled: v })} />
+      </Row>
+      <Row label={t('settings.models.keepHeld.label')} hint={t('settings.models.keepHeld.hint')}>
+        <Toggle on={s.mask_keep_held === 'auto' || s.mask_keep_held === undefined ? KEEP_HELD_DEFAULT : !!s.mask_keep_held} onChange={(v) => patch('models', { mask_keep_held: v })} />
       </Row>
       <Row label={t('settings.models.edgeRefine.label')} hint={t('settings.models.edgeRefine.hint')}>
         <Toggle on={s.mask_edge_refine_enabled ?? true} onChange={(v) => patch('models', { mask_edge_refine_enabled: v })} />

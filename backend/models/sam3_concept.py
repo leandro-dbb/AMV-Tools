@@ -129,17 +129,53 @@ class Sam3Concept:
                 out = np.maximum(out, m.any(0).float().cpu().numpy())
         return out
 
+    def segment_with_objects(self, rgb: np.ndarray, prompts: str | Sequence[str] = DEFAULT_PROMPTS,
+                             objects: Sequence[str] = (), threshold: float = SCORE_THRESHOLD,
+                             zoom: bool = False) -> tuple[np.ndarray, list]:
+        """(character mask as :meth:`segment` / :meth:`segment_zoomed`, list
+        of bool instance masks of the ``objects`` concepts — "staff",
+        "halo"...). One image-encoder pass is shared by every prompt; only
+        the light decoder runs once per prompt."""
+        import torch
+        from PIL import Image
+        self._ensure_image()
+        prompts = [prompts] if isinstance(prompts, str) else list(prompts)
+        prompts = [q for p in prompts for q in p.split("|")]
+        h, w = rgb.shape[:2]
+        dev = self.device.torch_device
+        inputs = self._img_proc(images=Image.fromarray(rgb), return_tensors="pt").to(dev)
+        sizes = inputs.get("original_sizes").tolist()
+        full = np.zeros((h, w), np.float32)
+        objs: list = []
+        with torch.inference_mode():
+            ve = self._img.get_vision_features(pixel_values=inputs["pixel_values"].to(self._dtype))
+            for p in prompts + list(objects):
+                ti = self._img_proc(text=p, return_tensors="pt").to(dev)
+                res = self._img(vision_embeds=ve, input_ids=ti["input_ids"],
+                                attention_mask=ti.get("attention_mask"))
+                m = self._img_proc.post_process_instance_segmentation(
+                    res, threshold=threshold, mask_threshold=0.5, target_sizes=sizes)[0]["masks"]
+                if not len(m):
+                    continue
+                if p in prompts:
+                    full = np.maximum(full, m.any(0).float().cpu().numpy())
+                else:
+                    objs.extend(x.cpu().numpy().astype(bool) for x in m)
+        sel = self.segment_zoomed(rgb, prompts, threshold, full=full) if zoom else full
+        return sel, objs
+
     def segment_zoomed(self, rgb: np.ndarray, prompts: str | Sequence[str] = DEFAULT_PROMPTS,
                        threshold: float = SCORE_THRESHOLD, margin: float = 0.12,
-                       min_frac: float = 0.004) -> np.ndarray:
+                       min_frac: float = 0.004, full: Optional[np.ndarray] = None) -> np.ndarray:
         """:meth:`segment`, then every character found is cropped (with a
         margin) and segmented again: SAM 3 works at a fixed 1008 px input, so
         a crop of one character gets 1.5-3x the resolution — finer outline,
         hair tips that the full-frame pass under-segments. Inside each crop
         the zoomed mask replaces the full-frame one; outside, the full-frame
-        mask stays."""
+        mask stays. ``full``: the full-frame mask when already computed."""
         import cv2
-        full = self.segment(rgb, prompts, threshold)
+        if full is None:
+            full = self.segment(rgb, prompts, threshold)
         m = (full > 0.5).astype(np.uint8)
         if not m.any():
             return full

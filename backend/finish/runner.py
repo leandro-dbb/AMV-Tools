@@ -622,12 +622,13 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                 ctx.progress(min(span, span * (i + 1) / total), f"matting {i + 1}/{total}")
         if not frames:
             raise RuntimeError("no frames decoded")
-        from ..api.segment import _select_characters
+        from ..api.segment import _keep_held, _select_characters
         sel_masks = np.stack(masks)
         if sel_masks.dtype != np.uint8:
             sel_masks = np.clip(np.rint(sel_masks * 255.0), 0, 255).astype(np.uint8)
         selector_masks: list = []
-        gated = _select_characters(sel_masks, frames, models_cfg, keep=selector_masks)
+        held = [] if _keep_held(models_cfg) else None
+        gated = _select_characters(sel_masks, frames, models_cfg, keep=selector_masks, held=held)
         if gated is not sel_masks:
             masks = list(gated) if tracker else [m.astype(np.float32) / 255.0 for m in gated]
         del sel_masks, gated
@@ -649,8 +650,9 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
             from ..models.auto_roto import tighten
             from ..api.segment import _quality
             masks = list(tighten(np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
-                                           for m in masks]), selector_masks, quality=_quality(models_cfg)))
-        del selector_masks
+                                           for m in masks]), selector_masks, quality=_quality(models_cfg),
+                                 held=held))
+        del selector_masks, held
     finally:
         if jpg_dir is not None:
             shutil.rmtree(jpg_dir, ignore_errors=True)
