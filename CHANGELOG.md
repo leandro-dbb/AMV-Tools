@@ -32,9 +32,27 @@ All notable changes to AMV Tools are documented here.
   (225 -> 435 ms per frame on an RTX 3090). Known loss: objects held by a
   character (a staff, a bowl) are cut. *Settings > Models > Character pick
   with SAM 3*.
+- **Max quality cutout** (default where SAM 3 runs, standard pipeline as the
+  automatic fallback): SAM 3 runs a second, zoomed pass on each character;
+  after tracking the matte hugs SAM 3's outline at 0.4 % of the diagonal and
+  gives back the opaque tips SAM 3 misses (hair spikes) but not glows or
+  pockets between the arms; loose fragments (bits of a halo ring) are
+  dropped; at export the outline band is re-solved from the local colours
+  with the ink line protected, unmixed against the nearest background, then
+  foreground estimation. On the 22 shots vs the first 0.6 pipeline:
+  background along the outline 10.6 -> 6.1 %, enclosed 7.8 -> 5.1 %, edge
+  colour contamination 30.9 -> 19.1 %, flicker 2.8 -> 2.5 %, J 0.920 ->
+  0.924, failures 1/107; simple shots: 2.7 -> 1.7 % and 3.0 -> 2.5 %.
+  0.65 s per frame on an RTX 3090 (0.44 s standard), same VRAM.
+  Measured and refused on the zoomed boards: a 0.4 % hug without tips (clips
+  hair spikes), colour-solved alpha without ink protection (dotted ink
+  line), a detector ensemble (half-transparent "ghost" wings), prompt
+  unions, temporal votes, SAM 3 video as selector. *Settings > Models > Max
+  quality cutout*.
 - Measured and rejected: SAM 3 alone (image or video: stair-step edges that
   drop the ink line, losses in the dark), the deepghs anime person detector,
-  BiRefNet HR (2048), ViTMatte on the outline band, colour-solved alpha.
+  BiRefNet HR (2048), ViTMatte on the outline band, colour-solved alpha over a
+  wide band (it ate the ink line; the max-quality export protects it).
 
 - **Measured on real anime, not synthetic clips**: `tests/eval/roto_eval.py`
   scores Mask Mode on 23 shots from real episodes (calm, dialogue, crowds,
