@@ -258,9 +258,13 @@ def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[
     ``max``: the alpha of a band 2 px inside / 12 px outside the outline is
     first re-solved from the local character / background colours (glows,
     halos and background-coloured fringes drop out), never on ink pixels
-    (a dark outline is neither colour), then foreground estimation —
-    contamination 27.5 -> 20.7 % on the benchmark, outline kept."""
+    (a dark outline is neither colour); the edge colours are then unmixed
+    against the nearest background (compositing equation) and smoothed by
+    foreground estimation — contamination 27.5 -> 19.1 % on the benchmark,
+    outline kept."""
     a = np.clip(alpha.astype(np.float32, copy=False), 0.0, 1.0)
     if mode == "max":
+        from .mask_postprocess import clean_edges_with_background
         a = colour_solve_safe(rgb, a, band_frac=MAX_EDGE_OUT, in_frac=MAX_EDGE_IN)
+        rgb, _ = clean_edges_with_background(rgb, a, resolve_alpha=False)
     return estimate_foreground(rgb, a), a
