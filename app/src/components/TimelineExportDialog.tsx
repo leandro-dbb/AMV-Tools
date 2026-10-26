@@ -66,6 +66,17 @@ const SOFTWARE_OPTIONS: SoftwareOption[] = [
   { id: 'other', labelKey: 'timeline.software.other', hintKey: 'timeline.import.other', format: 'otio' },
 ];
 
+// The editor rarely changes between exports: remember the last choice.
+const SOFTWARE_KEY = 'amv.timeline.software';
+
+function savedSoftware(): SoftwareId {
+  try {
+    const v = localStorage.getItem(SOFTWARE_KEY);
+    if (v && SOFTWARE_OPTIONS.some((o) => o.id === v)) return v as SoftwareId;
+  } catch {}
+  return 'premiere';
+}
+
 function fmtDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   const h = Math.floor(total / 3600);
@@ -102,8 +113,9 @@ export default function TimelineExportDialog({
 }: TimelineExportDialogProps) {
   const t = useT();
   const [formats, setFormats] = useState<TimelineFormat[]>([]);
-  const [software, setSoftware] = useState<SoftwareId>('premiere');
-  const [format, setFormat] = useState<TimelineFormat['id']>('fcp7xml');
+  const [software, setSoftware] = useState<SoftwareId>(savedSoftware);
+  const [format, setFormat] = useState<TimelineFormat['id']>(
+    () => SOFTWARE_OPTIONS.find((o) => o.id === software)?.format ?? 'fcp7xml');
   const [title, setTitle] = useState(defaultName ?? 'AMV timeline');
   const [sequenceFps, setSequenceFps] = useState('first');
   const [resolution, setResolution] = useState('first');
@@ -150,6 +162,7 @@ export default function TimelineExportDialog({
 
   function chooseSoftware(id: SoftwareId) {
     setSoftware(id);
+    try { localStorage.setItem(SOFTWARE_KEY, id); } catch {}
     const option = SOFTWARE_OPTIONS.find((o) => o.id === id);
     if (!option) return;
     if (id !== 'other') {
