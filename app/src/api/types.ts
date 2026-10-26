@@ -151,6 +151,10 @@ export interface ProgressEvent {
   output?: string;
   session_id?: string;
   frame_idx?: number;
+  file_index?: number;
+  file_count?: number;
+  failed?: boolean;
+  path?: string;
 }
 
 export interface DerushFolder {

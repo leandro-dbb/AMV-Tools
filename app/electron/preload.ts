@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 type BootstrapState = { phase: 'starting' | 'ready' | 'error'; port: number };
 
@@ -15,6 +15,8 @@ const bridge = {
     ipcRenderer.invoke('amv:save-dialog', opts) as Promise<string | null>,
   reveal: (p: string) => ipcRenderer.invoke('amv:reveal', p),
   openPath: (p: string) => ipcRenderer.invoke('amv:open-path', p) as Promise<string>,
+  // Electron 32+ removed File.path: dropped files only expose their path here.
+  pathForFile: (f: File) => webUtils.getPathForFile(f),
   platform: () => process.platform,
   onProgress: (cb: (e: any) => void) => {
     const listener = (_: unknown, payload: any) => cb(payload);
