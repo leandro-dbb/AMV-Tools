@@ -65,7 +65,7 @@ export const derushStrings: Dict = {
   'derush.playlist.markDerushed': { en: 'Mark episode as derushed (done)', fr: 'Marquer l\'épisode comme dérushé (terminé)' },
   'derush.playlist.moveToFolder': { en: 'Move episode to a folder…', fr: 'Déplacer l\'épisode dans un dossier…' },
   'derush.playlist.folderPlaceholder': { en: 'Folder name (empty = none)…', fr: 'Nom du dossier (vide = aucun)…' },
-  'derush.playlist.empty': { en: 'No indexed episodes. Index a folder first (Settings).', fr: 'Aucun épisode indexé. Indexez d\'abord un dossier (Paramètres).' },
+  'derush.playlist.empty': { en: 'No indexed episodes. Index a folder first (Library tab).', fr: 'Aucun épisode indexé. Indexez d\'abord un dossier (onglet Bibliothèque).' },
 
   // ── Player: video area ────────────────────────────────────────────────────
   'derush.player.preparing': { en: 'Preparing episode…', fr: 'Préparation de l\'épisode…' },

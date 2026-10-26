@@ -37,6 +37,7 @@ declare global {
       saveFileDialog: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       reveal: (p: string) => void;
       openPath?: (p: string) => Promise<string>;
+      pathForFile?: (f: File) => string;
       platform: () => string;
       onBootstrap?: (cb: (e: { line: string; stream: 'stdout' | 'stderr' }) => void) => () => void;
       onBootstrapReady?: (cb: (port: number) => void) => () => void;
@@ -188,6 +189,10 @@ export const api = {
     req<{ frames: string[]; proxy_url?: string }>(`/api/scene/${sceneId}/preview`),
 
   queue: () => req<{ items: IndexQueueItem[] }>('/api/index/queue'),
+  modelsStatus: () =>
+    req<{ models: { key: string; label: string; enabled: boolean; present: boolean }[] }>('/api/models/status'),
+  removeFromQueue: (id: number) =>
+    req<{ ok: boolean }>(`/api/index/queue/${id}`, { method: 'DELETE' }),
   enqueue: (paths: { path: string; recursive?: boolean; group?: string | null }[]) =>
     req<{ added: number }>('/api/index/queue', {
       method: 'POST',
