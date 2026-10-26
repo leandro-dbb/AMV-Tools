@@ -838,7 +838,8 @@ def _select_characters(det: np.ndarray, frames, models_cfg: dict, progress=None,
     if sam3 is None:
         return det
     try:
-        return apply_selector(det, frames, sam3, progress_cb=progress, keep=keep)
+        return apply_selector(det, frames, sam3, progress_cb=progress, keep=keep,
+                              zoom=_quality(models_cfg) == "max")
     finally:
         try: sam3.offload()
         except Exception: pass
