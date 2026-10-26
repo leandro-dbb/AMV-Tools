@@ -1,9 +1,131 @@
 # Chantier roto : rendre le détourage (Mask Mode) utilisable sur de vrais épisodes
 
-Ce rapport a cinq parties, la plus récente en tête : **partie 5 (stabilité : rien ne disparaît, trait
-d'encre gardé — le mode Stable par défaut)**, partie 4 (objectifs 5 % et 1 s, audit de la métrique de
+Ce rapport a six parties, la plus récente en tête : **partie 6 (le bord : lisse, complet, sans frange —
+exemples v4)**, partie 5 (stabilité : rien ne disparaît, trait d'encre gardé — le mode Stable par
+défaut), partie 4 (objectifs 5 % et 1 s, audit de la métrique de
 contamination), partie 3 (qualité max), partie 2 (SAM 3 et fond dans les cheveux), partie 1 (chantier
 roto, 0.5, le banc).
+
+# Partie 6 — Le bord : lisse, complet, sans frange (exemples v4)
+
+Date : 26 octobre 2026, 13 h 15 – 16 h. Verdict de Léandro sur les exemples v3 (exemple 03, image 63,
+« Nouveau (v3) sur blanc » contre « Ancien mode 0.4 sur blanc ») : bords en escalier sans anticrénelage
+sur toutes les pointes de cheveux, franges blanches/grises au bout des pointes, trous dans les pointes,
+traits fins abîmés près du bord. L'ancien mode est plus beau sur ce point.
+
+## 1. Diagnostic (image 63 du SSJ3, ProRes 1080p, zoom ×4)
+
+- **Escalier** : le masque est calculé en 1080×608 et agrandi ; en v3 l'absorption du trait d'encre se
+  faisait sur ce masque de travail (pixels 0/1) avant l'agrandissement : marches de 1,8 px, dures.
+- **Pointes coupées** : la qualité max comme le Stable s'appuient sur un masque de travail qui s'arrête
+  avant le bout des mèches (BiRefNet et SAM 3 sous-segmentent les pointes) ; et le recalcul de l'alpha par
+  les couleurs à l'export prenait les pointes jaunes du SSJ3 pour l'aura jaune et les rognait.
+- **Franges** : seuls des bouts de trait étaient absorbés autour d'un bord qui gardait du fond clair.
+- **Trous** : 30 petits trous transparents par image dans le SSJ3 v3, 126 dans b1, 241 dans s04 (mesure
+  ci-dessous) — l'absorption à basse résolution et le recalcul par couleurs en ouvraient à l'intérieur.
+
+## 2. Corrections (export, à la résolution source ; `backend/models/edge_refine.py`)
+
+1. **Bord recalculé en pleine résolution** (`edge_solve`) : dans une bande de 3 px à l'intérieur et 13 px à
+   l'extérieur du masque agrandi, l'alpha est re-résolu à 1080p à partir des couleurs locales
+   (personnage / fond, équation de composition). Il peut baisser (l'anticrénelage du dessin, plus de halo)
+   et monter, mais seulement jusqu'au plein (une pointe que le masque arrêtait trop tôt), jamais vers un
+   demi-alpha de lueur ; un morceau ajouté doit avoir la couleur du personnage qu'il touche (pas de décor
+   collé au bord).
+2. **Trait d'encre absorbé à pleine résolution seulement** (plus sur le masque de travail) : opaque ; juste
+   au-delà, l'alpha suit la couverture que la luminance implique (l'anticrénelage du dessin) ; les pixels
+   de fond clair au-delà du trait passent à 0 (plus de frange) ; rien de nouveau ne reste détaché.
+3. **Une zone sombre plus épaisse qu'un trait n'est pas de l'encre** (mesuré hors du masque : plus de 3 px
+   de demi-largeur à 1080p) : la bande de lueur vert sombre autour des cheveux du SSJ3, plus sombre que
+   l'aura claire derrière, était absorbée comme encre — un halo sombre, opaque et déchiqueté (vu sur les
+   images 12 et 38 de la première production v4) ; elle est maintenant laissée au recalcul du bord.
+4. **Le recalcul par couleurs de la qualité max** ne touche plus ni le trait ni les pixels pleins collés au
+   trait (les pointes jaunes du SSJ3 contre l'aura jaune).
+5. **Lissage final du contour** (`smooth_outline`) : la bande de 2 px autour du contour alpha 0,5 est
+   remplacée par son flou gaussien (σ 0,8 px) — plus de marches ; le trait d'encre lui-même reste opaque.
+6. **Trous** (`fill_small_holes`) : ceux que l'export a ouverts dans un masque opaque, et les points de
+   moins de 60 px, sont refermés ; les trous plus grands déjà dans le masque restent (le fond entre deux
+   mèches complétées est aussi un trou fermé).
+7. Stable : les pixels pleins d'une excroissance retirée qui sont à moins de 10 px du personnage de SAM 3
+   restent (les pointes que SAM 3 sous-segmente).
+
+Essayés et retirés, vus à l'œil sur s04 : suivre le trait sombre jusqu'à 3 % de la diagonale et combler ce
+qu'il enferme (complétait des pointes, mais happait les briques autour de l'arche, le feuillage et le banc
+près de Goku) ; combler tout ce que masque + trait enferment (comblait le fond entre deux mèches et du
+feuillage) ; combler tous les trous de moins de 0,02 % de l'image (taches sombres dans les creux du SSJ3).
+Essayés aussi en fin de journée et retirés, vus à l'œil sur le SSJ3 : un critère d'épaisseur plus large
+(4,6 px, pour remonter l'encre de 02 de 95,3 à 96,0 %) faisait revenir la bande de lueur sombre autour des
+mèches ; une bande intérieure recalculée de 9 px au lieu de 3 (pour retirer la lueur logée dans le masque)
+dessinait des traits noirs parasites près des pointes et doublait la rugosité de Black Clover.
+Un incident a interrompu la production à 14 h 15 (un ancien filet de sécurité a libéré la carte) : la
+notation et les exemples ont été relancés.
+
+## 3. Nouvelles mesures
+
+- **Rugosité du bord** (`roto_eval.jaggies`) : longueur du contour alpha 0,5 rapportée à celle du même
+  contour après un léger flou du masque (σ 2 px), en %. Un escalier ou un bord déchiqueté la font monter.
+  Limite : des pointes fines et réelles la font monter aussi — elle se compare d'une version à l'autre sur
+  les mêmes images, pas dans l'absolu ; un bord flou (ancien mode) est mécaniquement « lisse ».
+- **Trous** (`roto_eval.holes`) : petites zones transparentes (alpha < 0,5) enfermées dans le masque, sans
+  contact avec le bord de l'image, de moins de 0,05 % de l'image (les plus grandes sont des poches de fond
+  entre les bras), par image.
+
+## 5. Les 3 exemples v4 (`reports/roto/exemples-v4/`, ProRes 1080p de l'appli, mesurés sur le fichier)
+
+| | 01 cigarette (b1) | 02 plan large (s04) | 03 SSJ3 (s13) |
+|---|---|---|---|
+| encre de contour (moy. / pire image) : ancien → v3 → **v4** | 62,4 → 99,2 → **97,6 / 96,9 %** | 63,1 → 98,5 → **95,3 / 94,3 %** | 30,3 → 60,4 → **55,2 %** (mesure non fiable) |
+| rugosité du bord (moy.) : ancien → v3 → **v4** | 4,5 → 5,6 → **5,9 %** | 3,8 → 18,1 → **17,1 %** | 6,6 → 9,5 → **17,6 %** |
+| trous par image (moy. / pire) : ancien → v3 → **v4** | 6,1 → 126 → **0,5 / 3** | 12,8 → 241 → **2,9 / 5** | 6,5 → 30 → **3,5 / 15** |
+| images perdues / sauts v4 | 0 / 0 | 0 / 0 | 0 / 1 (image 7, sol d'aura) |
+| parasites v4 (îlots / px pâles par image) | 0 / 0 | 0 / 0 | 0 / 0 |
+| cigarette, pire image | 98,5 % | – | – |
+
+Vérifié à l'œil (zoom ×3 à ×4, sur blanc et sur rouge, `contour-sur-blanc.png` et captures) :
+
+- **01** : trait brun continu autour des cheveux, de la main et de la cigarette, bord lisse, plus de halo de
+  ciel ; un petit éclat clair au bout du filtre de la cigarette côté pouce.
+- **03, image 63** (celle de la capture de Léandro) : pointes complètes jusqu'au bout, liseré jaune
+  conservé, bord lisse et anticrénelé, plus de frange ni de trou. **Images 12 et 38** : une bande de lueur
+  vert sombre reste autour des mèches, au bord extérieur dur : elle est dans le masque Stable lui-même
+  (alpha ≈ 0,5 au niveau de travail, donc plus profond que la bande recalculée à l'export) ; restes d'aura
+  déchiquetés le long du dos et des jambes et un morceau de flamme d'aura détaché sur les images 0 à 21 —
+  c'est ce qui fait monter la rugosité de ce plan, pas le contour du personnage.
+- **02** : contours de Goku, Kaio (antennes entières), Beerus et Whis nets ; l'encre passe sous 97 %
+  (95,3 %) à cause du critère d'épaisseur (un trait collé à du décor sombre est laissé de côté) ; restent de
+  petits traits de briques autour de l'arche (gardée comme en ancien mode) et du feuillage collé aux cheveux
+  de Goku — ce qui fait aussi monter la rugosité de ce plan.
+
+## 6. Ce qui reste
+
+- La rugosité moyenne du banc est au niveau de l'ancien mode (6,6 contre 6,8 %), mais pas sur 02 et 03 où
+  du décor (briques, feuillage) et des restes d'aura laissés par le masque Stable donnent des bords
+  déchiquetés.
+- Trous : quasi nuls sur les ProRes (0,5 à 3,5 par image contre 30 à 241 en v3), pas 0 ; sur le banc,
+  3,1 par image dans le masque de travail (démon noir de b2, fumée de s16, palais sombre de s18).
+- Encre de contour : 02 à 95,3 % (objectif 97 % manqué de peu, la v3 était à 98,5 %).
+- La bande de lueur sombre du SSJ3 (images 12, 38) se règle dans le masque Stable, pas à l'export : non
+  fait.
+
+## 4. Banc refondu, chaîne complète de l'appli (27 plans, 2 058 images ; export appliqué à la taille de travail)
+
+| mode | plans | images | perdues | sauts | encre de contour % (pire plan ; plans >= 97 %) | rugosité % (méd.) | trous / img | îlots / img | fond contour % (méd.) | mangé % | fond enfermé % | cigarette pire image % |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ancien 0,4 | 27 | 2058 | 30 | 60 | 62,0 (29,6 ; 0/27) | 6,8 (5,0) | 1,69 | 2,08 | 17,2 (14,5) | 10,5 | 17,9 | 98,6 |
+| Stable v3 (encre, réglages serrés) | 27 | 2058 | 10 | 18 | 94,9 (48,7 ; 20/27) | non mesurée | non mesurés | 0,12 | 11,0 (9,6) | 4,4 | 12,5 | 99,0 |
+| Stable v4 (bord pleine résolution) | 27 | 2058 | 10 | 18 | 94,9 (50,4 ; 17/27) | 6,6 (5,7) | 3,11 | 0,12 | 14,4 (10,0) | 2,9 | 14,0 | 98,5 |
+
+- Rugosité du bord : 6,6 % en moyenne (médiane 5,7), contre 6,8 % (5,0) pour l'ancien mode (dont le bord
+  est flou) — au niveau de l'ancien, objectif « ≤ ancien » atteint en moyenne, pas en médiane.
+- Trous : 3,1 par image, mesurés sur le **masque de travail** avant l'export (b2, s18, s16 surtout : démon
+  noir, palais sombre, fumée) ; sur les ProRes des exemples, après l'export, voir §5. Objectif « 0 trou »
+  non atteint sur le banc.
+- Encre de contour : 94,9 % (17 plans ≥ 97 %). Sous 97 % : s13 50 % (mesure non fiable : sol et fond noir
+  autour de l'aura), b2 84 %, b5 85 %, L1 92 %, s15 93 %, s04 94 %, s19 95 %, h5 95 %, s10 96 %. Le critère
+  d'épaisseur (la lueur n'est pas de l'encre) coûte quelques points à la taille de travail, où un trait ne
+  fait que 2-3 px.
+- Inchangé par rapport à la partie 5 : 10 images perdues (toutes justifiées : fumée, flou de vitesse,
+  entrée de champ), 18 sauts, cigarette ≥ 98,5 % sur ses 84 images, bord mangé 2,9 %.
 
 # Partie 5 — Stabilité : rien ne doit disparaître
 
