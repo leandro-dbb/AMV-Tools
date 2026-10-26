@@ -1,10 +1,110 @@
 # Chantier roto : rendre le détourage (Mask Mode) utilisable sur de vrais épisodes
 
-Ce rapport a six parties, la plus récente en tête : **partie 6 (le bord : lisse, complet, sans frange —
-exemples v4)**, partie 5 (stabilité : rien ne disparaît, trait d'encre gardé — le mode Stable par
+Ce rapport a sept parties, la plus récente en tête : **partie 7 (v5 : le bord doux de BiRefNet redevient
+la base, l'encre ajoutée par-dessus — exemples v5)**, partie 6 (le bord : lisse, complet, sans frange —
+exemples v4), partie 5 (stabilité : rien ne disparaît, trait d'encre gardé — le mode Stable par
 défaut), partie 4 (objectifs 5 % et 1 s, audit de la métrique de
 contamination), partie 3 (qualité max), partie 2 (SAM 3 et fond dans les cheveux), partie 1 (chantier
 roto, 0.5, le banc).
+
+# Partie 7 — v5 : le bord doux de BiRefNet redevient la base
+
+Date : 26 octobre 2026, 16 h 50 – 19 h 10. Verdict de Léandro sur la v4 (planches contour-sur-blanc) :
+plan 01 meilleur que l'ancien ; plan 02 mitigé (escalier, rugosité 3,8 → 17 %, feuillage et pierre collés
+au bord) ; plan 03 SSJ3 pire que l'ancien (escalier, franges grises, trous aux pointes, rugosité 6,6 →
+18 %). Empiler des corrections sur le masque SAM 3 basse résolution ne tient pas : changement de base.
+
+## 1. Architecture v5 (`auto_roto.soft_frame`, export `edge_mode="soft"`)
+
+- **Base = le masque doux de BiRefNet** (l'ancien mode), avec son dégradé d'origine : tout morceau de
+  BiRefNet qui touche un personnage (SAM 3, suivi SAM 2, objet tenu) est gardé tel quel ; seuls les morceaux
+  **détachés** des personnages (décor) sont retirés. Aucun serrage, aucune portée, aucun tri d'excroissances.
+- **SAM 3 = secours** : il ne comble que là où BiRefNet perd le personnage sur l'image (flou) ou en voit
+  moins de 60 % (personnage sombre comme le démon de b2), loin du bord de BiRefNet, avec un raccord doux de
+  1,5 px ; il choisit toujours les personnages ; il ne touche jamais au bord là où BiRefNet en a un.
+- Gardés de la v2-v4 : garde temporelle (0 image perdue), objets tenus (cigarette), nettoyage des îlots
+  détachés et des pixels pâles isolés, filtre des fausses détections SAM 3 d'une image et de ses masques
+  qui enflent.
+- **Export « soft »** : le masque est agrandi sur l'image 1080p par filtre guidé, comme l'ancien mode
+  (lisse, sans escalier) ; le trait d'encre extérieur est ajouté sans jamais baisser l'alpha (max avec
+  le masque de BiRefNet), seulement dans le dégradé que BiRefNet a déjà amorcé (alpha ≥ 0,3 : en dessous, les stries pâles du
+  dégradé agrandi devenaient des hachures sombres en travers du bord) et s'il n'est pas plus clair
+  que le personnage qu'il borde (un feuillage vert collé à des cheveux noirs n'est pas un trait). L'encre
+  est ajoutée comme **une couverture continue** (noirceur du pixel rapportée au cœur du trait, floutée sur
+  1,4 px puis ×2,5, sans déborder de plus d'un pixel au-delà du trait) et non pixel par pixel : la version
+  pixel par pixel faisait passer la rugosité de s04 de 3,6 à 22 % (bord en dents de scie) ; avec un flou de
+  0,8 px il restait de petits tirets noirs le long du bord (6,7 % contre 3,8 % pour l'ancien sur l'exemple
+  02) ; avec 2 px sans limite, le flou débordait sur le fond (fond le long du contour 14,7 → 23,5 % au banc,
+  liseré crème visible sur rouge). Les pixels sombres du bord à moins de 5 px du cœur opaque sont aussi
+  relevés (le trait collé au personnage). Une zone sombre plus épaisse que deux traits que le masque ne
+  couvre qu'à moitié (fond noir entre les flammes d'aura) n'est jamais rendue opaque, ni les fines
+  pointes sombres juste à côté ; et un noir (luma < 0,10) relié à une grande zone noire que le masque
+  laisse transparente est ce fond-là, pas un trait (les coins de fond noir entre les flammes d'aura du
+  SSJ3 devenaient des pâtés noirs opaques, image 12 — vus à l'œil sur les deux premières séries
+  d'exemples v5 et corrigés) ; trous minuscules refermés ; couleurs du bord décontaminées contre le fond local (pas l'alpha).
+- Le mode « hard » (v2-v4, `STABLE_EDGE = "hard"`) reste disponible dans le code.
+
+Essayé et retiré : estomper par l'alpha les grosses excroissances lumineuses (flammes d'aura) collées au
+personnage — sans effet sur le SSJ3, où SAM 3 colle lui-même l'aura au personnage.
+
+## 2. Exemples v5 (`/srv/data/amv-tools/reports/roto/exemples-v5/`, mêmes 3 plans)
+
+Mesuré sur les ProRes 1080p de l'appli (ancien 0.4 → v4 → v5) :
+
+| | 01 cigarette | 02 plan large | 03 SSJ3 |
+|---|---|---|---|
+| encre de contour | 62 → 97,6 → **95,2 %** | 63 → 95,3 → **91,7 %** | 30 → 55 → 67 % (mesure faussée par l'aura) |
+| rugosité du bord | 4,5 → 5,9 → **1,4 %** | 3,8 → 17,1 → **3,4 %** | 6,6 → 17,6 → **6,1 %** |
+| trous / image | 6,1 → 0,5 → 0,14 | 12,8 → 2,9 → 1,1 | 6,5 → 3,5 → 2,0 |
+| images perdues | 0 → 0 → 0 | 0 → 0 → 0 | 17 → 0 → 4 (7, 11, 13, 18) |
+| cigarette | 84/84 images, pire 98,5 % | | |
+
+Critères : rugosité ≤ ancien sur chaque plan — oui (3/3) ; encre ≥ 95 % sur 01 et 02 — oui sur 01, non sur
+02 (91,7 %) ; 0 image perdue — oui sur 01 et 02, non sur 03 (4, l'ancien 17) ; cigarette sur toutes les
+images — oui ; 0 trou — non au sens strict (0,14 à 2 petits trous par image, moins que l'ancien partout).
+
+Vérifié à l'œil (contour-sur-blanc ×3, et sur rouge), pointes SSJ3 d'abord :
+- **03 SSJ3** : image 63, pointes complètes, lisses, trait présent, sans le halo brun de l'ancien — plus
+  beau que l'ancien. Image 38 : même halo de lueur vert sombre autour des mèches que l'ancien (il est dans
+  le masque de BiRefNet). Image 12 (dans l'aura) : plus de pâtés noirs ; restent des facettes grises
+  anguleuses dans l'aura sombre (comblement SAM 3) que l'ancien n'a pas. L'aura est gardée et scintille
+  comme dans l'ancien (4 images perdues, 34 sauts ; l'ancien 17 et 37).
+- **01** : trait continu autour des cheveux, de la main et de la cigarette, plus de halo bleu : nettement
+  mieux que l'ancien ; un léger liseré clair autour de la main sur rouge (moins que l'ancien).
+- **02** : bord plus net, beaucoup moins de hachures que l'ancien ; un fil beige d'1 px le long du bord sur
+  rouge ; quelques éclats bruns de briques le long de l'arche et du flanc de Goku, feuillage collé aux
+  cheveux (comme l'ancien).
+
+Verdict : sur 01 et 02, au moins aussi beau que l'ancien avec le trait en plus. Sur 03, cheveux plus beaux,
+aura aussi imparfaite que l'ancien, avec en plus des facettes grises par endroits.
+
+## 3. Banc complet (27 plans, 2058 images, export « soft » final, `sc_v5f_*.json`)
+
+| mode | perdues | sauts | encre de contour % (pire plan ; plans ≥ 97 %) | rugosité % (méd.) | trous / img | îlots / img | fond contour % (méd.) | mangé % | fond enfermé % | cigarette pire image % |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ancien 0.4 | 30 | 60 | 62,0 (29,6 ; 0/27) | 6,8 (5,0) | 1,69 | 2,08 | 17,2 (14,5) | 10,5 | 17,9 | 98,6 |
+| Stable v4 (bord pleine résolution) | 10 | 18 | 94,9 (50,4 ; 17/27) | 6,6 (5,7) | 3,11 | 0,12 | 14,4 (10,0) | 2,9 | 14,0 | 98,5 |
+| **Stable v5 (bord BiRefNet + encre)** | 14 | 70 | 91,6 (59,8 ; 9/27) | **3,8 (2,8)** | 3,28 | 0,07 | 16,1 (12,6) | 2,7 | 17,9 | 98,5 |
+
+- **Rugosité** : la v5 est le mode le plus lisse des trois (3,8 % contre 6,8 % pour l'ancien), plus lisse
+  que l'ancien sur 23 plans sur 27. Plus rugueux : b2 (14,2 contre 6,5 : l'aile du démon en éclats, que la
+  v5 garde plus entière que l'ancien), s18 (7,8 contre 3,0 : foule serrée, interstices de fond entre les
+  silhouettes), b4 (4,8 contre 3,6) et s16 (0,5 contre 0,4, négligeable).
+- **Encre** : 91,6 % en moyenne (ancien 62 %), au moins 95 % sur 13 plans sur 27, 85 à 94 % sur 10
+  autres ; pires plans b2 (démon noir sur fond sombre) 60 %, s13 (SSJ3, mesure faussée par l'aura) 64 %,
+  b5 80 % et s17 81 %. Sous la v4 (94,9 %) : l'encre n'est plus absorbée pixel par pixel (c'était la cause
+  des escaliers) et n'est ajoutée que là où BiRefNet a déjà amorcé le bord.
+- **Fond le long du contour** : 16,1 % (ancien 17,2 %, v4 14,4 %) — le bord doux de BiRefNet garde son
+  dégradé, comme l'ancien mode. Fond enfermé identique à l'ancien (17,9 %), mangé 2,7 % (ancien 10,5 %).
+- **Trous** : 3,3 par image (ancien 1,7). Vérifié à l'œil sur les plans qui en comptent le plus (s18, b2,
+  b4) : ce sont des interstices de fond réels entre silhouettes d'une foule (s18) ou entre les éclats de
+  l'aile (b2), déjà dans le masque BiRefNet, pas des trous dans un personnage ; l'export en referme la
+  moitié.
+- **Stabilité** : 14 images perdues (ancien 30, v4 10) : les 10 de la v4 (débuts de plan s10, s12, s16,
+  déjà expliqués partie 5) plus 4 sur s13, où le bord doux de BiRefNet suit le scintillement de l'aura
+  comme l'ancien mode (s13 : 4 perdues contre 17 pour l'ancien). Les sauts remontent à 70 (v4 : 18) : s13
+  (aura), b2 (éclats de l'aile) et s09 — la v5 rend la variation d'image en image de BiRefNet, que la v4
+  écrasait en serrant le masque. Cigarette : présente sur toutes les images (pire 98,5 %).
 
 # Partie 6 — Le bord : lisse, complet, sans frange (exemples v4)
 
