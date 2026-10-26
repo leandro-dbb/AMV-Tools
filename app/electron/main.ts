@@ -19,7 +19,9 @@ let sidecarStopping: Promise<void> | null = null;
 let sidecarStopped = false;
 // Per-launch secret: the sidecar refuses requests without it (backend/security.py),
 // so other local web pages cannot drive it. Renderer gets it via the preload.
-const apiToken = randomBytes(32).toString('hex');
+// AMV_TOKEN is a test-only override: the Windows smoke workflow launches the
+// installed app with a known token so it can drive the sidecar from PowerShell.
+const apiToken = process.env.AMV_TOKEN || randomBytes(32).toString('hex');
 
 type BootstrapStream = 'stdout' | 'stderr';
 type BootstrapEvent =
@@ -56,6 +58,12 @@ function flushBootstrap() {
 }
 
 function findFreePort(): Promise<number> {
+  // Test-only override so a headless smoke run knows where to find /health
+  // (the real app always asks the OS for a free port).
+  const forced = Number(process.env.AMV_SIDECAR_PORT || 0);
+  if (Number.isInteger(forced) && forced > 0 && forced < 65536) {
+    return Promise.resolve(forced);
+  }
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
@@ -333,6 +341,39 @@ async function performCleanReinstall(): Promise<void> {
   app.exit(0);
 }
 
+// ── headless smoke-test hooks (CI only, inert for real users) ──────────────
+// The Windows smoke workflow drives the installed app through its sidecar.
+// These three env vars let it know the port/token, capture the real window
+// and ask the app to quit gracefully afterwards.
+const smokeShotDir = process.env.AMV_SMOKE_SCREENSHOT_DIR;
+
+function captureSmokeShot(tag: string) {
+  if (!smokeShotDir) return;
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.capturePage()
+      .then((image) => {
+        fs.mkdirSync(smokeShotDir, { recursive: true });
+        fs.writeFileSync(path.join(smokeShotDir, `${tag}.png`), image.toPNG());
+        console.log(`[smoke] screenshot ${tag} written`);
+      })
+      .catch((err) => console.error('[smoke] screenshot failed', err));
+  }, 1500);
+}
+
+function watchSmokeQuitFile() {
+  const file = process.env.AMV_SMOKE_QUIT_FILE;
+  if (!file) return;
+  const timer = setInterval(() => {
+    if (fs.existsSync(file)) {
+      clearInterval(timer);
+      console.log('[smoke] quit file seen — quitting through the normal path');
+      app.quit();
+    }
+  }, 1000);
+  timer.unref();
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -351,6 +392,7 @@ async function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     rendererReady = true;
     flushBootstrap();
+    captureSmokeShot('startup');
   });
 
   if (useVite) {
@@ -365,8 +407,12 @@ app.whenReady().then(async () => {
   // resolves wheels. The sidecar boots concurrently and streams its stdout
   // / stderr into the renderer via amv:bootstrap events.
   await createWindow();
+  watchSmokeQuitFile();
   startSidecar()
-    .then((port) => emitBootstrap({ kind: 'ready', port }))
+    .then((port) => {
+      emitBootstrap({ kind: 'ready', port });
+      captureSmokeShot('ready');
+    })
     .catch((err) => {
       console.error('Failed to start sidecar', err);
       emitBootstrap({ kind: 'error', message: String(err?.message ?? err) });
