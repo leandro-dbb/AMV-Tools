@@ -8,6 +8,7 @@ test is skipped when it is not reachable so offline runs stay green.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -33,6 +34,7 @@ DTD_URL = (
     "https://raw.githubusercontent.com/CommandPost/CommandPost/develop/"
     "src/extensions/cp/apple/fcpxml/dtd/FCPXMLv1_9.dtd"
 )
+DTD_SHA256 = "a93b8974035de3b7da4956800db64078c5dee0dab5e5d985f4b21be9ea912db2"
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -87,8 +89,10 @@ def apple_dtd(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 target.write_bytes(response.read())
         except Exception as exc:  # offline / mirror moved
             pytest.skip(f"Apple FCPXML 1.9 DTD unavailable: {exc}")
-    if "<!ELEMENT fcpxml" not in target.read_text(errors="ignore"):
-        pytest.skip("downloaded file is not the FCPXML DTD")
+    # Pinned: the file is fetched at test time, never trusted blindly.
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    if digest != DTD_SHA256:
+        pytest.skip(f"FCPXML DTD checksum mismatch ({digest}); not the pinned Apple 1.9 DTD")
     return target
 
 
@@ -100,7 +104,7 @@ def test_fcpxml_validates_against_apple_dtd(tmp_path, apple_dtd):
     output = tmp_path / "timeline.fcpxml"
     output.write_text(fcpxml.dumps(_timeline()), encoding="utf-8")
     proc = subprocess.run(
-        [xmllint, "--noout", "--dtdvalid", str(apple_dtd), str(output)],
+        [xmllint, "--noout", "--nonet", "--dtdvalid", str(apple_dtd), str(output)],
         capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
@@ -167,7 +171,10 @@ def test_edl_columns_and_event_integrity():
     text = edl.dumps(_timeline())
     events = _edl_events(text)
     assert [e.group(3) for e in events].count("V") == 3
-    assert all(len(line) <= 80 for line in text.splitlines())
+    # Event lines respect the 80-column CMX layout; FROM CLIP NAME / FROM FILE
+    # comments stay on one line whatever their length (that's what NLEs read).
+    assert all(len(line) <= 80 for line in text.splitlines() if not line.startswith("*"))
+    assert "* FROM FILE: " + _sources()["win"].path in text.splitlines()
     assert all(len(e.group(2)) <= 8 for e in events)
     assert text.count("* FROM CLIP NAME:") == len(events)
     event_numbers = [int(e.group(1)) for e in events]

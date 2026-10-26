@@ -153,7 +153,7 @@
               },
               "start_time": {
                 "OTIO_SCHEMA": "RationalTime.1",
-                "rate": 23.976023976023978,
+                "rate": 25.0,
                 "value": 10.0
               }
             },
@@ -171,12 +171,12 @@
                   "OTIO_SCHEMA": "TimeRange.1",
                   "duration": {
                     "OTIO_SCHEMA": "RationalTime.1",
-                    "rate": 23.976023976023978,
+                    "rate": 25.0,
                     "value": 1.0
                   },
                   "start_time": {
                     "OTIO_SCHEMA": "RationalTime.1",
-                    "rate": 23.976023976023978,
+                    "rate": 25.0,
                     "value": 10.0
                   }
                 },
