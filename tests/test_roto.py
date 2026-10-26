@@ -831,3 +831,13 @@ def test_persist_selector_drops_a_one_frame_false_character():
     assert out[2][20, 20] == 0.0 and out[2][50, 100] == 1.0
     sel = [np.maximum(goku, rock)] * 3                  # a second character seen on every frame
     assert persist_selector(sel)[1][20, 20] == 1.0
+
+
+def test_persist_selector_brings_a_swollen_mask_back_to_its_neighbours_shape():
+    from backend.models.auto_roto import persist_selector
+    h, w = 120, 200
+    goku = _blob(h, w, 80, 20, 120, 100)
+    aura = _blob(h, w, 30, 5, 170, 115)                 # SAM 3 took the aura for him on one frame
+    sel = [goku] * 4 + [aura] + [goku] * 4
+    out = persist_selector(sel)
+    assert out[4][60, 100] == 1.0 and out[4][60, 40] == 0.0
