@@ -437,6 +437,14 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
     if far_dark.any():
         cand &= ~(cv2.dilate(far_dark.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
     edge_ink = dark & solid & (d_in <= band)
+    if not cut_fringe:
+        # "soft": a large dark area inside the matte (black background between
+        # aura flames) is not an ink line — never made opaque
+        thick_all = cv2.distanceTransform(dark.astype(np.uint8), cv2.DIST_L2, 3) > half
+        if thick_all.any():
+            r2 = int(np.ceil(half)) + 1
+            edge_ink &= ~(cv2.dilate(thick_all.astype(np.uint8),
+                                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r2 + 1, 2 * r2 + 1))) > 0)
     ink = np.zeros_like(solid)
     if cand.any():
         seed = cv2.dilate(solid.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
