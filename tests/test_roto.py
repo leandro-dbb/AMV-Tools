@@ -712,8 +712,19 @@ def test_stable_frame_drops_an_aura_flare_but_keeps_a_strand_and_does_not_blink(
     assert stable_frame(det2, body)[102, 335] == 1.0    # the strand stays
     det3 = body.copy()
     det3[50:150, 300:330] = 1.0                         # 3 000 px: 10 %, between the thresholds
-    assert stable_frame(det3, body)[100, 320] == 0.0    # no previous frame having it: out
-    assert stable_frame(det3, body, prev=det3)[100, 320] == 1.0   # kept before: kept now
+    rgb = np.zeros((h, w, 3), np.uint8)
+    rgb[:] = (70, 140, 230)                             # sky all around
+    rgb[50:350, 200:300] = (230, 120, 40)               # the character
+    assert stable_frame(det3, body, rgb=rgb)[100, 320] == 0.0      # sky-coloured chunk: out
+    assert stable_frame(det3, body)[100, 320] == 1.0               # (no colours: kept, inclusive)
+    rgb[50:150, 300:330] = (230, 120, 40)                          # character-coloured: a sleeve
+    assert stable_frame(det3, body, rgb=rgb)[100, 320] == 1.0
+    rgb[50:150, 300:330] = (70, 140, 230)
+    rgb[50:75, 300:330] = (230, 120, 40)                           # 25 % sleeve, 75 % sky
+    assert stable_frame(det3, body, rgb=rgb)[100, 320] == 0.0
+    rgb[50:110, 300:330] = (230, 120, 40)                          # 60 % sleeve, 40 % sky
+    assert stable_frame(det3, body, rgb=rgb)[100, 320] == 0.0      # over 35 %: out ...
+    assert stable_frame(det3, body, rgb=rgb, prev=det3)[100, 320] == 1.0   # ... unless kept before (no blink)
 
 
 def test_temporal_guard_does_not_draw_back_a_character_that_went_behind_a_wall():
@@ -795,3 +806,28 @@ def test_track_auto_stable_path_runs_with_fake_models(monkeypatch, tmp_path):
     assert masks.shape == (T, h, w)
     assert all((m > 0.5).sum() > 0.8 * body.sum() for m in masks)      # no frame lost
     assert all(m[61, 130] > 0.5 for i, m in enumerate(masks) if i != 3)  # the cigarette stays
+
+
+def test_stable_frame_ignores_a_rock_the_tracker_picked_up():
+    from backend.models.auto_roto import stable_frame
+    h, w = 400, 600
+    body = _blob(h, w, 200, 50, 300, 350)
+    rock = _blob(h, w, 20, 20, 60, 60)                  # 1 600 px, detached
+    det = np.maximum(body, rock)
+    track = det.copy()                                  # SAM 2 followed the rock too
+    assert stable_frame(det, body, track)[40, 40] == 0.0
+    other = _blob(h, w, 400, 50, 500, 350)              # a whole character SAM 3 missed on this frame
+    det2, track2 = np.maximum(body, other), np.maximum(body, other)
+    assert stable_frame(det2, body, track2)[200, 450] == 1.0
+
+
+def test_persist_selector_drops_a_one_frame_false_character():
+    from backend.models.auto_roto import persist_selector
+    h, w = 100, 200
+    goku = _blob(h, w, 80, 10, 120, 90)
+    rock = _blob(h, w, 10, 10, 30, 30)
+    sel = [goku, goku, np.maximum(goku, rock), goku, goku]
+    out = persist_selector(sel)
+    assert out[2][20, 20] == 0.0 and out[2][50, 100] == 1.0
+    sel = [np.maximum(goku, rock)] * 3                  # a second character seen on every frame
+    assert persist_selector(sel)[1][20, 20] == 1.0

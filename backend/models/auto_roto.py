@@ -121,10 +121,13 @@ JUMP_FRAC = 0.25             # area change between neighbours counted as a jump
 STABLE_OPAQUE = 0.8          # BiRefNet pixels above: solid (ink, hair, props), always kept in a kept piece
 STABLE_SOLID_REACH = 2.0     # solid pixels reach this x farther (props, long strands)
 STABLE_CORE_PX = 4.0         # matte beyond this distance from SAM 3's character: "extras", sorted by size
+TRACK_MIN_REL = 0.3          # a track piece away from SAM 3's characters counts if >= this x their area
 GUARD_SEEN_MIN = 0.3         # temporal guard: refill only if BiRefNet / SAM 3 still see this share of it
 GUARD_NEAR = 0.02            # ... and only near what they see (share of the diagonal)
-EXTRA_LO = 0.05              # extras under this x the characters' area stay (strands, props)
-EXTRA_HI = 0.15              # ... over it go (aura flares, fused scenery); in between: as on the previous frame
+EXTRA_LO = 0.02              # extras under this x the characters' area stay (strands, props)
+EXTRA_HI = 0.15              # ... over it go (aura flares, fused scenery)
+EXTRA_BG_SHARE = 0.35        # ... in between, they go when this share of their pixels has the background's colours
+EXTRA_BG_DIST = 0.12         # colour distance (0..1 RGB) to the background palette counted as "background colour"
 STABLE_SOFT_PX = 3.0         # semi-transparent pixels kept within this of a solid one / SAM 3 (px)
 SPECK_LO = 0.0002            # detached islands under this share of the frame: background specks
 SPECK_HI = 0.001             # ... above: kept; in between: as on the previous frame
@@ -595,7 +598,8 @@ def _fill_holes(m: np.ndarray) -> np.ndarray:
     return out
 
 
-def _background_palette(rgb: np.ndarray, base: np.ndarray, selector: np.ndarray, k: int = 8):
+def _background_palette(rgb: np.ndarray, base: np.ndarray, selector: np.ndarray, k: int = 8,
+                        max_px: int = 20000, attempts: int = 2):
     """Main colours (k-means, 0..1 RGB) of the background around the
     character: pixels the base matte calls background, in a ring 10-40 px
     outside the selector."""
@@ -606,11 +610,11 @@ def _background_palette(rgb: np.ndarray, base: np.ndarray, selector: np.ndarray,
     px = rgb[ring].astype(np.float32) / 255.0
     if len(px) < 50:
         return None
-    if len(px) > 20000:
-        px = px[np.random.default_rng(0).choice(len(px), 20000, replace=False)]
+    if len(px) > max_px:
+        px = px[np.random.default_rng(0).choice(len(px), max_px, replace=False)]
     kk = min(k, len(px))
     crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1e-3)
-    _c, _l, centers = cv2.kmeans(px, kk, None, crit, 2, cv2.KMEANS_PP_CENTERS)
+    _c, _l, centers = cv2.kmeans(px, kk, None, crit, attempts, cv2.KMEANS_PP_CENTERS)
     return centers
 
 
@@ -918,7 +922,8 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
                  opaque: float = STABLE_OPAQUE, soft_px: float = STABLE_SOFT_PX,
                  solid_reach: float = STABLE_SOLID_REACH, core_px: float = STABLE_CORE_PX,
                  extra_lo: float = EXTRA_LO, extra_hi: float = EXTRA_HI,
-                 prev: Optional[np.ndarray] = None) -> np.ndarray:
+                 prev: Optional[np.ndarray] = None, track_min_rel: float = TRACK_MIN_REL,
+                 rgb: Optional[np.ndarray] = None) -> np.ndarray:
     """One frame of the "stable" matte.
 
     ``det``: BiRefNet's alpha (float 0..1), the floor. ``selector``: SAM 3's
@@ -928,17 +933,20 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
     ``low``) that touches it is kept — its outline, hair strands, a held
     cigarette — up to ``reach_frac`` of the diagonal from the characters,
     ``solid_reach`` x farther for its solid pixels (beyond: soft fall-off,
-    then cut: set pieces fused with the character, aura flares); pieces that do not touch a character are dropped. Inside a
-    kept piece the solid pixels (alpha > ``opaque``: ink, hair, props) all
+    then cut: set pieces fused with the character, aura flares); pieces
+    that do not touch a character are dropped. Inside a kept piece the
+    solid pixels (alpha > ``opaque``: ink, hair, props) all
     stay; the semi-transparent ones stay within ``soft_px`` px of a solid
     pixel or of SAM 3's character (the antialiased edge, a motion blur SAM 3
     sees) — a wide soft halo of background around the hair does not.
     What sticks out of SAM 3's character by more than ``core_px`` px is
-    sorted by size: a piece under ``extra_lo`` x the characters' area (a
-    strand, a cigarette, a finger SAM 3 missed) stays, one over
-    ``extra_hi`` x (an aura flare, a wall fused with the shoulder) goes; in
-    between it stays only if the previous frame's matte (``prev``) had it,
-    so the decision does not blink. Held objects are never sorted. SAM
+    sorted (:func:`_drop_big_extras`): a piece under ``extra_lo`` x the
+    characters' area (a strand, a cigarette, a finger SAM 3 missed) stays;
+    a bigger one goes if it is over ``extra_hi`` x (an aura flare) or has
+    the colours of the background around (``rgb``: scenery fused with the
+    outline, a pocket between the arms), the previous frame's decision
+    (``prev``) weighing in so it does not blink. Held objects and
+    characters SAM 3 missed but the track has are never sorted. SAM
     3's mask (eroded by ``sel_erode`` px) is added on top; the track is
     added where SAM 3 sees nobody: a character that BiRefNet loses in a
     motion blur stays. No character evidence at all: BiRefNet as is."""
@@ -951,9 +959,24 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
         s = np.asarray(selector) > 0.5
         ev |= s
     tr = None
+    missed = None
     if track is not None and np.any(track):
         tr = np.clip(np.asarray(track, np.float32), 0, 1)
-        ev |= tr > 0.5
+        tm = tr > 0.5
+        if s is not None:
+            # where SAM 3 sees characters, a piece of the track away from
+            # them counts only if it is character-sized (one SAM 3 missed on
+            # this frame), not a rock the tracker picked up
+            n_t, lab_t, st_t, _ = cv2.connectedComponentsWithStats(tm.astype(np.uint8), connectivity=8)
+            if n_t > 1:
+                ok = np.zeros(n_t, bool)
+                ok[np.unique(lab_t[tm & s])] = True
+                touch = ok.copy()
+                ok |= st_t[:, 4] >= track_min_rel * float(s.sum())
+                ok[0] = False
+                tm = ok[lab_t]
+                missed = (ok & ~touch)[lab_t]   # characters SAM 3 missed: never sorted as extras
+        ev |= tm
     hm = None
     if held is not None and np.any(held):
         hm = np.asarray(held, np.float32)
@@ -983,7 +1006,10 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
             d_solid = cv2.distanceTransform((~solid).astype(np.uint8), cv2.DIST_L2, 3)
             out = np.where((out > opaque) | (d_solid <= soft_px), out, 0.0)
     if s is not None and core_px is not None and extra_hi is not None:
-        out = _drop_big_extras(out, s, hm, core_px, extra_lo, extra_hi, prev)
+        protect = hm
+        if missed is not None and missed.any():
+            protect = np.maximum(hm if hm is not None else 0.0, missed.astype(np.float32))
+        out = _drop_big_extras(out, s, protect, core_px, extra_lo, extra_hi, prev, rgb)
     if s is not None:
         se = s.astype(np.uint8)
         if sel_erode > 0:
@@ -998,10 +1024,18 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
 
 
 def _drop_big_extras(out: np.ndarray, s: np.ndarray, hm: Optional[np.ndarray], core_px: float,
-                     lo: float, hi: float, prev: Optional[np.ndarray]) -> np.ndarray:
-    """:func:`stable_frame`: the pieces of the matte sticking out of SAM 3's
-    character (beyond ``core_px``) bigger than ``hi`` x its area removed,
-    between ``lo`` and ``hi`` x only if ``prev`` did not have them."""
+                     lo: float, hi: float, prev: Optional[np.ndarray],
+                     rgb: Optional[np.ndarray] = None, bg_share: float = EXTRA_BG_SHARE) -> np.ndarray:
+    """:func:`stable_frame`: sort the pieces of the matte sticking out of
+    SAM 3's character (beyond ``core_px``). Up to ``lo`` x its area (a
+    strand, a cigarette, a finger): kept. Bigger: removed when over ``hi``
+    x, or — with the frame ``rgb`` — when at least ``bg_share`` of its
+    pixels have the colours of the background around the character (a
+    chunk of sky, grass or crystals BiRefNet fused with the outline, a
+    pocket of background between the arms). A piece the previous frame
+    (``prev``) kept needs 1.5 x those thresholds to go, one it did not keep
+    stays out unless clearly character-coloured: the decision does not
+    blink."""
     import cv2
     ns = float(s.sum())
     if ns <= 0:
@@ -1009,21 +1043,33 @@ def _drop_big_extras(out: np.ndarray, s: np.ndarray, hm: Optional[np.ndarray], c
     d_s = cv2.distanceTransform((~s).astype(np.uint8), cv2.DIST_L2, 3)
     extra = (out > 0.5) & (d_s > core_px)
     if hm is not None:
-        extra &= ~(cv2.dilate((hm > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0)
+        extra &= ~(cv2.dilate((np.asarray(hm) > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0)
     if not extra.any():
         return out
     n, lab, stats, _ = cv2.connectedComponentsWithStats(extra.astype(np.uint8), connectivity=8)
     rel = stats[:, 4] / ns
-    drop = rel > hi
-    mid = (rel > lo) & ~drop
-    mid[0] = drop[0] = False
-    if mid.any():
-        if prev is None:
-            drop |= mid
-        else:
-            pv = cv2.dilate((np.asarray(prev) > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
-            had = np.bincount(lab[pv], minlength=n)
-            drop |= mid & (had < 0.5 * stats[:, 4])
+    big = rel > lo
+    big[0] = False
+    if not big.any():
+        return out
+    had = np.zeros(n, bool)
+    if prev is not None:
+        pv = cv2.dilate((np.asarray(prev) > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        had = np.bincount(lab[pv], minlength=n) >= 0.5 * stats[:, 4]
+    share = np.zeros(n)
+    palette = _background_palette(rgb, out, s, max_px=4000, attempts=1) if rgb is not None else None
+    if palette is not None:
+        src = rgb.astype(np.float32) / 255.0
+        for i in np.flatnonzero(big):
+            x, y, bw, bh, _a = stats[i]
+            comp = lab[y:y + bh, x:x + bw] == i
+            cols = src[y:y + bh, x:x + bw][comp]
+            if len(cols) > 4000:
+                cols = cols[np.random.default_rng(0).choice(len(cols), 4000, replace=False)]
+            dmin = np.sqrt(((cols[:, None, :] - palette[None, :, :]) ** 2).sum(-1)).min(1)
+            share[i] = float((dmin < EXTRA_BG_DIST).mean())
+    k = np.where(had, 1.5, 1.0)
+    drop = big & ((rel > hi * k) | (share >= np.minimum(0.95, bg_share * k)))
     if not drop.any():
         return out
     gone = cv2.dilate(drop[lab].astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
@@ -1197,6 +1243,47 @@ def _touching_mask(m: Optional[np.ndarray], ref: np.ndarray) -> Optional[np.ndar
     return np.where(ok[lab], m, 0).astype(np.asarray(m).dtype)
 
 
+def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[tuple[int, int]]] = None,
+                     min_overlap: float = 0.3, slack_frac: float = 0.012) -> list:
+    """SAM 3's character masks without its one-frame false detections: a
+    piece (connected component) of frame t is kept if the mask of t-1 or
+    t+1 (same shot, dilated by ``slack_frac`` of the diagonal for motion)
+    covers at least ``min_overlap`` of it, or if it is the frame's biggest
+    piece (a rock SAM 3 calls a character on one blurred frame goes, the
+    character stays)."""
+    import cv2
+    T = len(sel)
+    out = list(sel)
+    for a, b in (shots or [(0, T)]):
+        if b - a < 2:
+            continue
+        near = {}
+        for t in range(a, b):
+            m = sel[t]
+            if m is None or not np.any(m):
+                continue
+            m = np.asarray(m) > 0.5
+            r = max(1, int(round(slack_frac * float(np.hypot(*m.shape)))))
+            near[t] = cv2.dilate(m.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+        for t in range(a, b):
+            m = sel[t]
+            if m is None or not np.any(m):
+                continue
+            mb = (np.asarray(m) > 0.5).astype(np.uint8)
+            n, lab, st, _ = cv2.connectedComponentsWithStats(mb, connectivity=8)
+            if n <= 2:
+                continue
+            keep = np.zeros(n, bool)
+            keep[int(np.argmax(st[1:, 4])) + 1] = True
+            for u in (t - 1, t + 1):
+                if u in near:
+                    keep |= np.bincount(lab[near[u]], minlength=n) >= min_overlap * st[:, 4]
+            keep[0] = False
+            if not keep[1:].all():
+                out[t] = np.where(keep[lab], np.asarray(m), 0).astype(np.asarray(m).dtype)
+    return out
+
+
 def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]],
                  track: Optional[np.ndarray] = None, held: Optional[Sequence[Optional[np.ndarray]]] = None,
                  frames: Optional[Sequence] = None, shots: Optional[List[tuple[int, int]]] = None,
@@ -1212,6 +1299,7 @@ def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]]
     T = len(det)
     out = np.empty(det.shape, np.float32)
     sel = list(selector_masks) if selector_masks is not None and len(selector_masks) == T else [None] * T
+    sel = persist_selector(sel, shots)
     hl = list(held) if held is not None and len(held) == T else [None] * T
     starts = {a for a, _b in (shots or [(0, T)])}
     for t in range(T):
@@ -1220,8 +1308,18 @@ def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]]
             tm = track[t] > 0.5
             sel[t] = _touching_mask(sel[t], tm)
             hl[t] = _touching_mask(hl[t], tm)
+        rgb = None
+        if frames is not None and len(frames) == T:
+            rgb = frames[t]
+            if not isinstance(rgb, np.ndarray):
+                from PIL import Image
+                with Image.open(rgb) as im:
+                    rgb = np.asarray(im.convert("RGB"))
+            if rgb.shape[:2] != d.shape:
+                import cv2
+                rgb = cv2.resize(rgb, (d.shape[1], d.shape[0]), interpolation=cv2.INTER_AREA)
         out[t] = stable_frame(d, sel[t], None if track is None else track[t], hl[t], reach_frac=reach_frac,
-                              prev=None if t in starts else out[t - 1])
+                              prev=None if t in starts else out[t - 1], rgb=rgb)
     if frames is not None and len(frames) == T:
         out, fixed = temporal_guard(out, frames, det, shots, selector=sel)
         if fixed:
