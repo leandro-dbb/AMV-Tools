@@ -34,9 +34,13 @@ describe('stageLabel', () => {
 describe('etaSeconds', () => {
   it('waits for some signal, then extrapolates', () => {
     expect(etaSeconds(1, 60)).toBeNull();
+    expect(etaSeconds(5, 300)).toBeNull();
     expect(etaSeconds(50, 2)).toBeNull();
     expect(etaSeconds(25, 60)).toBe(180);
     expect(etaSeconds(100, 60)).toBeNull();
+    // Measured from the tagging stage: 30 s for 25 -> 40 % => 60 % left at 2 %/s.
+    expect(etaSeconds(40, 30, 25)).toBe(120);
+    expect(etaSeconds(26, 30, 25)).toBeNull();
   });
 });
 

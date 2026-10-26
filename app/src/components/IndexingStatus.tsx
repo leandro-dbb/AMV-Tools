@@ -10,17 +10,20 @@ import { etaSeconds, stageLabel } from '../indexProgress';
 
 export default function IndexingStatus({ progress, percent }: { progress: ProgressEvent; percent: number }) {
   const t = useT();
-  const started = useRef<{ video?: string; at: number }>({ at: Date.now() });
+  // Anchor of the time-left estimate: reset per file, then moved to the
+  // moment the bar reaches the tagging stage (cut detection is not linear).
+  const started = useRef<{ video?: string; at: number; pct: number }>({ at: Date.now(), pct: 0 });
   const [now, setNow] = useState(Date.now());
   const [stopping, setStopping] = useState(false);
 
-  if (started.current.video !== progress.video) started.current = { video: progress.video, at: Date.now() };
+  if (started.current.video !== progress.video) started.current = { video: progress.video, at: Date.now(), pct: 0 };
+  if (started.current.pct < 25 && percent >= 25) started.current = { video: progress.video, at: Date.now(), pct: percent };
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const eta = etaSeconds(percent, (now - started.current.at) / 1000);
+  const eta = etaSeconds(percent, (now - started.current.at) / 1000, started.current.pct);
   const stage = stageLabel(progress.message, t);
   return (
     <>

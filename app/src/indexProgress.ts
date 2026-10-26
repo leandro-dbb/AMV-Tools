@@ -28,11 +28,14 @@ export function stageLabel(message: string | undefined, t: TFunc): string {
   return message;
 }
 
-/** Seconds left for the current file, extrapolated from its progress so far.
- *  null until there is enough signal (a few percent, a few seconds). */
-export function etaSeconds(percent: number, elapsedS: number): number | null {
-  if (percent < 3 || percent >= 100 || elapsedS < 5) return null;
-  return (elapsedS * (100 - percent)) / percent;
+/** Seconds left for the current file, extrapolated from the progress made
+ *  since `fromPercent` (when the bar passed the tagging/embedding stages, the
+ *  bulk of the work). null until there is enough signal: during cut
+ *  detection the bar sits on 3-5 % and the estimate climbed to "23 min". */
+export function etaSeconds(percent: number, elapsedS: number, fromPercent = 0): number | null {
+  const done = percent - fromPercent;
+  if (percent < 25 || percent >= 100 || elapsedS < 5 || done < 3) return null;
+  return (elapsedS * (100 - percent)) / done;
 }
 
 export interface IndexFailure { video: string; path?: string; reason: string }
