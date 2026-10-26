@@ -48,6 +48,16 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
+  // Sub-segmentation runs the tagger on many extra frames: fine on a GPU,
+  // but it multiplies a CPU-only indexing time. Follow the backend choice
+  // until the user picks a profile themselves.
+  const [profileTouched, setProfileTouched] = useState(false);
+  const recommendedProfile: 'fast' | 'quality' = selected === 'cpu' ? 'fast' : 'quality';
+  function pickBackend(id: GpuBackend) {
+    setSelected(id);
+    if (!profileTouched) setProfile(id === 'cpu' ? 'fast' : 'quality');
+  }
+
   const visibleOptions = ALL_OPTIONS.filter((o) => {
     if (!o.platforms) return true;
     return o.platforms.some((p) => platformIs(p));
@@ -101,10 +111,10 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="w-screen h-screen bg-gradient-to-br from-[#0F0F11] via-[#18181B] to-[#0F0F11] text-[#FAFAFA] flex items-center justify-center p-8 overflow-auto" style={{ fontFamily: 'Inter, Space Grotesk, system-ui, sans-serif' }}>
+    <div className="w-screen h-screen bg-gradient-to-br from-[#0F0F11] via-[#18181B] to-[#0F0F11] text-[#FAFAFA] flex p-8 overflow-auto" style={{ fontFamily: 'Inter, Space Grotesk, system-ui, sans-serif' }}>
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-[#8B5CF6]/10 rounded-full blur-[150px] pointer-events-none"></div>
 
-      <div className="relative max-w-4xl w-full">
+      <div className="relative max-w-4xl w-full m-auto">
         <div className="absolute top-0 right-0 flex gap-1.5 z-10">
           {(['en', 'fr'] as const).map((l) => (
             <button
@@ -144,7 +154,7 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
               {visibleOptions.map((opt) => {
                 const isSel = selected === opt.id;
                 return (
-                  <button key={opt.id} onClick={() => setSelected(opt.id)}
+                  <button key={opt.id} onClick={() => pickBackend(opt.id)}
                     className={`relative text-left p-5 rounded-xl border-2 transition-all ${isSel ? 'border-[#8B5CF6] bg-gradient-to-br from-[#8B5CF6]/10 to-[#EC4899]/10 shadow-lg shadow-[#8B5CF6]/20' : 'border-[#27272A] bg-[#18181B]/50 hover:border-[#3f3f46]'}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1">
@@ -167,13 +177,13 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
             <div className="mb-2 font-semibold text-[#FAFAFA]">{t('onboarding.profile.title')}</div>
             <div className="grid grid-cols-2 gap-3 mb-2">
               {([
-                { id: 'fast' as const, icon: Zap, title: 'onboarding.profile.fast.title', detail: 'onboarding.profile.fast.detail' },
-                { id: 'quality' as const, icon: Target, title: 'onboarding.profile.quality.title', detail: 'onboarding.profile.quality.detail', recommended: true },
+                { id: 'fast' as const, icon: Zap, title: 'onboarding.profile.fast.title', detail: 'onboarding.profile.fast.detail', recommended: recommendedProfile === 'fast' },
+                { id: 'quality' as const, icon: Target, title: 'onboarding.profile.quality.title', detail: 'onboarding.profile.quality.detail', recommended: recommendedProfile === 'quality' },
               ]).map((p) => {
                 const isSel = profile === p.id;
                 const Icon = p.icon;
                 return (
-                  <button key={p.id} onClick={() => setProfile(p.id)}
+                  <button key={p.id} onClick={() => { setProfile(p.id); setProfileTouched(true); }}
                     className={`relative text-left p-5 rounded-xl border-2 transition-all ${isSel ? 'border-[#EC4899] bg-gradient-to-br from-[#EC4899]/10 to-[#8B5CF6]/10 shadow-lg shadow-[#EC4899]/20' : 'border-[#27272A] bg-[#18181B]/50 hover:border-[#3f3f46]'}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1">
@@ -190,7 +200,10 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
                 );
               })}
             </div>
-            <div className="text-xs text-[#71717A] mb-6">{t('onboarding.profile.changeLater')}</div>
+            <div className="text-xs text-[#71717A] mb-6">
+              {selected === 'cpu' && <span className="text-[#FBBF24]">{t('journey.onboarding.cpuFast')} </span>}
+              {t('onboarding.profile.changeLater')}
+            </div>
 
             <div className="flex justify-end gap-3">
               <button onClick={startInstall} className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-8 py-3 rounded-xl text-sm font-semibold hover:shadow-lg hover:shadow-[#8B5CF6]/50 transition-all">

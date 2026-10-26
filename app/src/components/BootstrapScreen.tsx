@@ -26,11 +26,11 @@ export default function BootstrapScreen({ lines, error }: Props) {
 
   return (
     <div
-      className="w-screen h-screen bg-gradient-to-br from-[#0F0F11] via-[#18181B] to-[#0F0F11] text-[#FAFAFA] flex items-center justify-center p-8 overflow-auto"
+      className="w-screen h-screen bg-gradient-to-br from-[#0F0F11] via-[#18181B] to-[#0F0F11] text-[#FAFAFA] flex p-8 overflow-auto"
       style={{ fontFamily: 'Inter, Space Grotesk, system-ui, sans-serif' }}
     >
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-[#8B5CF6]/10 rounded-full blur-[150px] pointer-events-none" />
-      <div className="relative max-w-3xl w-full">
+      <div className="relative max-w-3xl w-full m-auto">
         <div className="flex items-center gap-3 mb-2">
           <div className="relative">
             <div className="absolute inset-0 bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] rounded-lg blur-lg opacity-50" />
