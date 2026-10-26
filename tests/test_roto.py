@@ -855,7 +855,7 @@ def test_stable_frame_does_not_add_an_aura_sam3_glued_to_a_character_birefnet_se
     assert det_seen(det) == [True, True, False, True, True]
 
 
-def _inked(h=120, w=200):
+def _inked(h=480, w=800):
     """A yellow character with a 3 px black outline on sky; the matte stops
     at the fill (the ink line is left out), as BiRefNet often does."""
     rgb = np.zeros((h, w, 3), np.uint8)
@@ -870,7 +870,7 @@ def test_absorb_ink_takes_the_outer_outline_into_the_matte():
     from backend.models.edge_refine import absorb_ink, finish_edges, outline_ink
     rgb, matte = _inked()
     a, ink = absorb_ink(rgb, matte)
-    assert (a[27:30, 57:143] == 1.0).all() and (a[90:93, 57:143] == 1.0).all()   # the whole line, opaque
+    assert (a[27:30, 60:140] == 1.0).all() and (a[90:93, 60:140] == 1.0).all()   # the whole line, opaque
     assert a[20, 100] == 0.0 and a[60, 30] == 0.0                                 # sky stays out
     ref_ink = outline_ink(rgb, matte > 0.5)
     assert ref_ink.sum() > 400 and (matte[ref_ink] >= 0.9).mean() < 0.1           # the bare matte misses it
@@ -886,3 +886,12 @@ def test_absorb_ink_does_nothing_on_a_background_as_dark_as_the_ink():
     rgb[np.where(matte == 0)] = (15, 15, 20)            # night: background as dark as the line
     a, ink = absorb_ink(rgb, matte)
     assert not ink.any() and a[10, 10] == 0.0
+
+
+def test_absorb_ink_leaves_dark_scenery_texture_touching_the_matte():
+    from backend.models.edge_refine import absorb_ink
+    rgb, matte = _inked()
+    rgb[40:80, 143:175] = (25, 45, 25)                  # dark foliage against his right side
+    a, ink = absorb_ink(rgb, matte)
+    assert a[60, 150] == 0.0                            # the foliage is not taken as outline
+    assert (a[27:30, 70:130] == 1.0).all()              # the real outline still is

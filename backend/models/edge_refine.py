@@ -309,7 +309,9 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
     :data:`INK_DARK` under the local background and under
     :data:`INK_MAX_LUMA`) connected to the solid matte through dark pixels,
     within ``band_frac`` of the diagonal outside it, is made opaque, the
-    dark pixels already in the matte's edge too; the 1-2 px antialiasing
+    dark pixels already in the matte's edge too — a piece is taken only if
+    the lighter background lies right beyond it (an outline), not more dark
+    texture (foliage, mortar between stones); the 1-2 px antialiasing
     ring beyond the ink gets the alpha its luma implies (between the ink and
     the background). Where the background is as dark as the ink (night)
     nothing is changed. Returns (alpha, ink mask made opaque)."""
@@ -330,7 +332,19 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
         if (grown == region).all():
             break
         region = grown
-    ink = region & cand
+    ink = region & cand & ~solid
+    if ink.any():
+        # an outline has the lighter background right beyond it; dark
+        # scenery texture (foliage, mortar) touching the matte goes on being
+        # dark farther out: absorbed pixels next to dark pixels beyond the
+        # band are left out
+        far_dark = dark & (d_out > band)
+        if far_dark.any():
+            r = 1
+            near_far = cv2.dilate(far_dark.astype(np.uint8),
+                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+            ink &= ~near_far
+    ink |= cand & solid & region
     out = a.copy()
     out[ink] = 1.0
     if ink.any():

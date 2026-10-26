@@ -1067,6 +1067,16 @@ def bg_metrics(a: np.ndarray, gt: np.ndarray) -> dict:
     return out
 
 
+def ink_kept(rgb: np.ndarray, a: np.ndarray, gt: np.ndarray, band_px: int = 4) -> float:
+    """Contour ink kept (%): share of the pixels of the character's outer
+    ink line (dark pixels within ``band_px`` of the reference contour, where
+    the background is lighter: edge_refine.outline_ink) that the exported
+    alpha keeps at >= 0.9; nan where fewer than 50 such pixels."""
+    from backend.models.edge_refine import outline_ink
+    ink = outline_ink(rgb, gt, band_px)
+    return float((a[ink] >= 0.9).mean() * 100) if ink.sum() >= 50 else float("nan")
+
+
 def held_kept(a: np.ndarray, ref: Path) -> float:
     """Held object kept (%): mean exported alpha on the reference mask of the
     objects the characters hold or wear (<root>/gt_held, a subset of the
@@ -1264,7 +1274,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
         paths = frame_paths(root, sid)
         js, fs, es, fails = [], [], [], 0
         bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": [], "contam_true": [], "colerr": [], "contam_col": [],
-               "held": []}
+               "held": [], "ink": []}
         for idx in scored_frames(root, sid, len(paths)):
             gt = read_alpha(root / "gt" / sid / f"{idx:05d}.png") > 0.5
             a = read_alpha(rd / f"{idx:05d}.png")
@@ -1273,6 +1283,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             for k_, v_ in bg_metrics(a_e, gt).items():
                 bgs[k_].append(v_)
             bgs["held"].append(held_kept(a_e, root / "gt_held" / sid / f"{idx:05d}.png"))
+            bgs["ink"].append(ink_kept(rgb, a_e, gt))
             bgs["contam"].append(contamination(rgb_e, rgb, a_e, gt))
             # ground-truth contamination: the same export run on a composite
             # of this frame whose true colours are known (method's alpha)
@@ -1393,8 +1404,8 @@ def stable_table(scores: dict, shots: list[dict]) -> str:
             cats.append(s["cat"])
     lines = ["| méthode | catégorie | images | perdues | sauts > 25 % | scint. % | J | fond contour % | (médiane) | mangé % "
              "| contour (fond + mangé) | fond intérieur % | objet tenu % | objet tenu, toutes images % "
-             "| images sans l'objet | îlots / image | px isolés / image |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| images sans l'objet | îlots / image | px isolés / image | encre de contour % (pire plan) |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for m, per in scores.items():
         for cat in cats + ["TOUT"]:
             ids = [s["id"] for s in shots if (cat == "TOUT" or s["cat"] == cat) and s["id"] in per
@@ -1407,7 +1418,8 @@ def stable_table(scores: dict, shots: list[dict]) -> str:
             lines.append(f"| {m} | {cat} | {tot('n_frames')} | {tot('lost')} | {tot('jumps')} | {g('flicker'):.1f} | "
                          f"{g('J'):.3f} | {g('bg_band'):.1f} | {med('bg_band'):.1f} | {g('eaten'):.1f} | {g('bg_band') + g('eaten'):.1f} | "
                          f"{g('bg_in'):.1f} | {g('held'):.1f} | {g('held_seq'):.1f} | "
-                         f"{tot('held_seq_lost')}/{tot('held_seq_n')} | {g('islands'):.2f} | {g('orphans'):.0f} |")
+                         f"{tot('held_seq_lost')}/{tot('held_seq_n')} | {g('islands'):.2f} | {g('orphans'):.0f} | "
+                         f"{g('ink'):.1f} ({float(np.nanmin([per[i].get('ink', np.nan) for i in ids])):.1f}) |")
     return "\n".join(lines)
 
 
