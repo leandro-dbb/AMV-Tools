@@ -37,11 +37,22 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const [log, setLog] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [pythonVer, setPythonVer] = useState<string>('');
+  // Pre-install GPU probe (nvidia-smi / WMI): suggests the right backend
+  // instead of always CUDA 13 (an AMD or GPU-less PC can't use it).
+  const [detected, setDetected] = useState<{ recommended: GpuBackend; gpu: string | null } | null>(null);
+  const userPicked = useRef(false);
   const logRef = useRef<HTMLPreElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     api.status().then((s) => setPythonVer(s.python_version)).catch(() => {});
+    api.setupHardware().then((hw) => {
+      const id = hw.recommended as GpuBackend;
+      if (!ALL_OPTIONS.some((o) => o.id === id)) return;
+      const gpu = hw.nvidia[0]?.name ?? hw.adapters.find((a) => a.vendor !== 'virtual')?.name ?? null;
+      setDetected({ recommended: id, gpu });
+      if (!userPicked.current) setSelected(id);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -140,18 +151,23 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
 
         {phase === 'choose' && (
           <>
+            {detected && (
+              <p className="text-xs text-[#A1A1AA] mb-3" data-testid="onboarding-detected">
+                {t('onboarding.detected', { gpu: detected.gpu ?? t('onboarding.detectedNone') })}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-6">
               {visibleOptions.map((opt) => {
                 const isSel = selected === opt.id;
                 return (
-                  <button key={opt.id} onClick={() => setSelected(opt.id)}
+                  <button key={opt.id} onClick={() => { userPicked.current = true; setSelected(opt.id); }}
                     className={`relative text-left p-5 rounded-xl border-2 transition-all ${isSel ? 'border-[#8B5CF6] bg-gradient-to-br from-[#8B5CF6]/10 to-[#EC4899]/10 shadow-lg shadow-[#8B5CF6]/20' : 'border-[#27272A] bg-[#18181B]/50 hover:border-[#3f3f46]'}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <Cpu size={16} className={isSel ? 'text-[#8B5CF6]' : 'text-[#71717A]'} />
                           <span className="font-semibold text-[#FAFAFA]">{t(opt.title)}</span>
-                          {opt.recommended && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase tracking-wider">{t('common.recommended')}</span>}
+                          {(detected ? detected.recommended === opt.id : opt.recommended) && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8B5CF6]/20 text-[#8B5CF6] font-bold uppercase tracking-wider">{t('common.recommended')}</span>}
                           {opt.badge && <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#EC4899]/20 text-[#EC4899] font-bold uppercase tracking-wider">{t(opt.badge)}</span>}
                         </div>
                         <div className="text-xs text-[#71717A] mb-2">{t(opt.subtitle)}</div>

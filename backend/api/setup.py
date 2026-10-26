@@ -214,3 +214,11 @@ async def install_backend(req: SetupRequest):
 def setup_status():
     marker = user_data_dir() / ".setup_complete"
     return {"complete": marker.exists(), "backend": marker.read_text() if marker.exists() else None}
+
+
+@router.get("/api/setup/hardware")
+def setup_hardware():
+    # Pre-install GPU probe (nvidia-smi / WMI, no torch): the onboarding
+    # screen preselects the suggested backend instead of always CUDA 13.
+    from .. import gpu_probe
+    return gpu_probe.probe()

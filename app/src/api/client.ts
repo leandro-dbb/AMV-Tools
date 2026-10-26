@@ -99,6 +99,9 @@ export const api = {
       body: JSON.stringify({ backend }),
     }),
 
+  setupHardware: () =>
+    req<{ recommended: string; reason: string; nvidia: { name: string; driver: string }[]; adapters: { name: string; vendor: string }[] }>('/api/setup/hardware'),
+
   search: (body: SearchRequest) =>
     req<{ results: SceneResult[]; total: number }>('/api/search', {
       method: 'POST',
