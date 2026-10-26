@@ -30,6 +30,17 @@ All notable changes to AMV Tools are documented here.
   in, opaque, with their antialiasing; the export never makes them
   transparent or recolours them. Nothing changes where the background is as
   dark as the ink.
+- **Smooth, complete outline at export** (the v3 examples had staircase
+  edges, background fringes at the hair tips and holes in them): the alpha
+  of the outline band is re-solved at the source resolution from the local
+  colours (a matte computed at 1080x608 is no longer just scaled up; tips
+  the matte stopped short of come back, never half-alpha glow or scenery of
+  another colour), the ink line is absorbed at full resolution only, with
+  the drawing's own antialiasing just beyond it and the light background
+  there set to 0 (no fringe), the max-quality colour re-solve no longer
+  touches the outline, the outline band gets a light 0.8 px antialiasing,
+  and the holes the export opens are closed. New benchmark measures: outline
+  roughness and small enclosed holes per frame.
 - Measured on the rebuilt benchmark (27 shots, 2 058 frames, the app's chain
   end to end), old 0.4 -> night max quality -> Stable: lost frames 30 -> 28
   -> 10 (all checked by eye: smoke hiding the character, pure speed-blur
