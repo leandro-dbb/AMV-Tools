@@ -163,4 +163,9 @@ export const onboardingStrings: Dict = {
   'tutorial.skip': { en: 'Skip', fr: 'Passer' },
   'tutorial.next': { en: 'Next', fr: 'Suivant' },
   'tutorial.letsGo': { en: 'Let\'s go', fr: 'C\'est parti' },
+  'onboarding.detected': {
+    en: 'Detected on this PC: {gpu}. The suggested option is preselected.',
+    fr: 'Détecté sur ce PC : {gpu}. L\'option conseillée est présélectionnée.',
+  },
+  'onboarding.detectedNone': { en: 'no usable GPU', fr: 'aucun GPU utilisable' },
 };
