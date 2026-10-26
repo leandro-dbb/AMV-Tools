@@ -38,7 +38,10 @@ All notable changes to AMV Tools are documented here.
   fills where BiRefNet loses the character or most of one (blur, dark
   characters), with a soft join, never on BiRefNet's own edge. The export
   ("soft" edge mode) scales the matte up with a guided filter as the old
-  mode did, adds the outer ink line without ever lowering alpha, closes
+  mode did, adds the outer ink line without ever lowering alpha (only
+  inside BiRefNet's own gradient, as one smooth coverage, not pixel by
+  pixel, so the edge stays as smooth as the old mode's; never on the black
+  background between aura flames), closes
   tiny holes and decontaminates the edge colours. The temporal guard, held
   objects and the speck cleanup stay.
 - **Smooth, complete outline at export** (the v3 examples had staircase
