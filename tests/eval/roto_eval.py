@@ -537,8 +537,9 @@ def method_runner(name: str, args, dev):
         import re
         head, rest = name.split("~", 1)
         base, sel = rest.rsplit("~", 1)
-        mm = re.match(r"hug(\d+)(?:t(\d+))?(?:o(\d+))?(f)?(h)?", head)
-        k, tt, oo, ff, hh = int(mm.group(1)), mm.group(2), mm.group(3), mm.group(4), mm.group(5)
+        mm = re.match(r"hug(\d+)(?:t(\d+))?(?:o(\d+))?(?:r(\d+))?(f)?(h)?", head)
+        k, tt, oo, rr, ff, hh = (int(mm.group(1)), mm.group(2), mm.group(3), mm.group(4),
+                                 mm.group(5), mm.group(6))
         from backend.models.auto_roto import drop_fragments, hug_with_tips
         root = Path(args.root)
 
@@ -551,6 +552,7 @@ def method_runner(name: str, args, dev):
                 o = hug_with_tips(b, g, tight_frac=k / 1000.0,
                                   max_touch=int(tt) / 100.0 if tt else 0.45,
                                   opaque=int(oo) / 100.0 if oo else 0.9,
+                                  reach_frac=int(rr) / 1000.0 if rr else 0.025,
                                   rgb=read_rgb(paths[i]) if hh else None)
                 out.append(drop_fragments(o, g) if ff else o)
             return np.stack(out)
@@ -577,6 +579,21 @@ def method_runner(name: str, args, dev):
                         out[t] = (S[t - 1].astype(np.uint8) + S[t] + S[t + 1]) >= 2
             return out.astype(np.float32)
         run.detector = [sel]
+        return run
+    if name.startswith("stab"):
+        # stab<k>~<base>: the app's temporal stabilisation after tracking
+        # (finish.matte.postprocess_stack, strength k/100; the Auto engine
+        # uses 0.5 x the setting = 0.25)
+        head, base = name.split("~", 1)
+        k = int(head[4:]) / 100.0
+        root = Path(args.root)
+        from backend.finish.matte import postprocess_stack
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            m = np.stack([read_alpha(root / "runs" / base / sid / f"{i:05d}.png") for i in range(len(paths))])
+            return postprocess_stack(m, [read_rgb(p) for p in paths], stabilize=True, strength=k)
+        run.detector = [base]
         return run
     if name.startswith("avg-"):
         # avg-<a>,<b>,...: mean of several detector mattes (ensemble)
@@ -851,6 +868,9 @@ def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, 
         return mp.clean_edges_with_background(rgb, a2, resolve_alpha=False)
     if name == "v06":
         return mp.export_edges(rgb, a)
+    if name == "max":  # the max-quality export of the app (edge_refine.finish_edges)
+        from backend.models.edge_refine import finish_edges
+        return finish_edges(rgb, a, "max")
     if name == "fg":  # foreground estimation only, alpha untouched
         from backend.models.edge_refine import estimate_foreground
         return estimate_foreground(rgb, a), a
@@ -864,6 +884,20 @@ def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, 
         from backend.models import edge_refine as er
         a2 = er.colour_solve(rgb, a) if name == "cs" else er.colour_solve_safe(rgb, a)
         return er.estimate_foreground(rgb, a2), a2
+    if name.startswith("csu"):  # csu<in>_<out>: csi alpha, colours unmixed against the nearest background
+        from backend.models import edge_refine as er
+        from backend.models import mask_postprocess as mp
+        ri, ro = (int(x) / 1000.0 for x in name[3:].split("_"))
+        a2 = er.colour_solve_safe(rgb, a, band_frac=ro, in_frac=ri)
+        col, _ = mp.clean_edges_with_background(rgb, a2, resolve_alpha=False)
+        return col, a2
+    if name.startswith("csb"):  # csb<in>_<out>: csi alpha, then unmix, then foreground estimation
+        from backend.models import edge_refine as er
+        from backend.models import mask_postprocess as mp
+        ri, ro = (int(x) / 1000.0 for x in name[3:].split("_"))
+        a2 = er.colour_solve_safe(rgb, a, band_frac=ro, in_frac=ri)
+        col, _ = mp.clean_edges_with_background(rgb, a2, resolve_alpha=False)
+        return er.estimate_foreground(col, a2), a2
     if name.startswith("csi"):  # csi<in>_<out>[_<ink%>][n<near%>]: asymmetric band, ink lines protected
         from backend.models import edge_refine as er
         near = 0.0
