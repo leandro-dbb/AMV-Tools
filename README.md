@@ -169,10 +169,10 @@ by default** — enable it from `Settings > Models`.
   out of them (aura flares); a frame where the character would vanish
   (camera shake, motion blur, flash) takes its neighbours' matte; loose
   background specks are cleaned the same way on every frame; the
-  character's outer ink line is always kept, opaque, and the outline is
-  refined at the source resolution at export (antialiased, hair tips
-  complete, no fringe of background). A little background can remain, to
-  brush away.
+  character's outer ink line is added, opaque; the outline itself is the
+  outline model's own soft edge (scaled up onto the full-resolution art,
+  as in 0.4), never redrawn. A little background can remain, to brush
+  away.
 - **Max quality** (*Settings > Models > Cutout mode*): SAM 3 runs a second, zoomed
   pass on each character, the matte hugs SAM 3's outline tightly but gives
   back the hair tips SAM 3 misses, loose fragments are dropped, and the
