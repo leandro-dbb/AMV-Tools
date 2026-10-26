@@ -377,6 +377,9 @@ function watchSmokeControlDir() {
     let names: string[] = [];
     try { names = fs.readdirSync(smokeControlDir); } catch { return; }
     for (const name of names) {
+      // Only our own command files are consumed (and deleted): a mistyped
+      // env var pointing at a real folder must never lose anyone's files.
+      if (name !== 'quit' && name !== 'reload' && !/^shot-[\w-]{1,40}$/.test(name)) continue;
       try { fs.rmSync(path.join(smokeControlDir, name), { force: true }); } catch {}
       console.log(`[smoke] control: ${name}`);
       if (name === 'quit') {
