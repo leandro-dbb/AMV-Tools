@@ -150,6 +150,13 @@ cartes).
 | < 1 s par image sur RTX 3090 | **oui** | 539 ms (masques), 705 ms export 1080p compris | — |
 | qualité à ± 0,3 point | **oui** | écart max 0,1 point | — |
 
+**Défaut visible restant** (planches, déjà présent en partie 3) : une **mèche fine isolée** qui part
+de la tête (s01, 1 à 2 px de large) est coupée par le contour serré sur SAM 3, avec quelques
+pixels blancs dans le trait à sa jonction ; BiRefNet seul la garde. Deux corrections essayées :
+rendre les pointes dès 60 % / 75 % d'opacité (la mèche revient en partie, mais le fond enfermé passe
+de 5,1 à 5,6 / 5,4 %), rendre les structures fines quelle que soit leur opacité (même effet, 5,6 %) —
+refusées, au-delà des 0,3 point tolérés.
+
 Planches de la partie 4 (sur la machine de mesure, `reports/roto/roto4/`) : `black/` et `white/`,
 zooms ×4 sur le contour le plus découpé de 3 images clés par plan — export de la partie 3 contre
 export final démélangé, sur fond noir et sur fond blanc.
