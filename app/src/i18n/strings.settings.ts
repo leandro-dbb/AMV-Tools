@@ -22,7 +22,7 @@ export const settingsStrings: Dict = {
   'settings.section.models': { en: 'Models', fr: 'Modèles' },
   'settings.section.search': { en: 'Search', fr: 'Recherche' },
   'settings.section.editor': { en: 'Editor', fr: 'Éditeur' },
-  'settings.section.derush': { en: 'Derush', fr: 'Derush' },
+  'settings.section.derush': { en: 'Derush', fr: 'Dérushage' },
   'settings.section.export': { en: 'Export', fr: 'Export' },
   'settings.section.databases': { en: 'Databases', fr: 'Bases de données' },
   'settings.section.interface': { en: 'Interface', fr: 'Interface' },

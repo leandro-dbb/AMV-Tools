@@ -173,8 +173,20 @@ export default function App() {
       <div className="w-screen h-screen bg-[#0F0F11] flex items-center justify-center text-[#FAFAFA]">
         <div className="max-w-md text-center">
           <div className="text-2xl font-semibold mb-3">{t('app.unreachable.title')}</div>
-          <div className="text-[#A1A1AA] text-sm">{t('app.unreachable.body')}</div>
-          <pre className="mt-4 bg-[#18181B] border border-[#27272A] p-3 rounded-lg text-xs text-left text-[#A1A1AA]">uv run --extra cu130 backend/server.py --port 8731</pre>
+          {window.amvBridge ? (
+            // Inside the app the sidecar was started for the user: a shell
+            // command means nothing to an editor. Status keeps polling, so
+            // the app recovers by itself if the sidecar comes back.
+            <>
+              <div className="text-[#A1A1AA] text-sm">{t('journey.unreachable.app')}</div>
+              <div className="mt-3 text-xs text-[#71717A] break-all">{statusError}</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[#A1A1AA] text-sm">{t('app.unreachable.body')}</div>
+              <pre className="mt-4 bg-[#18181B] border border-[#27272A] p-3 rounded-lg text-xs text-left text-[#A1A1AA]">uv run --extra cu130 backend/server.py --port 8731</pre>
+            </>
+          )}
         </div>
       </div>
     );
