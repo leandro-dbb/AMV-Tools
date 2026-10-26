@@ -86,10 +86,9 @@ Même chaîne de modèles que la qualité max (BiRefNet, SAM 3, SAM 2.1), décis
    contour, poche de fond entre les bras. La décision de l'image précédente pèse (seuils × 1,5 pour un
    morceau qu'elle gardait) : pas de clignotement. Objets tenus et personnages manqués par SAM 3 mais
    suivis ne sont jamais triés.
-5. **SAM 3 ajouté** (érodé de 2 px) seulement sur les images où BiRefNet perd le personnage (aire
-   effondrée par rapport aux voisines : flou) ou pour un personnage que BiRefNet ne voit pas du tout ; ses
-   fausses détections d'une seule image et ses masques qui enflent (aura collée) sont filtrés par les
-   images voisines.
+5. **SAM 3 ajouté** (érodé de 2 px) sur chaque image : un personnage que BiRefNet perd dans un flou, ou
+   les parties d'un personnage sombre qu'il rate (b2), restent ; ses fausses détections d'une seule image
+   et ses masques qui enflent (aura collée) sont filtrés par les images voisines.
 6. **Garde temporelle** : une image dont l'aire tombe sous 60 % de la médiane glissante reprend le
    masque de sa voisine porté par le flot optique (Farneback), seulement là où BiRefNet ou SAM 3 voient
    encore quelque chose (à 2 % de la diagonale) et s'ils en voient au moins 30 % — un personnage parti
@@ -128,12 +127,13 @@ démon de b2 sur plusieurs images (grosse excroissance sombre aux couleurs du fo
 47 % sur ce plan, 2 sauts). Réglages gardés : 3 px, 4 px, 15 % / 35 %. Rien ne disparaît passe avant
 moins de fond.
 
-Deux corrections encore, trouvées en regardant les images : sur s15, SAM 3 (passe non zoomée de l'appli)
-colle toute l'aura à Goku sur 8 images que BiRefNet découpe bien → le masque SAM 3 n'est plus ajouté que
-sur les images où BiRefNet perd le personnage (aire effondrée par rapport aux voisines), ou pour un
-personnage que BiRefNet ne voit pas du tout ; sur s13, la même aura collée sur 2 images floues
+Corrections trouvées en regardant les images : sur s13, SAM 3 colle l'aura à Goku sur 2 images floues
 (masque ×3) → un masque SAM 3 qui enfle de plus de 1,6 × sa médiane glissante est recoupé sur le masque
-de la voisine normale porté par le flot optique.
+de la voisine normale porté par le flot optique. Sur s15, SAM 3 (passe non zoomée de l'appli) colle
+l'aura à Goku sur 8 images que BiRefNet découpe bien ; n'ajouter SAM 3 que là où BiRefNet perd le
+personnage réglait s15 mais **faisait disparaître** de grandes parties du démon noir de b2 (que BiRefNet
+rate en permanence ; mangé 14 → 44 %) et son aile sur 2 images : essayé puis **retiré** — SAM 3 est de
+nouveau ajouté partout (l'aura de s15 revient sur quelques images : du fond en trop, pas une perte).
 
 ## 5. Résultats — chaîne complète de l'appli (`app_stable`), 27 plans, 2 058 images
 
@@ -158,7 +158,7 @@ d'aire > 25 % entre voisines ; « encre de contour » = moyenne des plans (pire 
 - La ligne **v3** du tableau a été mesurée avec des réglages d'excroissances plus serrés (§4), retirés
   ensuite parce qu'ils coupaient l'aile du démon de b2 (mangé 47 % et 2 sauts sur ce plan ; sauts b2 5 et
   14). Le passage complet du banc avec les réglages finaux (ceux de la v2 + le trait d'encre) n'a pas pu
-  finir avant l'échéance : voir §5 bis pour les plans terminés.
+  finir avant l'échéance : voir §5 bis pour les plans terminés et b2 corrigé.
 - Encre de contour de la v3 sous 97 % : b2 49 % (forme démoniaque noire sur fond sombre, aile coupée par ces
   réglages), s13 57 % (mesure non fiable : sol et fond noir autour de l'aura, §6), s15 93 %, L1 94 %,
   b5 96 %, h5 96 %, b6 97 % ; tous les autres plans ≥ 97 %.
@@ -177,8 +177,20 @@ et la fumée ; b2 [5, 14] l'aile coupée par les réglages serrés (corrigé, §
 
 ## 5 bis. Réglages finaux (v2 + trait d'encre) — plans terminés à l'échéance
 
-Le passage du banc avec les réglages finaux tournait encore à l'échéance (13 h 15). Les exemples v3
-(§7) sont produits avec ces réglages finaux.
+Le passage complet du banc avec le code final n'a pas pu finir avant l'échéance (13 h 15) : les deux
+derniers correctifs (§4 : SAM 3 de nouveau ajouté partout ; ce que l'image précédente avait) sont arrivés
+à 12 h 45-12 h 50, après la vérification de b2. Mesures disponibles :
+
+- **13 premiers plans** (s01 à s17), réglages v2 + trait d'encre, avant ces deux correctifs : 10 images
+  perdues (les mêmes, toutes justifiées), 17 sauts, encre de contour 95,4 % (tous ≥ 97 % sauf s13 58 %
+  — mesure non fiable — et s15 93 %), mangé 3,5 %, fond contour 8,3 % (médiane 4,9 %), fond enfermé
+  12,3 %, 0,02 îlot par image. Sur les mêmes plans, v2 : mangé 3,1 %, fond contour 7,1 %, encre 73 %.
+- **b2 et s15 avec le code final** : b2 : mangé 10 % (v2 14 %, version restreinte 44 %), encre 89 % (49 % avant), 0 image
+  perdue, 0 saut (l'aile reste), fond contour 31 % et fond enfermé 20 % (le démon noir est collé au décor
+  sombre : du fond en trop), 0,75 îlot par image ; s15 : mangé 9 %, encre 93 %, 0 image perdue, 1 saut
+  (image 39 : l'aura que SAM 3 colle à Goku revient sur les dernières images — du fond, pas une perte).
+- Les autres plans de la seconde moitié terminés avant ces correctifs (s18, s19, s20, L1, b1) : encre
+  97-100 % (L1 94 %), mangé ≤ 1 % (L1 13 %, comme en v2), aucune image perdue ni saut.
 
 ## 6. Le trait d'encre extérieur (verdict de Léandro sur les exemples v2)
 
