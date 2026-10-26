@@ -280,6 +280,7 @@ def _export_worker(items: list[dict], export_settings: dict) -> None:
         state.publish({
             "type": "derush_export", "current": total, "total": total, "percent": 100,
             "message": f"{done} exported" + (f", {failed} failed" if failed else ""),
+            "exported_count": done, "failed_count": failed,
             "done": True, "ok": failed == 0,
             "output": str(base_dir / "derush"),
         })

@@ -6,6 +6,7 @@ import { useT } from '../i18n';
 import MaskMode from './MaskMode';
 import { SimilarButton } from './SceneBadges';
 import FinishMenu from './FinishMenu';
+import { parseApiError } from '../modelTiers';
 
 interface MiniEditorProps {
   scenes: SceneResult[];
@@ -272,7 +273,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
       setExportResult(r.output);
       api.revealOutput(r.output);
     } catch (err) {
-      setExportResult(`Error: ${(err as Error).message}`);
+      setExportResult(`Error: ${parseApiError(err).message}`);
     } finally {
       setExporting(false);
     }
@@ -365,7 +366,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
               {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
               {exporting ? t('editor.exporting') : t('editor.exportBtn', { seconds: ((trimEnd - trimStart) / 1000).toFixed(1) })}
             </button>
-            <button onClick={onClose} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group ml-2">
+            <button onClick={onClose} title={t('common.close')} aria-label={t('common.close')} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group ml-2">
               <X size={20} className="text-[#A1A1AA] group-hover:text-[#EC4899]" />
             </button>
           </div>

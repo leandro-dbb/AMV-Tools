@@ -11,6 +11,7 @@ import { useT } from '../i18n';
 import TimelineExportDialog from './TimelineExportDialog';
 import { SimilarButton } from './SceneBadges';
 import FinishMenu from './FinishMenu';
+import { exportDoneLabel } from '../derushExport';
 
 /*
  * Derush mode — the AMV-maker dailies workflow.
@@ -1087,7 +1088,7 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
       {exportDone?.done && (
         <div className={`flex items-center gap-2 px-4 py-2 text-xs border-b border-[#27272A] ${exportDone.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
           {exportDone.ok ? <Check size={14} /> : <X size={14} />}
-          {exportDone.message ?? t('derush.library.exportFinished')}
+          {exportDoneLabel(exportDone, t)}
           {exportDone.output && (
             <button onClick={() => api.revealOutput(exportDone.output!)} className="underline text-[#A1A1AA] hover:text-[#FAFAFA] flex items-center gap-1">
               {t('derush.library.openFolder')} <ChevronRight size={12} />
