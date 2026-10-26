@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Cpu, Zap, Target, Layers, FileVideo, Palette, Download, Settings2, FolderOpen, Loader2, Trash2, Upload, AlertTriangle, Clapperboard, RotateCcw, Activity } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppSettings } from '../api/types';
+import { parseApiError } from '../modelTiers';
 import { DERUSH_ACTIONS, DERUSH_DEFAULT_KEYS, displayKey } from '../derushKeys';
 import { useI18n, useT, type Lang } from '../i18n';
 import DiagnosticSection from './DiagnosticSection';
@@ -42,8 +43,15 @@ export default function SettingsTab({ runtimeDevice, gpuName, vramGb }: { runtim
     try {
       const saved = await api.saveSettings({ [section]: next[section] } as Partial<AppSettings>);
       setSettings(saved);
+      setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      // Show the reason, not the raw "API 400: {json}", and put the rejected
+      // value back (a refused export folder must not look accepted).
+      const info = parseApiError(err);
+      setError(info.code === 'output_folder_not_writable'
+        ? t('journey.settings.folderNotWritable', { path: String((partial as Record<string, unknown>).output_folder ?? '') })
+        : info.message);
+      setSettings(settings);
     } finally {
       setSaving(false);
     }
