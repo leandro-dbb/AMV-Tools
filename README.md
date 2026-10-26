@@ -153,6 +153,9 @@ by default** — enable it from `Settings > Models`.
   the arms, under the chin and between hair spikes. SAM 3's weights are gated
   on Hugging Face: accept its license with your account and paste your token
   in `Settings > Models`; without access, Auto runs as in 0.5.
+  In max quality SAM 3 also finds what the characters hold or wear (a staff,
+  a halo, a sword, a bowl...) and puts it back in the cutout instead of
+  cutting it off (`Keep held objects`, on by default).
 - **Manual**: click a character and it is the whole detected character that
   is tracked (not just the colour patch under the click); a box prompt still
   goes straight to SAM 2. Clicks on several frames are keyframes.
@@ -652,6 +655,11 @@ How the engines work (0.5, with the 0.6 character pick):
   while the detector still draws the hair and the ink line. A frame where SAM
   3 sees nobody keeps the detector's matte. Off switch: `Character pick with
   SAM 3` in `Settings > Models`.
+- **Held objects (max quality)**: the same SAM 3 pass looks for weapon,
+  sword, staff, halo, bowl, hammer and cup; an instance that touches a
+  character, that the detector sees as foreground, that does not glow (energy
+  beams and ki flames are effects) and that persists over neighbouring frames
+  is given back with the detector's outline. Off switch: `Keep held objects`.
 - **Manual**: a click selects the detected character under it (then tracked
   like Auto); a box goes to SAM 2 as before. Without a GPU tier (CPU) clicks
   go to SAM 2 directly.

@@ -64,11 +64,11 @@ MASK_TIERS: dict[str, dict[str, dict[str, Optional[str]]]] = {
     "nvidia": {
         # "fast": SAM 3 adds ~0.3 s per frame on an RTX 3090
         "fast": {"detector": "general", "tracker": "tiny", "selector": None, "quality": "standard"},
-        "8gb": {"detector": "general", "tracker": "tiny", "selector": "sam3", "quality": "max"},
-        "12gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3", "quality": "max"},
-        "16gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3", "quality": "max"},
-        "24gb": {"detector": "general", "tracker": "large", "selector": "sam3", "quality": "max"},
-        "max": {"detector": "general", "tracker": "large", "selector": "sam3", "quality": "max"},
+        "8gb": {"detector": "general", "tracker": "tiny", "selector": "sam3", "quality": "stable"},
+        "12gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3", "quality": "stable"},
+        "16gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3", "quality": "stable"},
+        "24gb": {"detector": "general", "tracker": "large", "selector": "sam3", "quality": "stable"},
+        "max": {"detector": "general", "tracker": "large", "selector": "sam3", "quality": "stable"},
     },
     # Not measured on a Mac (unreachable during the 0.5 work): same detector,
     # lighter trackers.
@@ -93,12 +93,38 @@ TIGHT_FRAC = 0.008           # final matte hugged to SAM 3's outline at this rea
 MAX_TIGHT_FRAC = 0.004
 SELECTOR_CHUNK = 16          # frames handed to the batched SAM 3 at once
 MAX_TIP_TOUCH = 0.30
+# Held / worn objects (0.6 roto held): SAM 3 object prompts, kept when they
+# touch a character and the detector sees them as foreground. See
+# docs/reports/chantier-roto-held.md.
+HELD_PROMPTS = ("weapon", "sword", "staff", "halo", "bowl", "hammer", "cup")
+HELD_TOUCH_FRAC = 0.006
+HELD_MIN_COVER = 0.6
+HELD_MAX_REL = 2.0
+HELD_MAX_GLOW = 0.3
+HELD_DEFAULT = True          # "auto" value of the mask_keep_held setting (measured win)
+
+
+# "Stable" (0.6 roto stable, the default where SAM 3 runs): BiRefNet's matte
+# is the floor — every piece of it that touches a character (SAM 3, the SAM 2
+# track or a held object) is kept whole, up to STABLE_REACH of the diagonal
+# from the character (farther: set pieces and aura flares); SAM 3 only drops
+# what is detached from the characters and never hugs the outline. A frame
+# whose matte collapses next to its neighbours (motion blur, camera shake,
+# flash) is refilled from the neighbours carried by optical flow. See
+# docs/reports/chantier-roto.md, part 5.
+STABLE_REACH = 0.05          # full keep up to half of it, soft fall-off to 0 at it
+STABLE_DET_LOW = 0.3         # BiRefNet pieces counted from this alpha (inclusive)
+STABLE_SEL_ERODE = 2         # SAM 3's character mask added to the matte, eroded by this (px)
+LOST_FRAC = 0.6              # matte area under this x the rolling median = frame lost
+LOST_WINDOW = 12             # rolling median over +-12 frames (~1 s), same shot only
+JUMP_FRAC = 0.25             # area change between neighbours counted as a jump
 
 
 def mask_quality(state, value: Optional[str] = None) -> str:
-    """"max" or "standard": the setting ("auto" = the tier's pick). "max"
-    needs the SAM 3 selector; without it, standard."""
-    if value in ("max", "standard"):
+    """"stable", "max" or "standard": the setting ("auto" = the tier's
+    pick). "stable" and "max" need the SAM 3 selector; without it,
+    standard."""
+    if value in ("max", "standard", "stable"):
         return value
     try:
         return (mask_models(state) or {}).get("quality") or "standard"
@@ -463,7 +489,9 @@ def gate_alpha(base: np.ndarray, selector: np.ndarray, *, box: bool = False,
 
 def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str = SELECTOR_PROMPT,
                    progress_cb: Optional[Callable[[int, int], None]] = None,
-                   keep: Optional[list] = None, zoom: bool = False) -> np.ndarray:
+                   keep: Optional[list] = None, zoom: bool = False,
+                   held: Optional[list] = None, held_prompts: Sequence[str] = HELD_PROMPTS,
+                   reach_frac: float = GATE_FRAC) -> np.ndarray:
     """Detector mattes ``(T, H, W)`` (uint8 or float) kept only near what the
     selector (a :class:`~backend.models.sam3_concept.Sam3Concept`) calls a
     character on each frame (:func:`gate_alpha`; a frame where it sees nobody
@@ -471,12 +499,21 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
     selector failure returns ``det`` unchanged — the 0.5 pipeline.
     ``keep``: a list that receives the selector's masks (uint8 0/1, one per
     frame) for :func:`tighten` after tracking. ``zoom``: the selector's
-    zoomed second pass per character (max quality)."""
+    zoomed second pass per character (max quality). ``held``: a list that
+    receives, per frame, the detector's matte (uint8) on the objects the
+    characters hold or wear (:func:`held_regions` on the selector's
+    ``held_prompts`` instances, :func:`persist_held`), or None — for
+    :func:`tighten` to give them back. ``reach_frac``: width of the gate
+    around the selector's characters (share of the diagonal)."""
     from PIL import Image
     out = np.empty_like(det)
     T = len(det)
+    held_masks: list = []
+    objs_many = getattr(selector, "segment_objects_many", None) if held is not None else None
     many = getattr(selector, "segment_zoomed_many" if zoom else "segment_many", None)
-    chunk = SELECTOR_CHUNK if many is not None else 1
+    if held is not None and objs_many is None and hasattr(selector, "segment_with_objects"):
+        many = None     # one frame at a time: character + objects share one encoder pass
+    chunk = SELECTOR_CHUNK if (many is not None or objs_many is not None) else 1
     try:
         for c0 in range(0, T, chunk):
             imgs = []
@@ -486,7 +523,14 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
                     with Image.open(f) as im:
                         f = np.asarray(im.convert("RGB"))
                 imgs.append(f)
-            if many is not None:
+            objs = None
+            if objs_many is not None:
+                # batched SAM 3, character + held-object concepts on one encoder pass
+                sels, objs = objs_many(imgs, prompt, held_prompts, zoom=zoom)
+            elif held is not None and hasattr(selector, "segment_with_objects"):
+                sel, o = selector.segment_with_objects(imgs[0], prompt, held_prompts, zoom=zoom)
+                sels, objs = [sel], [o]
+            elif many is not None:
                 # batched SAM 3: text encoded once, images in batches
                 sels = many(imgs, prompt)
             elif zoom and hasattr(selector, "segment_zoomed"):
@@ -494,22 +538,36 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
             else:
                 sels = [selector.segment(imgs[0], prompt)]
             for j, sel in enumerate(sels):
-                _gate_one(det, out, c0 + j, sel, keep)
+                if objs is not None:
+                    d = det[c0 + j].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[c0 + j]
+                    held_masks.append(held_regions(d, sel, objs[j], rgb=imgs[j]))
+                _gate_one(det, out, c0 + j, sel, keep, reach_frac)
             if progress_cb is not None:
                 progress_cb(min(T, c0 + chunk), T)
     except Exception as exc:  # OOM, gated weights, ...: keep the 0.5 behaviour
         log.warning("auto roto: character selector failed (%s), detector matte kept", exc)
         if keep is not None:
             keep.clear()
+        if held is not None:
+            held.clear()
         return det
+    if held is not None and len(held_masks) == T:
+        for t, m in enumerate(persist_held(held_masks)):
+            if m is None or not np.any(m):
+                held.append(None)
+                continue
+            d = det[t].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[t]
+            a = keep_held(np.zeros(m.shape, np.float32), d, m)
+            held.append(np.clip(np.rint(a * 255.0), 0, 255).astype(np.uint8))
     return out
 
 
-def _gate_one(det: np.ndarray, out: np.ndarray, t: int, sel: np.ndarray, keep: Optional[list]) -> None:
+def _gate_one(det: np.ndarray, out: np.ndarray, t: int, sel: np.ndarray, keep: Optional[list],
+              reach_frac: float = GATE_FRAC) -> None:
     if keep is not None:
         keep.append((sel > 0.5).astype(np.uint8))
     d = det[t].astype(np.float32) / 255.0 if det.dtype == np.uint8 else det[t]
-    g = gate_alpha(d, sel, keep_if_empty=True)
+    g = gate_alpha(d, sel, keep_if_empty=True, reach_frac=reach_frac)
     out[t] = np.clip(np.rint(g * 255.0), 0, 255).astype(np.uint8) if det.dtype == np.uint8 else g
 
 
@@ -643,8 +701,117 @@ def drop_fragments(alpha: np.ndarray, selector: np.ndarray, *, max_rel: float = 
     return out
 
 
+def held_regions(base: np.ndarray, selector: np.ndarray, objects: Sequence[np.ndarray], *,
+                 touch_frac: float = HELD_TOUCH_FRAC, min_cover: float = HELD_MIN_COVER,
+                 max_rel: float = HELD_MAX_REL, min_frac: float = 0.0003,
+                 rgb: Optional[np.ndarray] = None, max_glow: float = HELD_MAX_GLOW) -> np.ndarray:
+    """Union (bool) of the objects a character holds or wears, from the
+    selector's object instances (SAM 3 "staff", "weapon", "halo", "bowl"...):
+    an instance counts when it touches what the selector calls a character
+    (within ``touch_frac`` of the diagonal), the detector's own matte
+    ``base`` covers at least ``min_cover`` of it (the detector sees it as
+    foreground: a pillar or a tree the concept prompt mislabels is
+    background for it) and it is not bigger than ``max_rel`` x the
+    character. With the frame ``rgb``: an instance more than ``max_glow``
+    of which glows — near white (luma > 0.85) or vivid (brightest channel >
+    0.85, saturation > 0.5) — is a light effect (an energy beam or a ki
+    flame SAM 3 calls a "weapon"), not a prop: measured on the benchmark,
+    effects 49-97 % of such pixels, props at most 18 %."""
+    import cv2
+    s = selector > 0.5
+    out = np.zeros(s.shape, bool)
+    if not s.any() or not len(objects):
+        return out
+    h, w = s.shape
+    r = max(1, int(round(touch_frac * float(np.hypot(h, w)))))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    near = cv2.dilate(s.astype(np.uint8), k) > 0
+    b = np.clip(base.astype(np.float32), 0, 1)
+    ns = int(s.sum())
+    bright = None
+    if rgb is not None and max_glow is not None:
+        c = np.asarray(rgb, np.float32) / 255.0
+        mx, mn = c.max(-1), c.min(-1)
+        white = c @ np.array([0.299, 0.587, 0.114], np.float32) > 0.85
+        vivid = (mx > 0.85) & ((mx - mn) > 0.5 * mx)
+        bright = white | vivid
+    for o in objects:
+        o = np.asarray(o) > 0.5
+        n = int(o.sum())
+        if n < min_frac * h * w or n > max_rel * ns or not (o & near).any():
+            continue
+        if float(b[o].mean()) < min_cover:
+            continue
+        if bright is not None and float(bright[o].mean()) > max_glow:
+            continue
+        out |= o
+    return out
+
+
+def keep_held(alpha: np.ndarray, base: np.ndarray, held: np.ndarray, fringe_px: int = 2,
+              fill_px: Optional[int] = None) -> np.ndarray:
+    """``alpha`` with the detector's matte given back on the ``held`` objects
+    (:func:`held_regions`) and their antialiased fringe. ``fill_px``: the
+    object's own mask, eroded by that many pixels, is made opaque too (the
+    detector leaves holes in a bowl's contents)."""
+    import cv2
+    if held is None or not np.any(held):
+        return alpha
+    h8 = np.asarray(held).astype(np.uint8)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * fringe_px + 1, 2 * fringe_px + 1))
+    zone = cv2.dilate(h8, k) > 0
+    b = np.clip(base.astype(np.float32), 0, 1)
+    out = np.maximum(alpha, np.where(zone, b, 0.0))
+    if fill_px:
+        ke = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * fill_px + 1, 2 * fill_px + 1))
+        out = np.maximum(out, (cv2.erode(h8, ke) > 0).astype(np.float32))
+    return out.astype(np.float32)
+
+
+def persist_held(held: Sequence[Optional[np.ndarray]], min_overlap: float = 0.3) -> list:
+    """Temporal filter of per-frame held masks: a held piece (connected
+    component) is kept on frame t only if the held mask of t-1 or t+1
+    overlaps at least ``min_overlap`` of it — a one-frame false detection
+    would flicker in and out."""
+    import cv2
+    out = []
+    T = len(held)
+    for t in range(T):
+        m = held[t]
+        if m is None or not np.any(m):
+            out.append(m)
+            continue
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(np.asarray(m).astype(np.uint8), connectivity=8)
+        keep = np.zeros(n, bool)
+        for u in (t - 1, t + 1):
+            if 0 <= u < T and held[u] is not None and np.any(held[u]):
+                cov = np.bincount(lab[np.asarray(held[u]) > 0], minlength=n)
+                keep |= cov >= min_overlap * stats[:, 4]
+        keep[0] = False
+        out.append(keep[lab])
+    return out
+
+
+def _touching(held: np.ndarray, alpha: np.ndarray, touch_px: int) -> np.ndarray:
+    """``held`` (uint8 matte) restricted to its pieces that touch ``alpha``
+    (the tracked target: in "main character" mode a prop of another
+    character stays out)."""
+    import cv2
+    m = (held > 127).astype(np.uint8)
+    n, lab = cv2.connectedComponents(m, connectivity=8)
+    if n <= 1:
+        return held
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * touch_px + 1, 2 * touch_px + 1))
+    near = cv2.dilate((alpha > 0.5).astype(np.uint8), k) > 0
+    ok = np.zeros(n, bool)
+    ok[np.unique(lab[near & (m > 0)])] = True
+    ok[0] = False
+    zone = cv2.dilate(ok[lab].astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    return np.where(zone, held, 0).astype(held.dtype)
+
+
 def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac: float = TIGHT_FRAC,
-            quality: str = "standard") -> np.ndarray:
+            quality: str = "standard", held: Optional[Sequence[Optional[np.ndarray]]] = None) -> np.ndarray:
     """Final mattes ``(T, H, W)`` float hugged to the selector's outline
     (:func:`gate_alpha` at ``tight_frac`` of the diagonal) on every frame
     where the selector sees someone: background left between the arms,
@@ -653,7 +820,9 @@ def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac:
     docs/reports/chantier-roto.md); waiting for the selector to cover the
     whole tracked character first measured worse. Frames where the selector
     sees nobody are unchanged. ``quality="max"``: :func:`hug_with_tips` at
-    0.4 % + :func:`drop_fragments`."""
+    0.4 % + :func:`drop_fragments`. ``held``: per-frame mattes of the held
+    objects (:func:`apply_selector`), given back where they touch the
+    result."""
     if len(selector_masks) != len(masks):
         return masks
     out = np.empty_like(masks)
@@ -667,4 +836,219 @@ def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac:
             out[t] = drop_fragments(o, sel)
         else:
             out[t] = gate_alpha(masks[t], sel, keep_if_empty=True, reach_frac=tight_frac)
+        if held is not None and t < len(held) and held[t] is not None:
+            h, w = held[t].shape
+            r = max(1, int(round(HELD_TOUCH_FRAC * float(np.hypot(h, w)))))
+            hk = _touching(held[t], out[t], r)
+            out[t] = np.maximum(out[t], hk.astype(np.float32) / 255.0)
+    return out
+
+
+def _rolling_median(a: np.ndarray, t: int, lo: int, hi: int, window: int = LOST_WINDOW) -> float:
+    """Median of ``a`` over [t - window, t + window] ∩ [lo, hi), t excluded."""
+    idx = [u for u in range(max(lo, t - window), min(hi, t + window + 1)) if u != t]
+    return float(np.median(a[idx])) if idx else float(a[t])
+
+
+def lost_frames(masks: np.ndarray, shots: Optional[List[tuple[int, int]]] = None,
+                frac: float = LOST_FRAC, window: int = LOST_WINDOW) -> list[int]:
+    """Frames whose matte area (alpha > 0.5) falls under ``frac`` x the
+    rolling median of the area in the same shot: the character vanished or
+    was eaten on that frame while its neighbours have it."""
+    T = len(masks)
+    area = np.array([float((m > 0.5).sum()) for m in masks])
+    out = []
+    for a, b in (shots or [(0, T)]):
+        for t in range(a, b):
+            med = _rolling_median(area, t, a, b, window)
+            if med > 0 and area[t] < frac * med:
+                out.append(t)
+    return out
+
+
+def area_jumps(masks: np.ndarray, shots: Optional[List[tuple[int, int]]] = None,
+               frac: float = JUMP_FRAC) -> list[int]:
+    """Frames t whose matte area differs from frame t-1's by more than
+    ``frac`` of the larger of the two (same shot only)."""
+    T = len(masks)
+    area = np.array([float((m > 0.5).sum()) for m in masks])
+    out = []
+    for a, b in (shots or [(0, T)]):
+        for t in range(a + 1, b):
+            big = max(area[t], area[t - 1])
+            if big > 0 and abs(area[t] - area[t - 1]) > frac * big:
+                out.append(t)
+    return out
+
+
+def _flow_warp(src_rgb: np.ndarray, dst_rgb: np.ndarray, alpha: np.ndarray, scale: float = 0.5) -> np.ndarray:
+    """``alpha`` (on the frame ``src_rgb``) carried onto the frame
+    ``dst_rgb`` by dense optical flow (Farneback, half resolution)."""
+    import cv2
+    h, w = alpha.shape
+
+    def gray(f):
+        g = cv2.cvtColor(np.ascontiguousarray(f[..., :3]), cv2.COLOR_RGB2GRAY)
+        if g.shape != (h, w):
+            g = cv2.resize(g, (w, h), interpolation=cv2.INTER_AREA)
+        return cv2.resize(g, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+    gs, gd = gray(src_rgb), gray(dst_rgb)
+    flow = cv2.calcOpticalFlowFarneback(gd, gs, None, 0.5, 4, 21, 3, 5, 1.1, 0)   # dst -> src
+    flow = cv2.resize(flow, (w, h), interpolation=cv2.INTER_LINEAR) / scale
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    return cv2.remap(alpha.astype(np.float32), gx + flow[..., 0], gy + flow[..., 1], cv2.INTER_LINEAR,
+                     borderMode=cv2.BORDER_CONSTANT, borderValue=0).astype(np.float32)
+
+
+def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optional[np.ndarray] = None,
+                 held: Optional[np.ndarray] = None, *, reach_frac: float = STABLE_REACH,
+                 low: float = STABLE_DET_LOW, sel_erode: int = STABLE_SEL_ERODE) -> np.ndarray:
+    """One frame of the "stable" matte.
+
+    ``det``: BiRefNet's alpha (float 0..1), the floor. ``selector``: SAM 3's
+    character mask, ``track``: the tracked matte of the characters (SAM 2 +
+    fusion), ``held``: the matte of the objects they hold (uint8 or float).
+    Their union says where the characters are. Every BiRefNet piece (alpha >
+    ``low``) that touches it is kept whole — its outline, hair strands, a
+    held cigarette — up to ``reach_frac`` of the diagonal from the
+    characters (beyond: soft fall-off, then cut: set pieces fused with the
+    character, aura flares). Pieces that do not touch a character are
+    dropped. SAM 3's mask (eroded by ``sel_erode`` px) and the track are
+    added on top: a character that BiRefNet loses in a motion blur stays.
+    No character evidence at all: BiRefNet's matte as is."""
+    import cv2
+    d = np.clip(det.astype(np.float32), 0, 1)
+    h, w = d.shape
+    ev = np.zeros((h, w), bool)
+    s = None
+    if selector is not None and np.any(selector):
+        s = np.asarray(selector) > 0.5
+        ev |= s
+    tr = None
+    if track is not None and np.any(track):
+        tr = np.clip(np.asarray(track, np.float32), 0, 1)
+        ev |= tr > 0.5
+    hm = None
+    if held is not None and np.any(held):
+        hm = np.asarray(held, np.float32)
+        hm = hm / 255.0 if hm.max() > 1.0 else hm
+        ev |= hm > 0.5
+    if not ev.any():
+        return d
+    m = (d > low).astype(np.uint8)
+    n, lab = cv2.connectedComponents(m, connectivity=8)
+    keep = np.zeros(n, bool)
+    if n > 1:
+        keep[np.unique(lab[ev & (m > 0)])] = True
+        keep[0] = False
+    r = max(2.0, reach_frac * float(np.hypot(h, w)))
+    d_out = cv2.distanceTransform((~ev).astype(np.uint8), cv2.DIST_L2, 3)
+    reach = np.clip((r - d_out) / (0.5 * r), 0.0, 1.0)
+    # the antialiased fringe of a kept piece (alpha under ``low``) comes along
+    zone = cv2.dilate(keep[lab].astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    out = np.where(zone, d, 0.0) * reach
+    if s is not None:
+        se = s.astype(np.uint8)
+        if sel_erode > 0:
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * sel_erode + 1, 2 * sel_erode + 1))
+            se = cv2.erode(se, k)
+        out = np.maximum(out, se.astype(np.float32))
+    if tr is not None:
+        out = np.maximum(out, tr)
+    if hm is not None:
+        out = np.maximum(out, hm)
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
+def temporal_guard(masks: np.ndarray, frames: Sequence[np.ndarray], det: Optional[np.ndarray] = None,
+                   shots: Optional[List[tuple[int, int]]] = None, *, frac: float = LOST_FRAC,
+                   window: int = LOST_WINDOW, low: float = STABLE_DET_LOW) -> tuple[np.ndarray, list[int]]:
+    """No frame may lose the character its neighbours have. A frame whose
+    matte area falls under ``frac`` x the rolling median of its shot
+    (:func:`lost_frames`) gets the previous frame's matte carried over by
+    optical flow (the next frame's at the start of a shot), plus the
+    BiRefNet pieces (``det``) that touch it; frames are repaired in order so
+    a run of lost frames is carried along. Returns (masks, repaired
+    frames). ``frames``: the RGB frames (any size, resized to the masks)."""
+    import cv2
+    T = len(masks)
+    out = masks.astype(np.float32, copy=True)
+    shots = shots or [(0, T)]
+    lost = set(lost_frames(out, shots, frac, window))
+    if not lost:
+        return out, []
+    fixed = []
+
+    def rgb(t):
+        f = frames[t]
+        if not isinstance(f, np.ndarray):
+            from PIL import Image
+            with Image.open(f) as im:
+                f = np.asarray(im.convert("RGB"))
+        return f
+
+    for a, b in shots:
+        ok = [t for t in range(a, b) if t not in lost]
+        if not ok:
+            continue
+        order = [t for t in range(a, b) if t in lost and t > ok[0]]
+        order += [t for t in range(b - 1, a - 1, -1) if t in lost and t < ok[0]]
+        for t in order:
+            u = t - 1 if t > ok[0] else t + 1
+            carried = _flow_warp(rgb(u), rgb(t), out[u])
+            new = np.maximum(out[t], carried)
+            if det is not None:
+                d = det[t].astype(np.float32) / (255.0 if det.dtype == np.uint8 else 1.0)
+                m = (d > low).astype(np.uint8)
+                n, lab = cv2.connectedComponents(m, connectivity=8)
+                if n > 1:
+                    hit = np.zeros(n, bool)
+                    hit[np.unique(lab[(carried > 0.5) & (m > 0)])] = True
+                    hit[0] = False
+                    new = np.maximum(new, np.where(hit[lab], d, 0.0))
+            out[t] = new
+            fixed.append(t)
+    return out, sorted(fixed)
+
+
+def _touching_mask(m: Optional[np.ndarray], ref: np.ndarray) -> Optional[np.ndarray]:
+    """Connected pieces of ``m`` that overlap ``ref`` (None stays None)."""
+    import cv2
+    if m is None or not np.any(m):
+        return m
+    b = (np.asarray(m, np.float32) > (127 if np.asarray(m).dtype == np.uint8 else 0.5)).astype(np.uint8)
+    n, lab = cv2.connectedComponents(b, connectivity=8)
+    ok = np.zeros(n, bool)
+    ok[np.unique(lab[ref & (b > 0)])] = True
+    ok[0] = False
+    return np.where(ok[lab], m, 0).astype(np.asarray(m).dtype)
+
+
+def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]],
+                 track: Optional[np.ndarray] = None, held: Optional[Sequence[Optional[np.ndarray]]] = None,
+                 frames: Optional[Sequence] = None, shots: Optional[List[tuple[int, int]]] = None,
+                 reach_frac: float = STABLE_REACH, only_tracked: bool = False) -> np.ndarray:
+    """The "stable" mattes ``(T, H, W)`` float: :func:`stable_frame` on every
+    frame, then :func:`temporal_guard` (with ``frames``). ``det``: BiRefNet's
+    alphas (uint8 or float), ``selector_masks``: SAM 3's character masks
+    (empty list = none), ``track``: the tracked mattes, ``held``: the held
+    objects' mattes (:func:`apply_selector`). ``only_tracked``: the
+    characters SAM 3 sees are used only where they touch the track (one
+    clicked / main character: the others stay out)."""
+    T = len(det)
+    out = np.empty(det.shape, np.float32)
+    sel = list(selector_masks) if selector_masks is not None and len(selector_masks) == T else [None] * T
+    hl = list(held) if held is not None and len(held) == T else [None] * T
+    for t in range(T):
+        d = det[t].astype(np.float32) / (255.0 if det.dtype == np.uint8 else 1.0)
+        if only_tracked and track is not None:
+            tm = track[t] > 0.5
+            sel[t] = _touching_mask(sel[t], tm)
+            hl[t] = _touching_mask(hl[t], tm)
+        out[t] = stable_frame(d, sel[t], None if track is None else track[t], hl[t], reach_frac=reach_frac)
+    if frames is not None and len(frames) == T:
+        out, fixed = temporal_guard(out, frames, det, shots)
+        if fixed:
+            log.info("auto roto (stable): %d frame(s) refilled from their neighbours: %s", len(fixed), fixed[:20])
     return out
