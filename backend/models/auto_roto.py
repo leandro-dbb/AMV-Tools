@@ -121,6 +121,7 @@ JUMP_FRAC = 0.25             # area change between neighbours counted as a jump
 STABLE_OPAQUE = 0.8          # BiRefNet pixels above: solid (ink, hair, props), always kept in a kept piece
 STABLE_SOLID_REACH = 2.0     # solid pixels reach this x farther (props, long strands)
 STABLE_CORE_PX = 4.0         # matte beyond this distance from SAM 3's character: "extras", sorted by size
+SEL_SPIKE = 1.6              # SAM 3 mask over this x its rolling median: swollen (aura taken for the character)
 TRACK_MIN_REL = 0.3          # a track piece away from SAM 3's characters counts if >= this x their area
 GUARD_SEEN_MIN = 0.3         # temporal guard: refill only if BiRefNet / SAM 3 still see this share of it
 GUARD_NEAR = 0.02            # ... and only near what they see (share of the diagonal)
@@ -1244,13 +1245,16 @@ def _touching_mask(m: Optional[np.ndarray], ref: np.ndarray) -> Optional[np.ndar
 
 
 def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[tuple[int, int]]] = None,
-                     min_overlap: float = 0.3, slack_frac: float = 0.012) -> list:
+                     min_overlap: float = 0.3, slack_frac: float = 0.012, spike: float = SEL_SPIKE) -> list:
     """SAM 3's character masks without its one-frame false detections: a
     piece (connected component) of frame t is kept if the mask of t-1 or
     t+1 (same shot, dilated by ``slack_frac`` of the diagonal for motion)
     covers at least ``min_overlap`` of it, or if it is the frame's biggest
     piece (a rock SAM 3 calls a character on one blurred frame goes, the
-    character stays)."""
+    character stays). A frame whose mask swells over ``spike`` x the
+    rolling median of the shot keeps it only near the mask of the nearest
+    normal frame (SAM 3 taking an aura for the character on blurred
+    frames)."""
     import cv2
     T = len(sel)
     out = list(sel)
@@ -1281,6 +1285,21 @@ def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[t
             keep[0] = False
             if not keep[1:].all():
                 out[t] = np.where(keep[lab], np.asarray(m), 0).astype(np.asarray(m).dtype)
+        # a sudden swell (SAM 3 taking the aura of a blurred frame for the
+        # character) is brought back to the shape of the nearest normal frame
+        area = np.array([0.0 if out[t] is None else float((np.asarray(out[t]) > 0.5).sum()) for t in range(T)])
+        for t in range(a, b):
+            med = _rolling_median(area, t, a, b)
+            if med <= 0 or area[t] <= spike * med:
+                continue
+            normal = [u for u in range(a, b) if u != t and 0.6 * med <= area[u] <= spike * med]
+            if not normal:
+                continue
+            u = min(normal, key=lambda v: abs(v - t))
+            mu = np.asarray(out[u]) > 0.5
+            r = max(1, int(round(2 * slack_frac * float(np.hypot(*mu.shape)))))
+            zone = cv2.dilate(mu.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+            out[t] = np.where(zone, np.asarray(out[t]), 0).astype(np.asarray(out[t]).dtype)
     return out
 
 
