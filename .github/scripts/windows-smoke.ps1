@@ -165,7 +165,7 @@ try {
   Step 'Generate test clips with the bundled ffmpeg'
   $venvPy = Join-Path $userData '.venv\Scripts\python.exe'
   if (-not (Test-Path $venvPy)) { throw "Sidecar venv not found at $venvPy" }
-  $ffmpeg = (& $venvPy -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())').Trim()
+  $ffmpeg = (& $venvPy -X utf8 -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())').Trim()
   if (-not (Test-Path $ffmpeg)) { throw "bundled ffmpeg not found ($ffmpeg)" }
   $summary.bundled_ffmpeg = $ffmpeg
   $media = Join-Path $ArtDir "médias d'essai"
@@ -260,7 +260,7 @@ try {
     $text = [IO.File]::ReadAllText($target, [Text.Encoding]::UTF8)
     switch ($f.id) {
       'fcp7xml' { $x = [xml]$text; if (-not $x.xmeml) { throw 'fcp7xml: no xmeml root' }
-                  if ($text -notmatch 'file://localhost/[A-Za-z]:/') { throw 'fcp7xml: pathurl is not a Windows file URL' } }
+                  if ($text -notmatch 'file://localhost/[A-Za-z]%3a/') { throw 'fcp7xml: pathurl is not a Premiere-style Windows file URL' } }
       'fcpxml' { $x = [xml]$text; if (-not $x.fcpxml) { throw 'fcpxml: no fcpxml root' }
                  if ($text -notmatch 'src="file:///[A-Za-z]:/') { throw 'fcpxml: src is not a Windows file URL' } }
       'otio' { $j = $text | ConvertFrom-Json; if ($j.OTIO_SCHEMA -notlike 'Timeline.*') { throw 'otio: bad schema' } }
@@ -333,6 +333,8 @@ print("OK")
   # The sidecar's own log must be clean.
   $bl = Join-Path $userData 'logs\backend.log'
   if (Test-Path $bl) {
+    # The log is UTF-8: '—' must not have become mojibake on the way.
+    if (Select-String -LiteralPath $bl -Pattern ([char]0xFFFD) -SimpleMatch -Quiet) { throw 'backend.log contains U+FFFD (encoding bug)' }
     $bad = @(Select-String -LiteralPath $bl -Pattern 'Traceback \(most recent call last\)|ModuleNotFoundError|UnicodeEncodeError|UnicodeDecodeError|PermissionError')
     if ($bad.Count) { $bad | ForEach-Object { Write-Host $_.Line }; throw "backend.log has $($bad.Count) error line(s)" }
   }
