@@ -63,12 +63,12 @@ MASK_TIERS: dict[str, dict[str, dict[str, Optional[str]]]] = {
     # so small cards take the lighter SAM 2.1.
     "nvidia": {
         # "fast": SAM 3 adds ~0.3 s per frame on an RTX 3090
-        "fast": {"detector": "general", "tracker": "tiny", "selector": None},
-        "8gb": {"detector": "general", "tracker": "tiny", "selector": "sam3"},
-        "12gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3"},
-        "16gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3"},
-        "24gb": {"detector": "general", "tracker": "large", "selector": "sam3"},
-        "max": {"detector": "general", "tracker": "large", "selector": "sam3"},
+        "fast": {"detector": "general", "tracker": "tiny", "selector": None, "quality": "standard"},
+        "8gb": {"detector": "general", "tracker": "tiny", "selector": "sam3", "quality": "max"},
+        "12gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3", "quality": "max"},
+        "16gb": {"detector": "general", "tracker": "base_plus", "selector": "sam3", "quality": "max"},
+        "24gb": {"detector": "general", "tracker": "large", "selector": "sam3", "quality": "max"},
+        "max": {"detector": "general", "tracker": "large", "selector": "sam3", "quality": "max"},
     },
     # Not measured on a Mac (unreachable during the 0.5 work): same detector,
     # lighter trackers.
@@ -86,6 +86,23 @@ MASK_TIERS: dict[str, dict[str, dict[str, Optional[str]]]] = {
 FALLBACK = {"detector": "anime", "tracker": "base_plus", "selector": None}
 SELECTOR_PROMPT = "anime character"
 TIGHT_FRAC = 0.008           # final matte hugged to SAM 3's outline at this reach (share of the diagonal)
+# "Max quality" (0.6, roto 3): hugged at 0.4 % with the opaque tips SAM 3
+# under-segments given back, loose fragments dropped; export edges re-solved
+# from the local colours with the ink line protected. See
+# docs/reports/chantier-roto.md.
+MAX_TIGHT_FRAC = 0.004
+MAX_TIP_TOUCH = 0.30
+
+
+def mask_quality(state, value: Optional[str] = None) -> str:
+    """"max" or "standard": the setting ("auto" = the tier's pick). "max"
+    needs the SAM 3 selector; without it, standard."""
+    if value in ("max", "standard"):
+        return value
+    try:
+        return (mask_models(state) or {}).get("quality") or "standard"
+    except Exception:
+        return "standard"
 
 
 # Catalogue for Settings > Models (label, download size, license).
@@ -478,7 +495,88 @@ def apply_selector(det: np.ndarray, frames: Sequence, selector, *, prompt: str =
     return out
 
 
-def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac: float = TIGHT_FRAC) -> np.ndarray:
+def hug_with_tips(base: np.ndarray, selector: np.ndarray, *, tight_frac: float = 0.004,
+                  reach_frac: float = GATE_FRAC, opaque: float = 0.9, max_touch: float = 0.45,
+                  fringe_px: int = 2) -> np.ndarray:
+    """Matte hugged to the selector's outline at ``tight_frac``, giving back
+    the *tips* the selector under-segments.
+
+    Outside the tight gate, a piece of the base matte comes back only if it
+    is opaque (> ``opaque``: a hair spike or a finger is solid and inked; a
+    glow, an aura smear or a halo is semi-transparent), stays within
+    ``reach_frac`` of the selector, and sticks *out* of the character: less
+    than ``max_touch`` of its outline touches the hugged matte (a pocket of
+    background enclosed between the arms touches it on most sides and stays
+    cut). Its antialiased fringe (``fringe_px``) comes back with it."""
+    import cv2
+    s = (selector > 0.5).astype(np.uint8)
+    b = np.clip(base.astype(np.float32), 0, 1)
+    if not s.any():
+        return b
+    h, w = s.shape
+    diag = float(np.hypot(h, w))
+    tight = gate_alpha(b, s, keep_if_empty=True, reach_frac=tight_frac)
+    d_out = cv2.distanceTransform(1 - s, cv2.DIST_L2, 3)
+    body = tight > 0.5
+    cand = (b > opaque) & ~body & (d_out <= reach_frac * diag)
+    if not cand.any():
+        return tight
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8), connectivity=8)
+    k3 = np.ones((3, 3), np.uint8)
+    near_body = cv2.dilate(body.astype(np.uint8), k3) > 0
+    keep = np.zeros(n, bool)
+    for i in range(1, n):
+        x, y, bw, bh, _a = stats[i]
+        x0, y0, x1, y1 = max(0, x - 1), max(0, y - 1), min(w, x + bw + 1), min(h, y + bh + 1)
+        comp = lab[y0:y1, x0:x1] == i
+        edge = comp & ~(cv2.erode(comp.astype(np.uint8), k3) > 0)
+        ring = (cv2.dilate(comp.astype(np.uint8), k3) > 0) & ~comp
+        nr = int(ring.sum())
+        if nr == 0:
+            continue
+        touch = float((ring & near_body[y0:y1, x0:x1]).sum()) / nr
+        keep[i] = 0 < touch < max_touch and edge.any()
+    if not keep.any():
+        return tight
+    tips = keep[lab]
+    if fringe_px > 0:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * fringe_px + 1, 2 * fringe_px + 1))
+        tips = cv2.dilate(tips.astype(np.uint8), k) > 0
+    return np.maximum(tight, np.where(tips, b, 0.0)).astype(np.float32)
+
+
+def drop_fragments(alpha: np.ndarray, selector: np.ndarray, *, max_rel: float = 0.02,
+                   min_inside: float = 0.5, fringe_px: int = 2) -> np.ndarray:
+    """Remove the small pieces of matte cut loose by the selector gate (bits
+    of a halo ring, of a staff, of an aura): components of the matte smaller
+    than ``max_rel`` of the biggest one and mostly (``min_inside``) outside
+    what the selector calls a character, with their antialiased fringe."""
+    import cv2
+    a = np.clip(alpha.astype(np.float32), 0, 1)
+    m = (a > 0.5).astype(np.uint8)
+    if not m.any():
+        return a
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    if n <= 2:
+        return a
+    big = stats[1:, 4].max()
+    s = selector > 0.5
+    inside = np.bincount(lab[s], minlength=n)
+    drop = [i for i in range(1, n) if stats[i, 4] < max_rel * big and inside[i] < min_inside * stats[i, 4]]
+    if not drop:
+        return a
+    gone = np.isin(lab, drop).astype(np.uint8)
+    keep = (m > 0) & (gone == 0)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * fringe_px + 1, 2 * fringe_px + 1))
+    zone = (cv2.dilate(gone, k) > 0) & ~(cv2.dilate(keep.astype(np.uint8), k) > 0)
+    out = a.copy()
+    out[gone > 0] = 0.0
+    out[zone] = 0.0
+    return out
+
+
+def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac: float = TIGHT_FRAC,
+            quality: str = "standard") -> np.ndarray:
     """Final mattes ``(T, H, W)`` float hugged to the selector's outline
     (:func:`gate_alpha` at ``tight_frac`` of the diagonal) on every frame
     where the selector sees someone: background left between the arms,
@@ -486,7 +584,8 @@ def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac:
     SAM 3 under-segments (0.4 % clipped them, measured in
     docs/reports/chantier-roto.md); waiting for the selector to cover the
     whole tracked character first measured worse. Frames where the selector
-    sees nobody are unchanged."""
+    sees nobody are unchanged. ``quality="max"``: :func:`hug_with_tips` at
+    0.4 % + :func:`drop_fragments`."""
     if len(selector_masks) != len(masks):
         return masks
     out = np.empty_like(masks)
@@ -495,5 +594,9 @@ def tighten(masks: np.ndarray, selector_masks: Sequence[np.ndarray], tight_frac:
         if sel is None or not np.any(sel):
             out[t] = masks[t]
             continue
-        out[t] = gate_alpha(masks[t], sel, keep_if_empty=True, reach_frac=tight_frac)
+        if quality == "max":
+            o = hug_with_tips(masks[t], sel, tight_frac=MAX_TIGHT_FRAC, max_touch=MAX_TIP_TOUCH)
+            out[t] = drop_fragments(o, sel)
+        else:
+            out[t] = gate_alpha(masks[t], sel, keep_if_empty=True, reach_frac=tight_frac)
     return out

@@ -597,17 +597,19 @@ def _encode_scene_with_alpha(
 
     def finish_frame(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
         alpha = np.clip(mask.astype(np.float32), 0.0, 1.0)
-        if edge_mode == "fg":
+        if edge_mode in ("fg", "max"):
             # 0.6 (chantier roto 2): the guided-filter upscale painted a ring
             # of the old background around hair (x4 background along the
             # outline on the benchmark) and ate the ink line; the matte is
             # now upscaled as is and only the COLOUR of the semi-transparent
             # pixels is fixed (foreground estimation): no pixel keeps the old
             # background's colour.
-            from ..models.edge_refine import estimate_foreground
+            # "max": the alpha of the outline band is first re-solved from
+            # the local colours (ink line protected).
+            from ..models.edge_refine import finish_edges
             if alpha.shape != rgb.shape[:2]:
                 alpha = _resize_alpha(alpha, (rgb.shape[1], rgb.shape[0]))
-            rgb = estimate_foreground(rgb, alpha)
+            rgb, alpha = finish_edges(rgb, alpha, edge_mode)
             return np.dstack([rgb, (alpha * 255.0).round().astype(np.uint8)])
         if alpha.shape != rgb.shape[:2]:
             if edge_refine:
