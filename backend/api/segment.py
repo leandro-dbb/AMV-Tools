@@ -772,13 +772,20 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
     use_tracker = bool(tracker) and (clicks is not None or models_cfg.get("mask_auto_track", True)) \
         and _sam2_available()
     span = 0.5 if use_tracker else 1.0
-    for i, fp in enumerate(sess.frame_paths):
-        with Image.open(fp) as im:
-            rgb = im.convert("RGB")
-            det[i] = np.clip(np.rint(birefnet.mask_image(rgb) * 255.0), 0, 255).astype(np.uint8)
-            if use_tracker:
-                small.append(np.asarray(rgb.resize((256, max(2, round(256 * h / max(1, w)))))))
-        progress(int((i + 1) * span), n_frames)
+    chunk = 4   # BiRefNet frames per forward pass (CUDA), same mattes as one by one
+    for c0 in range(0, n_frames, chunk):
+        rgbs = []
+        for fp in sess.frame_paths[c0:c0 + chunk]:
+            with Image.open(fp) as im:
+                rgb = im.convert("RGB")
+                rgbs.append(np.asarray(rgb))
+                if use_tracker:
+                    small.append(np.asarray(rgb.resize((256, max(2, round(256 * h / max(1, w)))))))
+        batch_fn = getattr(birefnet, "alpha_batch", None)
+        alphas = batch_fn(rgbs, batch=chunk) if batch_fn else [birefnet.mask_image(Image.fromarray(r)) for r in rgbs]
+        for j, a in enumerate(alphas):
+            det[c0 + j] = np.clip(np.rint(a * 255.0), 0, 255).astype(np.uint8)
+        progress(int(min(n_frames, c0 + chunk) * span), n_frames)
     from ..models.auto_roto import tighten
     sel_masks: list = []
     det = _select_characters(det, sess.frame_paths, models_cfg,
@@ -841,8 +848,10 @@ def _select_characters(det: np.ndarray, frames, models_cfg: dict, progress=None,
         return apply_selector(det, frames, sam3, progress_cb=progress, keep=keep,
                               zoom=_quality(models_cfg) == "max")
     finally:
-        try: sam3.offload()
-        except Exception: pass
+        from ..models.sam3_concept import KEEP_LOADED_GB, total_vram_gb
+        if total_vram_gb() < KEEP_LOADED_GB:   # small cards: free the room for SAM 2
+            try: sam3.offload()
+            except Exception: pass
 
 
 def _sam2_available() -> bool:

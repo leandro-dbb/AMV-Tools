@@ -467,3 +467,28 @@ def test_unmix_recovers_the_true_edge_colour_of_a_composite():
     assert np.abs(out[soft] - F[soft]).max() < 6                   # true colour back
     col, a = finish_edges(I, alpha, "max")
     assert np.abs(col[soft].astype(np.float32) - F[soft]).mean() < 8
+
+
+def test_apply_selector_batched_matches_one_by_one():
+    from backend.models.auto_roto import apply_selector
+    det = np.stack([(_blob(60, 100, 5 + t, 5, 30 + t, 50) + _blob(60, 100, 70, 5, 95, 50)) * 255
+                    for t in range(7)]).astype(np.uint8)
+    frames = [np.full((60, 100, 3), t, np.uint8) for t in range(7)]
+
+    class One:
+        def segment(self, rgb, prompt):
+            t = int(rgb[0, 0, 0])
+            return _blob(60, 100, 5 + t, 5, 30 + t, 50)
+
+    class Many(One):
+        calls = 0
+
+        def segment_many(self, images, prompt):
+            Many.calls += 1
+            return [self.segment(f, prompt) for f in images]
+
+    k1, k2 = [], []
+    a = apply_selector(det, frames, One(), keep=k1)
+    b = apply_selector(det, frames, Many(), keep=k2)
+    assert np.array_equal(a, b) and len(k1) == len(k2) == 7
+    assert Many.calls == 1                       # one batched call for the whole chunk
