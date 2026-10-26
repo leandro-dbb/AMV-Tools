@@ -413,10 +413,14 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
     # an ink line is thin: a dark area thicker than INK_MAX_HALF_FRAC on each
     # side of its middle (a glow band, a shadow, dark scenery) is not one
     half = max(2.5, INK_MAX_HALF_FRAC * diag)
-    thick = cv2.distanceTransform(dark.astype(np.uint8), cv2.DIST_L2, 3) > half
+    # (measured outside the matte only: a black hair mass inside the
+    # character makes its own outline no thicker)
+    dark_out = dark & ~solid
+    thick = cv2.distanceTransform(dark_out.astype(np.uint8), cv2.DIST_L2, 3) > half
     if thick.any():
         r = int(np.ceil(half)) + 1
-        dark &= ~(cv2.dilate(thick.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0)
+        dark &= ~((cv2.dilate(thick.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0)
+                  & ~solid)
     # 1. outline: dark pixels connected to the solid matte, within reach
     cand = dark & (d_out <= reach) & ~solid
     far_dark = dark & (d_out > reach)
