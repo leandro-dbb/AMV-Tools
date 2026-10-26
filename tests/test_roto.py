@@ -453,3 +453,17 @@ def test_hug_gives_back_a_held_object_but_not_a_pocket_of_sky():
     assert out[220, 640] == 0.0                    # sky stays out
     no_rgb = hug_with_tips(base, sel)
     assert no_rgb[330, 540] == 0.0
+
+
+def test_unmix_recovers_the_true_edge_colour_of_a_composite():
+    from backend.models.edge_refine import finish_edges, unmix_with_background
+    h, w = 120, 400
+    F = np.zeros((h, w, 3), np.float32); F[:] = (240, 200, 80)       # character
+    B = np.zeros((h, w, 3), np.float32); B[:] = (40, 90, 200)        # background
+    alpha = np.tile(np.clip((210 - np.arange(w)) / 20.0, 0, 1), (h, 1)).astype(np.float32)
+    I = (alpha[..., None] * F + (1 - alpha[..., None]) * B).round().astype(np.uint8)
+    out = unmix_with_background(I, alpha).astype(np.float32)
+    soft = (alpha > 0.3) & (alpha < 0.95)
+    assert np.abs(out[soft] - F[soft]).max() < 6                   # true colour back
+    col, a = finish_edges(I, alpha, "max")
+    assert np.abs(col[soft].astype(np.float32) - F[soft]).mean() < 8

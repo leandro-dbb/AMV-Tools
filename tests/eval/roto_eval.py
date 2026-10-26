@@ -853,6 +853,63 @@ def contamination(rgb_out: np.ndarray, rgb_src: np.ndarray, a: np.ndarray, gt: n
     return float((a[ok] * c[ok]).sum() / a[ok].sum() * 100)
 
 
+def synthetic_composite(rgb: np.ndarray, gt: np.ndarray, sigma: float = 0.8):
+    """Ground-truth composite of a key frame: (I, F, B, alpha).
+
+    F: the character's colours (reference pixels as they are; outside the
+    reference, the colour of the nearest reference pixel), B: the frame's own
+    background (colour of the nearest background pixel), alpha: the reference
+    softened into a ~2 px antialiased ramp. I = alpha F + (1 - alpha) B. On
+    I the true foreground colour of every pixel is known, so contamination
+    can be measured exactly instead of guessing F from the frame (the old
+    estimate counted correct ink pixels as contamination: 26 % on a perfect
+    answer, see docs/reports/chantier-roto.md, part 4)."""
+    import cv2
+    g = gt > 0.5
+    if not g.any():
+        return None
+    _, lab = cv2.distanceTransformWithLabels((~g).astype(np.uint8), cv2.DIST_L2, 3,
+                                             labelType=cv2.DIST_LABEL_PIXEL)
+    gy, gx = np.nonzero(g)
+    k = np.clip(lab.astype(np.int64) - 1, 0, len(gy) - 1)
+    F = rgb[gy[k], gx[k]]
+    # background: colour of the nearest real background pixel 4 px or more
+    # outside the reference (known exactly, fast; only the outline band needs it)
+    far = cv2.dilate(g.astype(np.uint8), np.ones((9, 9), np.uint8)) == 0
+    if not far.any():
+        return None
+    _, labb = cv2.distanceTransformWithLabels((~far).astype(np.uint8), cv2.DIST_L2, 3,
+                                              labelType=cv2.DIST_LABEL_PIXEL)
+    by, bx = np.nonzero(far)
+    kb = np.clip(labb.astype(np.int64) - 1, 0, len(by) - 1)
+    B = rgb[by[kb], bx[kb]]
+    alpha = cv2.GaussianBlur(g.astype(np.float32), (0, 0), sigma)
+    I = (alpha[..., None] * F + (1 - alpha[..., None]) * B).round().clip(0, 255).astype(np.uint8)
+    return I, F, B, alpha
+
+
+def contamination_true(col: np.ndarray, a_out: np.ndarray, F: np.ndarray, B: np.ndarray,
+                       alpha: np.ndarray) -> tuple[float, float]:
+    """(contamination %, colour error) of an export of a synthetic composite:
+    background share of the exported colour on the true F -> B axis,
+    weighted by the exported alpha, on the pixels the truth calls
+    semi-transparent where F and B differ visibly; colour error = mean
+    |C - F| (0..255) there, which also catches over-correction."""
+    c = col.astype(np.float32) / 255.0
+    f = F.astype(np.float32) / 255.0
+    b = B.astype(np.float32) / 255.0
+    fb = b - f
+    den = (fb * fb).sum(2)
+    ok = (alpha > 0.05) & (alpha < 0.95) & (a_out > 0.05) & (den >= (40 / 255) ** 2)
+    if ok.sum() < 30:
+        return float("nan"), float("nan")
+    t = np.clip(((c - f) * fb).sum(2) / np.maximum(den, 1e-6), 0, 1)
+    w = a_out[ok]
+    cont = float((w * t[ok]).sum() / w.sum() * 100)
+    err = float(np.sqrt(((c - f) ** 2).sum(2))[ok].mean() * 255 / np.sqrt(3))
+    return cont, err
+
+
 def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """What the alpha export does to (frame, alpha) at the working size.
     ``none``: alpha as is, source colours; ``v05``: the 0.5 export (guided
@@ -868,6 +925,14 @@ def export_post(name: str, rgb: np.ndarray, a: np.ndarray) -> tuple[np.ndarray, 
         return mp.clean_edges_with_background(rgb, a2, resolve_alpha=False)
     if name == "v06":
         return mp.export_edges(rgb, a)
+    if name.startswith("um"):  # um[c]<faint>_<solid>: unmix against an inpainted background (c: after colour solve)
+        from backend.models import edge_refine as er
+        body = name[2:]
+        cs = body.startswith("c")
+        body = body[1:] if cs else body
+        fa, so = (int(x) / 100.0 for x in body.split("_")) if body else (0.15, 0.5)
+        a2 = er.colour_solve_safe(rgb, a, band_frac=0.012, in_frac=0.002) if cs else a
+        return er.unmix_with_background(rgb, a2, faint=fa, solid=so), a2
     if name == "max":  # the max-quality export of the app (edge_refine.finish_edges)
         from backend.models.edge_refine import finish_edges
         return finish_edges(rgb, a, "max")
@@ -936,7 +1001,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             continue  # excluded: reference found wrong during the visual review
         paths = frame_paths(root, sid)
         js, fs, es, fails = [], [], [], 0
-        bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": []}
+        bgs = {"bg_band": [], "bg_in": [], "eaten": [], "contam": [], "contam_true": [], "colerr": [], "contam_col": []}
         for idx in scored_frames(root, sid, len(paths)):
             gt = read_alpha(root / "gt" / sid / f"{idx:05d}.png") > 0.5
             a = read_alpha(rd / f"{idx:05d}.png")
@@ -945,6 +1010,19 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             for k_, v_ in bg_metrics(a_e, gt).items():
                 bgs[k_].append(v_)
             bgs["contam"].append(contamination(rgb_e, rgb, a_e, gt))
+            # ground-truth contamination: the same export run on a composite
+            # of this frame whose true colours are known (method's alpha)
+            syn = synthetic_composite(rgb, gt)
+            if syn is not None:
+                I_s, F_s, B_s, al_s = syn
+                col_s, a_s = export_post(export, I_s, a)
+                ct, ce = contamination_true(col_s, a_s, F_s, B_s, al_s)
+                bgs["contam_true"].append(ct)
+                bgs["colerr"].append(ce)
+                # same, with the true alpha given to the export: the colour step alone
+                col_p, a_p = export_post(export, I_s, al_s)
+                cp, _cpe = contamination_true(col_p, a_p, F_s, B_s, al_s)
+                bgs["contam_col"].append(cp)
             p = a > 0.5
             union = (p | gt).sum()
             j = float((p & gt).sum() / union) if union else 1.0
