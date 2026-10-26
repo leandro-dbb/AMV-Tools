@@ -63,5 +63,6 @@ export const journeyStrings: Dict = {
     en: 'The analysis engine of AMV Tools stopped responding. Wait a few seconds (it reconnects by itself), otherwise close and reopen the app. If it keeps happening, send the logs folder (Settings > Diagnostic) with a bug report.',
     fr: "Le moteur d'analyse d'AMV Tools ne répond plus. Attends quelques secondes (il se reconnecte tout seul), sinon ferme et rouvre l'appli. Si ça se répète, joins le dossier des logs (Paramètres > Diagnostic) à un rapport de bug.",
   },
+  'journey.library.countOne': { en: '1 episode · {scenes} scenes', fr: '1 épisode · {scenes} scènes' },
   'journey.library.removeQueued': { en: 'Remove from the queue', fr: 'Retirer de la file' },
 };

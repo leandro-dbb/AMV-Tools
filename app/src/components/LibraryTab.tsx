@@ -227,7 +227,7 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
           <>
             <div className="flex items-center justify-between -mb-2">
               <div className="text-sm font-semibold text-[#FAFAFA]">{t('library.videos.title')}</div>
-              <div className="text-xs text-[#71717A]">{t('library.videos.count', { videos: totals.videos, scenes: totals.scenes })}</div>
+              <div className="text-xs text-[#71717A]">{totals.videos === 1 ? t('journey.library.countOne', { scenes: totals.scenes }) : t('library.videos.count', { videos: totals.videos, scenes: totals.scenes })}</div>
             </div>
             <EpisodeFoldersPanel refreshKey={`${totals.videos}:${totals.scenes}`} />
           </>
