@@ -121,6 +121,7 @@ JUMP_FRAC = 0.25             # area change between neighbours counted as a jump
 STABLE_OPAQUE = 0.8          # BiRefNet pixels above: solid (ink, hair, props), always kept in a kept piece
 STABLE_SOLID_REACH = 2.0     # solid pixels reach this x farther (props, long strands)
 STABLE_CORE_PX = 4.0         # matte beyond this distance from SAM 3's character: "extras", sorted by size
+SEL_FILL_SEEN = 0.1          # SAM 3 adds a character BiRefNet sees less than this share of
 SEL_SPIKE = 1.6              # SAM 3 mask over this x its rolling median: swollen (aura taken for the character)
 TRACK_MIN_REL = 0.3          # a track piece away from SAM 3's characters counts if >= this x their area
 GUARD_SEEN_MIN = 0.3         # temporal guard: refill only if BiRefNet / SAM 3 still see this share of it
@@ -924,7 +925,7 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
                  solid_reach: float = STABLE_SOLID_REACH, core_px: float = STABLE_CORE_PX,
                  extra_lo: float = EXTRA_LO, extra_hi: float = EXTRA_HI,
                  prev: Optional[np.ndarray] = None, track_min_rel: float = TRACK_MIN_REL,
-                 rgb: Optional[np.ndarray] = None) -> np.ndarray:
+                 rgb: Optional[np.ndarray] = None, det_ok: bool = True) -> np.ndarray:
     """One frame of the "stable" matte.
 
     ``det``: BiRefNet's alpha (float 0..1), the floor. ``selector``: SAM 3's
@@ -948,9 +949,11 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
     outline, a pocket between the arms), the previous frame's decision
     (``prev``) weighing in so it does not blink. Held objects and
     characters SAM 3 missed but the track has are never sorted. SAM
-    3's mask (eroded by ``sel_erode`` px) is added on top; the track is
-    added where SAM 3 sees nobody: a character that BiRefNet loses in a
-    motion blur stays. No character evidence at all: BiRefNet as is."""
+    3's mask (eroded by ``sel_erode`` px) is added on top when BiRefNet
+    lost the character on this frame (``det_ok`` False: its matte collapsed
+    next to the neighbouring frames' — motion blur), otherwise only for a
+    character BiRefNet does not see at all; the track is added where SAM 3
+    sees nobody. No character evidence at all: BiRefNet as is."""
     import cv2
     d = np.clip(det.astype(np.float32), 0, 1)
     h, w = d.shape
@@ -1013,7 +1016,19 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
         out = _drop_big_extras(out, s, protect, core_px, extra_lo, extra_hi, prev, rgb)
     if s is not None:
         se = s.astype(np.uint8)
-        if sel_erode > 0:
+        if not det_ok:
+            pass   # BiRefNet lost the character on this frame (blur): SAM 3 fills it all
+        else:
+            # BiRefNet sees the characters: SAM 3 only adds one it does not
+            # see at all (SAM 3 sometimes glues an aura to the character)
+            n_s, lab_s = cv2.connectedComponents(se, connectivity=8)
+            if n_s > 1:
+                tot = np.bincount(lab_s.ravel(), minlength=n_s)
+                seen = np.bincount(lab_s[d > low], minlength=n_s)
+                add = seen < SEL_FILL_SEEN * np.maximum(tot, 1)
+                add[0] = False
+                se = add[lab_s].astype(np.uint8)
+        if sel_erode > 0 and se.any():
             k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * sel_erode + 1, 2 * sel_erode + 1))
             se = cv2.erode(se, k)
         out = np.maximum(out, se.astype(np.float32))
@@ -1026,7 +1041,7 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
 
 def _drop_big_extras(out: np.ndarray, s: np.ndarray, hm: Optional[np.ndarray], core_px: float,
                      lo: float, hi: float, prev: Optional[np.ndarray],
-                     rgb: Optional[np.ndarray] = None, bg_share: float = EXTRA_BG_SHARE) -> np.ndarray:
+                     rgb: Optional[np.ndarray] = None, bg_share: Optional[float] = None) -> np.ndarray:
     """:func:`stable_frame`: sort the pieces of the matte sticking out of
     SAM 3's character (beyond ``core_px``). Up to ``lo`` x its area (a
     strand, a cigarette, a finger): kept. Bigger: removed when over ``hi``
@@ -1038,6 +1053,8 @@ def _drop_big_extras(out: np.ndarray, s: np.ndarray, hm: Optional[np.ndarray], c
     stays out unless clearly character-coloured: the decision does not
     blink."""
     import cv2
+    if bg_share is None:
+        bg_share = EXTRA_BG_SHARE
     ns = float(s.sum())
     if ns <= 0:
         return out
@@ -1317,6 +1334,21 @@ def persist_selector(sel: Sequence[Optional[np.ndarray]], shots: Optional[List[t
     return out
 
 
+def det_seen(det: np.ndarray, shots: Optional[List[tuple[int, int]]] = None) -> list:
+    """Per frame: does BiRefNet still see the characters (its matte area at
+    least LOST_FRAC x the rolling median of the shot)? False on the frames
+    where a motion blur or a flash makes it collapse."""
+    T = len(det)
+    thr = 127 if det.dtype == np.uint8 else 0.5
+    area = np.array([float((d > thr).sum()) for d in det])
+    ok = [True] * T
+    for a, b in (shots or [(0, T)]):
+        for t in range(a, b):
+            med = _rolling_median(area, t, a, b)
+            ok[t] = not (med > 0 and area[t] < LOST_FRAC * med)
+    return ok
+
+
 def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]],
                  track: Optional[np.ndarray] = None, held: Optional[Sequence[Optional[np.ndarray]]] = None,
                  frames: Optional[Sequence] = None, shots: Optional[List[tuple[int, int]]] = None,
@@ -1335,6 +1367,7 @@ def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]]
     sel = persist_selector(sel, shots, frames=frames if frames is not None and len(frames) == T else None)
     hl = list(held) if held is not None and len(held) == T else [None] * T
     starts = {a for a, _b in (shots or [(0, T)])}
+    det_ok = det_seen(det, shots)
     for t in range(T):
         d = det[t].astype(np.float32) / (255.0 if det.dtype == np.uint8 else 1.0)
         if only_tracked and track is not None:
@@ -1352,7 +1385,7 @@ def stable_masks(det: np.ndarray, selector_masks: Sequence[Optional[np.ndarray]]
                 import cv2
                 rgb = cv2.resize(rgb, (d.shape[1], d.shape[0]), interpolation=cv2.INTER_AREA)
         out[t] = stable_frame(d, sel[t], None if track is None else track[t], hl[t], reach_frac=reach_frac,
-                              prev=None if t in starts else out[t - 1], rgb=rgb)
+                              prev=None if t in starts else out[t - 1], rgb=rgb, det_ok=det_ok[t])
     if frames is not None and len(frames) == T:
         out, fixed = temporal_guard(out, frames, det, shots, selector=sel)
         if fixed:
