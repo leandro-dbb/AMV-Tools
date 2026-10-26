@@ -500,8 +500,12 @@ def test_registry_download_is_throttled(tmp_path, monkeypatch):
 
 def test_registry_lists_only_permissive_models():
     from backend.finish import registry
-    # CC-BY-4.0: redistributable with attribution (credited in the label/README)
-    assert {m["license"] for m in registry.list_models()} <= {"BSD-3-Clause", "MIT", "Apache-2.0", "CC-BY-4.0"}
+    # CC-BY-4.0: redistributable with attribution (credited in the label/README);
+    # CC-BY-NC-SA-4.0 (chantier 4b): non-commercial, flagged for the UI
+    models = registry.list_models()
+    assert {m["license"] for m in models} <= {"BSD-3-Clause", "MIT", "Apache-2.0", "CC-BY-4.0",
+                                              "CC-BY-NC-SA-4.0", "CC-BY-NC-4.0"}
+    assert all(m["non_commercial"] == ("-NC" in m["license"]) for m in models)
     depth = registry.MODELS["depth-anything-v2-small"]
     assert all("Small" in f.url for f in depth.files)
 
