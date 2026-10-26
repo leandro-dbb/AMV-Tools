@@ -53,17 +53,19 @@ def _metadata(clip, timeline: Timeline) -> dict:
 
 
 def _marker_dict(marker, clip, timeline: Timeline) -> dict:
-    # marked_range lives in the clip's media time, like source_range: it
-    # starts at the source in point, not at 0.
-    src_rate = otio_rate(clip.source.fps)
-    local = convert_frames(max(0, marker.frame - clip.record_start),
-                           timeline.sequence_fps, clip.source.fps)
-    local = min(local, max(0, clip.out_frame - clip.in_frame - 1))
+    # marked_range lives in the clip's timebase, like source_range.  Clip
+    # source ranges are written on the sequence timebase (see _clip_dict), so
+    # the marker start is the converted in point plus its offset inside the
+    # clip; both are sequence frames.
+    seq_rate = otio_rate(timeline.sequence_fps)
+    in_seq = convert_frames(clip.in_frame, clip.source.fps, timeline.sequence_fps)
+    local = max(0, marker.frame - clip.record_start)
+    local = min(local, max(0, clip.record_duration - 1))
     return {
         "OTIO_SCHEMA": "Marker.2",
         "metadata": {"amv": {"color": marker.color}},
         "name": marker.name,
-        "marked_range": _time_range(clip.in_frame + local, 1, src_rate),
+        "marked_range": _time_range(in_seq + local, 1, seq_rate),
         "color": "RED" if marker.color else "GREEN",
         "comment": marker.comment,
     }
@@ -71,16 +73,22 @@ def _marker_dict(marker, clip, timeline: Timeline) -> dict:
 
 def _clip_dict(clip, timeline: Timeline) -> dict:
     src_rate = otio_rate(clip.source.fps)
+    seq_rate = otio_rate(timeline.sequence_fps)
     url = media_url(clip.source.path, base_dir=timeline.base_dir,
                     relative=timeline.path_mode == "relative")
     duration = clip.source.duration_frames or clip.out_frame
-    # Clip source_range is in the source timebase; OTIO places it on the
-    # track using that source_range, so gaps are explicit Gap items.
+    # OTIO has no per-track rate conversion: a Track's duration is the sum
+    # of its children's source_range durations.  Writing source ranges at the
+    # *source* rate made mixed-rate timelines internally inconsistent, so the
+    # in point is converted to sequence frames and the duration is the placed
+    # duration.  Seconds (and therefore the edit) stay identical; the media
+    # reference keeps the real source rate in available_range/metadata.
+    in_seq = convert_frames(clip.in_frame, clip.source.fps, timeline.sequence_fps)
     return {
         "OTIO_SCHEMA": "Clip.2",
         "metadata": _metadata(clip, timeline),
         "name": clip.name,
-        "source_range": _time_range(clip.in_frame, clip.out_frame - clip.in_frame, src_rate),
+        "source_range": _time_range(in_seq, clip.record_duration, seq_rate),
         "effects": [],
         "markers": [
             _marker_dict(m, clip, timeline)
@@ -127,6 +135,11 @@ def _track_dict(timeline: Timeline, kind: str) -> dict:
             children.append(_gap_dict(clip.record_start - cursor, seq_rate))
         children.append(_clip_dict(clip, timeline))
         cursor = clip.record_end
+    if kind == "Audio" and cursor < timeline.duration_frames:
+        # Audio is optional per source.  Without a trailing gap the audio
+        # track is shorter than the video track, which some readers (OTIO's
+        # own otiostat, Resolve) flag as an inconsistent timeline.
+        children.append(_gap_dict(timeline.duration_frames - cursor, seq_rate))
     return {
         "OTIO_SCHEMA": "Track.1",
         "metadata": {"amv": {"kind": kind}},

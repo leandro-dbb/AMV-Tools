@@ -69,9 +69,11 @@ def _file_xml(file_id: str, info, timeline: Timeline) -> str:
     # <name> carries the file name so a moved project relinks by folder.
     url = media_url(info.path, base_dir=timeline.base_dir, relative=False)
     duration = info.duration_frames or 0
+    # Canonical FCP 7 order inside file/media/video is samplecharacteristics
+    # (the file-level <duration> already carries the length).  Premiere is
+    # lenient, but Resolve and FCP 7's own importer expect this layout.
     video = (
         "<video>"
-        f"<duration>{duration}</duration>"
         f"{_sample_characteristics(info.fps, info.width or 0, info.height or 0)}"
         "</video>"
     )
@@ -79,10 +81,10 @@ def _file_xml(file_id: str, info, timeline: Timeline) -> str:
     if info.has_audio:
         audio = (
             "<audio>"
-            f"<channelcount>{max(1, info.audio_channels or 2)}</channelcount>"
             "<samplecharacteristics>"
             "<depth>16</depth><samplerate>48000</samplerate>"
             "</samplecharacteristics>"
+            f"<channelcount>{max(1, info.audio_channels or 2)}</channelcount>"
             "</audio>"
         )
     return (
@@ -184,7 +186,7 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
         f"    {_rate_xml(timeline.sequence_fps)}\n"
         "    <timecode>\n"
         f"      {_rate_xml(timeline.sequence_fps)}\n"
-        "      <string>00:00:00:00</string>\n"
+        f"      <string>{'00:00:00;00' if timeline.drop_frame_active else '00:00:00:00'}</string>\n"
         "      <frame>0</frame>\n"
         f"      <displayformat>{'DF' if timeline.drop_frame_active else 'NDF'}</displayformat>\n"
         "    </timecode>\n"

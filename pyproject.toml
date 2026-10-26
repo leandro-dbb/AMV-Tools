@@ -47,6 +47,9 @@ dev = [
     "httpx>=0.27.0",
     # Timeline export golden tests round-trip the .otio output.
     "opentimelineio>=0.17",
+    # Community adapters (Apache-2.0) used to import our FCP7 XML/EDL/OTIO
+    # exports with a third-party parser in the validation tests.
+    "opentimelineio-plugins>=0.18",
 ]
 
 [project.optional-dependencies]
