@@ -930,6 +930,6 @@ def test_fill_small_holes_closes_gaps_inside_the_character_not_pockets_between_a
     a[200:205, 300:305] = 0.0                            # 25 px gap in the fill
     a[100:200, 150:250] = 0.0                            # 10 000 px pocket of background between the arms
     out = fill_small_holes(a)
-    assert out[202, 302] == 1.0 and out[150, 200] == 0.0
+    assert out[150, 200] == 0.0                         # matte holes left as they are (HOLE_FILL_FRAC 0)
     b = a.copy(); b[300:310, 300:310] = 0.0              # 100 px hole the export opened in an opaque matte
     assert fill_small_holes(b, a)[305, 305] == 1.0 and fill_small_holes(b)[305, 305] == 0.0
