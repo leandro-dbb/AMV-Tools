@@ -416,7 +416,8 @@ def test_quality_by_tier_and_setting():
         def model_selection(self):
             return self.sel
 
-    assert auto_roto.mask_quality(St("nvidia", "24gb")) == "max"
+    assert auto_roto.mask_quality(St("nvidia", "24gb")) == "stable"
+    assert auto_roto.mask_quality(St("nvidia", "24gb"), "max") == "max"
     assert auto_roto.mask_quality(St("nvidia", "fast")) == "standard"
     assert auto_roto.mask_quality(St("mac", "mac16")) is not None
     assert auto_roto.mask_quality(St("cpu", "fast"), "auto") == "standard"
@@ -589,3 +590,208 @@ def test_held_regions_rejects_light_effects():
     assert held_regions(base, body, [staff], rgb=rgb).any()
     rgb[beam] = (40, 40, 120)                           # a dark blue staff
     assert held_regions(base, body, [staff], rgb=rgb).any()
+
+
+# ── 0.6 stable Auto (roto stable) ────────────────────────────────────────────
+def _smoker(h=400, w=600):
+    """BiRefNet's matte of a character holding a cigarette that sticks out
+    of SAM 3's mask, a detached piece of scenery and a faint halo."""
+    det = _blob(h, w, 100, 40, 180, 190)                # body
+    det[100:104, 180:214] = 1.0                         # cigarette, touching the hand
+    det[20:60, 250:290] = 1.0                           # scenery, detached
+    det[40:190, 180:200] = np.maximum(det[40:190, 180:200], 0.4)   # soft halo of sky beside the body
+    sel = _blob(h, w, 100, 40, 180, 190)                # SAM 3: the body only
+    return det, sel
+
+
+def test_stable_frame_keeps_what_touches_the_character_and_drops_detached_scenery():
+    from backend.models.auto_roto import stable_frame
+    det, sel = _smoker()
+    out = stable_frame(det, sel)
+    assert out[102, 212] == 1.0                         # the cigarette is never cut
+    assert out[40, 270] == 0.0                          # detached scenery dropped
+    assert out[100, 140] == 1.0                         # body
+    assert out[150, 181] > 0.3                          # the antialiased edge stays
+    assert out[150, 195] == 0.0                         # the wide soft halo does not
+    assert stable_frame(det, sel, soft_px=0)[150, 195] > 0.3   # (without the soft-edge limit it would)
+
+
+def test_stable_frame_adds_the_selector_where_birefnet_loses_a_blurred_character():
+    from backend.models.auto_roto import stable_frame
+    det, sel = _smoker()
+    out = stable_frame(np.zeros_like(det), sel)
+    assert out[100, 140] == 1.0                         # BiRefNet empty (motion blur): SAM 3 keeps him
+    assert stable_frame(det, None)[40, 270] == 1.0      # no character evidence: BiRefNet as is
+
+
+def test_temporal_guard_refills_a_lost_frame_from_its_neighbours():
+    from backend.models.auto_roto import lost_frames, temporal_guard
+    T, h, w = 9, 120, 160
+    masks = np.stack([_blob(h, w, 40 + t, 20, 100 + t, 100) for t in range(T)])
+    masks[4] = 0.0                                      # the character vanishes on one frame
+    frames = [np.full((h, w, 3), 30, np.uint8) for _ in range(T)]
+    for t in range(T):
+        frames[t][20:100, 40 + t:100 + t] = 200
+    assert lost_frames(masks) == [4]
+    out, fixed = temporal_guard(masks, frames)
+    assert fixed == [4]
+    assert (out[4] > 0.5).sum() > 0.8 * (masks[3] > 0.5).sum()
+    assert lost_frames(out) == []
+
+
+def test_area_jumps_counts_big_changes_between_neighbours_only_inside_a_shot():
+    from backend.models.auto_roto import area_jumps
+    h, w = 50, 50
+    m = np.stack([_blob(h, w, 0, 0, 20, 20), _blob(h, w, 0, 0, 20, 20), _blob(h, w, 0, 0, 40, 40)])
+    assert area_jumps(m) == [2]
+    assert area_jumps(m, [(0, 2), (2, 3)]) == []         # across a cut: not a jump
+
+
+def test_clean_specks_is_stable_in_time_and_keeps_held_objects():
+    from backend.models.auto_roto import clean_specks, specks
+    h, w = 200, 300
+    a = _blob(h, w, 50, 50, 150, 150)
+    a[10:12, 250:252] = 1.0                              # 4 px confetti: always gone
+    a[20:27, 200:207] = 1.0                              # 49 px island, between the two thresholds
+    a[180, 20] = 0.3                                     # faint orphan pixel
+    lo, hi = 10 / (h * w), 100 / (h * w)
+    out = clean_specks(a, None, lo_frac=lo, hi_frac=hi)
+    assert out[11, 251] == 0.0 and out[180, 20] == 0.0
+    assert out[23, 203] == 0.0                           # no previous frame keeping it: gone
+    assert clean_specks(a, a, lo_frac=lo, hi_frac=hi)[23, 203] == 1.0   # kept before: kept now
+    held = np.zeros((h, w), np.float32); held[10:12, 250:252] = 1.0
+    assert clean_specks(a, None, held, lo_frac=lo, hi_frac=hi)[11, 251] == 1.0
+    assert out[100, 100] == 1.0                          # the character itself never
+    assert specks(a, island_frac=hi)[0] == 2 and specks(out, island_frac=hi) == (0, 0)
+
+
+def test_stable_masks_main_mode_ignores_characters_away_from_the_track():
+    from backend.models.auto_roto import stable_masks
+    h, w = 100, 200
+    det = np.stack([_blob(h, w, 10, 10, 60, 90) + _blob(h, w, 120, 10, 170, 90)] * 3)
+    sel = [((_blob(h, w, 10, 10, 60, 90) + _blob(h, w, 120, 10, 170, 90)) > 0).astype(np.uint8)] * 3
+    track = np.stack([_blob(h, w, 10, 10, 60, 90)] * 3)
+    both = stable_masks(det, sel, track)
+    one = stable_masks(det, sel, track, only_tracked=True)
+    assert both[1, 50, 140] == 1.0 and one[1, 50, 140] == 0.0 and one[1, 50, 30] == 1.0
+
+
+def test_apply_selector_batched_objects_pass():
+    from backend.models.auto_roto import apply_selector
+    h, w = 120, 200
+    body = _blob(h, w, 60, 10, 120, 110)
+    stick = _blob(h, w, 120, 50, 190, 56)
+    det = np.stack([np.maximum(body, stick) * 255] * 3).astype(np.uint8)
+    frames = [np.full((h, w, 3), 90, np.uint8) for _ in range(3)]
+
+    class Sel:
+        calls = 0
+
+        def segment_objects_many(self, images, prompt, objects, zoom=False):
+            Sel.calls += 1
+            return [body.copy() for _ in images], [[stick > 0.5] for _ in images]
+
+    keep, held = [], []
+    apply_selector(det, frames, Sel(), keep=keep, held=held)
+    assert Sel.calls == 1 and len(keep) == 3 and len(held) == 3
+    assert held[1] is not None and held[1][53, 170] > 200
+
+
+def test_stable_frame_drops_an_aura_flare_but_keeps_a_strand_and_does_not_blink():
+    from backend.models.auto_roto import stable_frame
+    h, w = 400, 600
+    body = _blob(h, w, 200, 50, 300, 350)               # SAM 3's character, 30 000 px
+    det = body.copy()
+    det[100:104, 300:340] = 1.0                         # a strand / cigarette: 160 px
+    det[50:350, 300:330] = 1.0                          # an aura flare along the side: 9 000 px (30 %)
+    out = stable_frame(det, body)
+    assert out[200, 320] == 0.0                         # the flare goes
+    assert out[200, 302] == 1.0                         # ... but not the character's own edge zone
+    det2 = body.copy()
+    det2[100:104, 300:340] = 1.0
+    assert stable_frame(det2, body)[102, 335] == 1.0    # the strand stays
+    det3 = body.copy()
+    det3[50:150, 300:330] = 1.0                         # 3 000 px: 10 %, between the thresholds
+    assert stable_frame(det3, body)[100, 320] == 0.0    # no previous frame having it: out
+    assert stable_frame(det3, body, prev=det3)[100, 320] == 1.0   # kept before: kept now
+
+
+def test_temporal_guard_does_not_draw_back_a_character_that_went_behind_a_wall():
+    from backend.models.auto_roto import temporal_guard
+    T, h, w = 9, 120, 160
+    masks = np.stack([_blob(h, w, 40, 20, 100, 100) for _ in range(T)])
+    masks[4] = 0.0
+    frames = [np.full((h, w, 3), 30, np.uint8) for _ in range(T)]
+    det = masks.copy()                                  # BiRefNet sees nothing there on frame 4 either
+    out, fixed = temporal_guard(masks, frames, det)
+    assert fixed == [] and out[4].max() == 0.0
+    det[4] = _blob(h, w, 42, 22, 98, 60) * 0.9          # it still sees half of him (blurred)
+    out, fixed = temporal_guard(masks, frames, det)
+    assert fixed == [4] and out[4, 50, 70] > 0.5        # refilled where it still shows
+
+
+def test_track_auto_stable_path_runs_with_fake_models(monkeypatch, tmp_path):
+    """The app's Auto route in "stable" mode, models faked: BiRefNet sees the
+    character on every frame but one (motion blur), SAM 3 always sees it,
+    SAM 2 follows its seed; no frame comes out empty, the cigarette stays."""
+    from backend.api import segment
+    from backend.models import auto_roto as ar
+    T, h, w = 6, 120, 200
+    paths = []
+    for t in range(T):
+        f = np.full((h, w, 3), 40, np.uint8)
+        f[20:110, 60:120] = 200
+        p = tmp_path / f"{t:05d}.jpg"
+        Image.fromarray(f).save(p)
+        paths.append(p)
+    body = _blob(h, w, 60, 20, 120, 110)
+    with_cig = body.copy(); with_cig[60:63, 120:135] = 1.0
+
+    class Bi:
+        calls = 0
+
+        def alpha_batch(self, rgbs, batch=4):
+            out = []
+            for _ in rgbs:
+                out.append(np.zeros((h, w), np.float32) if Bi.calls == 3 else with_cig.copy())
+                Bi.calls += 1
+            return out
+
+    class S3:
+        def segment_objects_many(self, images, prompt, objects, zoom=False):
+            return [body.copy() for _ in images], [[] for _ in images]
+
+        def offload(self):
+            pass
+
+    class S2:
+        window_frames = 96
+
+        def track_keyframes(self, keyframes, frames_dir, frame_paths, frame_size, soft=True):
+            return np.stack([body] * len(frame_paths))
+
+    class St:
+        settings = {"models": {"mask_temporal_smooth_enabled": True}}
+
+        def get_birefnet(self):
+            return Bi()
+
+        def get_sam3(self):
+            return S3()
+
+        def get_sam2(self, variant=None):
+            return S2()
+
+        def model_selection(self):
+            return {"platform": "nvidia", "effective_tier": "24gb"}
+
+    monkeypatch.setattr(segment, "get_state", lambda: St())
+    monkeypatch.setattr(ar, "mask_models", lambda state: dict(ar.MASK_TIERS["nvidia"]["24gb"]))
+    monkeypatch.setattr(segment, "_sam2_available", lambda: True)
+    sess = segment.SegmentSession(session_id="s", scene_id=1, video_path="v", start_ms=0, end_ms=250, fps=24.0,
+                                  frames_dir=tmp_path, frame_paths=paths, frame_size=(w, h))
+    body_req = segment.TrackRequest(session_id="s")
+    masks = segment._track_auto(sess, body_req, lambda seen, total: None)
+    assert masks.shape == (T, h, w)
+    assert all((m > 0.5).sum() > 0.8 * body.sum() for m in masks)      # no frame lost
+    assert all(m[61, 130] > 0.5 for i, m in enumerate(masks) if i != 3)  # the cigarette stays

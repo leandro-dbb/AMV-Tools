@@ -593,6 +593,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                        lambda: st.get_birefnet())
 
     frames: list[np.ndarray] = []
+    stable_clean = None   # stable mode: {"shots", "held"} for the speck cleanup after stabilisation
     masks: list[np.ndarray] = []
     total = clip.n_frames
     # 0.5: the Auto engine's tracker (auto_roto) when the tier has one — the
@@ -656,15 +657,16 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
             track = np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
                               for m in masks]) if tracker else None
             small = [cv2.resize(f, (256, max(2, round(256 * hh / ww))), interpolation=cv2.INTER_AREA) for f in frames]
+            stable_clean = {"shots": split_shots(small, len(frames)), "held": held}
             masks = list(stable_masks(raw, selector_masks, track, held, frames=frames,
-                                      shots=split_shots(small, len(frames)),
+                                      shots=stable_clean["shots"],
                                       only_tracked=(p.get("target") or models_cfg.get("mask_auto_target", "all")) == "main"))
         elif selector_masks:
             from ..models.auto_roto import tighten
             masks = list(tighten(np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
                                            for m in masks]), selector_masks, quality=_quality(models_cfg),
                                  held=held))
-        del selector_masks, held, raw
+        del selector_masks, raw
     finally:
         if jpg_dir is not None:
             shutil.rmtree(jpg_dir, ignore_errors=True)
@@ -674,6 +676,9 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
         strength=float(p.get("strength", models_cfg.get("mask_temporal_smooth_strength", 0.5))),
         check_cancel=ctx.check_cancel,
     )
+    if stable_clean is not None:   # stable mode: specks cleaned after the stabilisation
+        from ..models.auto_roto import clean_masks
+        stack = clean_masks(stack, stable_clean["shots"], stable_clean["held"])
     ctx.progress(0.85, "encoding alpha", force=True)
     target = unique_path(out_dir, f"{stem}_cutout", ".mov" if codec == "prores_4444_alpha" else ".webm")
     ctx.on_cancel_cleanup(lambda: (Path(target).unlink(missing_ok=True),
