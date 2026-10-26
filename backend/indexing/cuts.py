@@ -273,6 +273,9 @@ def _pyav_hwaccel_handle() -> Optional[av.codec.hwaccel.HWAccel]:
     if not _PYAV_HW_PROBED:
         _PYAV_HW_PROBED = True
         device_type = "videotoolbox" if sys.platform == "darwin" else "cuda"
+        if device_type == "cuda" and not _nvidia_gpu_present():
+            _PYAV_HW = None
+            return _PYAV_HW
         try:
             _PYAV_HW = av.codec.hwaccel.HWAccel(device_type=device_type, allow_software_fallback=True)
             log.info("%s enabled for PyAV fallback path", device_type)
