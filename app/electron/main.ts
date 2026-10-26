@@ -158,6 +158,10 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
     env: {
       ...process.env,
       PYTHONUNBUFFERED: '1',
+      // Windows pipes default to the ANSI code page (cp1252): accented
+      // paths and '—' in the sidecar's log lines reached the bootstrap
+      // screen as '�'. Electron decodes the pipe as UTF-8.
+      PYTHONIOENCODING: 'utf-8',
       // macOS: PyTorch's MPS backend is missing some ops; without this flag an
       // unsupported op raises instead of falling back to CPU. No-op elsewhere.
       PYTORCH_ENABLE_MPS_FALLBACK: '1',
