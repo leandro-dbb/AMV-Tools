@@ -4,6 +4,35 @@ All notable changes to AMV Tools are documented here.
 
 ## 0.5.0-alpha — unreleased
 
+### Mask Mode — "Stable" Auto: nothing disappears (roto stable)
+
+- **New default Auto mode, "Stable"** (NVIDIA 8 GB and up with SAM 3; the
+  night's "max quality" made a cigarette vanish from a character's hand,
+  ate outlines and dropped Goku on the 8 blurred frames of a shaking-camera
+  shot). BiRefNet's matte is the floor: every piece of it that touches a
+  character (SAM 3, the SAM 2 track or a held object) is kept, solid pixels
+  (ink, hair, props) whole; SAM 3 no longer hugs the outline, it only drops
+  scenery detached from the characters and oversized extras sticking out of
+  them (aura flares, a wall fused with a shoulder), with a decision that
+  does not blink from one frame to the next. Its own mask is added where
+  BiRefNet loses a blurred character. A frame whose matte collapses next to
+  its neighbours is refilled from them by optical flow, only where BiRefNet
+  or SAM 3 still see something (a character that went behind a wall is not
+  drawn back). Background specks (small detached islands, faint pixels away
+  from the matte) are cleaned after the temporal stabilisation, decided with
+  the previous frame. Held objects are on in this mode; the SAM 3 character
+  and object concepts share one batched encoder pass.
+- RESULTS_PLACEHOLDER
+- *Settings > Models > Cutout mode*: Stable (default) / Max quality (tight
+  outline) / Standard.
+- Benchmark rebuilt for stability: every frame of every shot is checked
+  (lost frames: matte area under 60 % of the shot's rolling median; jumps:
+  area change over 25 % between neighbours; background specks per frame),
+  the eaten character weighs as much as the background kept ("contour" =
+  background along the outline + eaten), the cigarette of b1 is referenced on
+  all 84 frames, extra verified references on the blurred frames of s13 and
+  on b1 / s04. Report: `docs/reports/chantier-roto.md`, part 5.
+
 ### Mask Mode — held objects stay in the cutout (roto held)
 
 - **Max quality keeps what the characters hold or wear**: the SAM 3 pass that
