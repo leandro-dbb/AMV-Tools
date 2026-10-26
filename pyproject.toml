@@ -31,6 +31,7 @@ dependencies = [
     # guided-filter alpha upsampling at export all use cv2. Headless build:
     # no Qt payload, works in the sidecar.
     "opencv-python-headless>=4.9.0",
+    "librosa>=0.11.0",
 ]
 # Note on MatAnyone: the upstream package is git-only (github.com/pq-yang/MatAnyone)
 # and not published on PyPI. We deliberately do NOT pull it in here to keep the
