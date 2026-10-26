@@ -354,6 +354,7 @@ SOFT_LF_MARGIN = 0.04      # "soft": an ink pixel no lighter than the bordering 
 SOFT_CORE_PX = 5.0          # "soft": dark edge pixels raised within this of the solid character (px)
 SOFT_EDGE_DARK = 0.10       # ... when this much darker than the local background
 SOFT_INK_MIN_ALPHA = 0.03   # "soft" export: ink absorbed only where the matte already has this much alpha
+SOFT_THICK_REACH = 1.0      # "soft": no ink within this many half-line widths of a dark area thicker than a line
 INK_REACH_FRAC = 0.0028  # outline followed this far from the matte (as the band: farther, scenery lines came along)
 INK_FILL_MAX_REL = 0.0   # what matte + outline enclose filled up to this share of the matte (0: off — it filled
                          # background between two spikes; tips now come from the full-resolution edge solve)
@@ -442,14 +443,19 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
     if far_dark.any():
         cand &= ~(cv2.dilate(far_dark.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
     edge_ink = dark & solid & (d_in <= band)
+    thick_near = np.zeros_like(solid)
     if not cut_fringe:
-        # "soft": a large dark area inside the matte (black background between
-        # aura flames) is not an ink line — never made opaque
-        thick_all = cv2.distanceTransform(dark.astype(np.uint8), cv2.DIST_L2, 3) > half
+        # "soft": a large dark area inside or around the matte (black
+        # background between aura flames) is not an ink line — never made
+        # opaque, nor the thin dark wedges right next to it
+        # (counted on the part the matte does not fully own: the dark
+        # character itself, black hair, is solid and stays)
+        thick_all = cv2.distanceTransform((dark & (a < 0.95)).astype(np.uint8), cv2.DIST_L2, 3) > 2 * half
         if thick_all.any():
-            r2 = int(np.ceil(half)) + 1
-            edge_ink &= ~(cv2.dilate(thick_all.astype(np.uint8),
-                                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r2 + 1, 2 * r2 + 1))) > 0)
+            r2 = int(np.ceil(SOFT_THICK_REACH * half)) + 1
+            thick_near = cv2.dilate(thick_all.astype(np.uint8),
+                                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r2 + 1, 2 * r2 + 1))) > 0
+            edge_ink &= ~thick_near
     ink = np.zeros_like(solid)
     if cand.any():
         seed = cv2.dilate(solid.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
@@ -520,7 +526,7 @@ def absorb_ink(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = INK_BAND_F
         if core.any():
             near_core = cv2.distanceTransform(1 - core, cv2.DIST_L2, 3) <= SOFT_CORE_PX
             zone |= (lum < lb - SOFT_EDGE_DARK) & (a >= 0.5) & (d_in <= band) & near_core
-        zone &= (lum < lb - 0.05)
+        zone &= (lum < lb - 0.05) & ~thick_near
         ink_l = cv2.erode(np.where(keep, lum, 1.0).astype(np.float32), np.ones((7, 7), np.uint8))
         cov = np.clip((lb - lum) / np.maximum(lb - ink_l, 1e-3), 0.0, 1.0)
         add = cv2.GaussianBlur(np.where(zone, cov, 0.0).astype(np.float32), (0, 0), SOFT_INK_SIGMA)
