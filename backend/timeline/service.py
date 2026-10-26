@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import edl, fcp7, fcpxml, otio
+from . import aftereffects, edl, fcp7, fcpxml, otio
 from .collect import collect_media
 from .model import (
     ClipSpec,
@@ -51,6 +51,22 @@ FORMATS: dict[str, dict] = {
         "apps": ["DaVinci Resolve", "Kdenlive", "OpenTimelineIO tools"],
         "description": "Interchange format for Resolve and Kdenlive.",
     },
+    "vegas": {
+        "id": "vegas",
+        "extension": ".txt",
+        "label": "Vegas Pro (EDL text)",
+        "label_fr": "Vegas Pro (EDL texte)",
+        "apps": ["Vegas Pro"],
+        "description": "CMX3600 text for File > Import > EDL in Vegas Pro.",
+    },
+    "aftereffects": {
+        "id": "aftereffects",
+        "extension": ".jsx",
+        "label": "After Effects (script)",
+        "label_fr": "After Effects (script)",
+        "apps": ["After Effects"],
+        "description": "ExtendScript that builds the composition; File > Scripts > Run Script File.",
+    },
 }
 
 _WRITERS = {
@@ -58,6 +74,8 @@ _WRITERS = {
     "fcpxml": fcpxml.dumps,
     "edl": edl.dumps,
     "otio": otio.dumps,
+    "vegas": edl.dumps_vegas,
+    "aftereffects": aftereffects.dumps,
 }
 
 
@@ -79,7 +97,7 @@ def _write_atomic(path: Path, content: str) -> None:
 
 
 def formats() -> list[dict]:
-    return [dict(FORMATS[key]) for key in ("fcp7xml", "fcpxml", "edl", "otio")]
+    return [dict(FORMATS[key]) for key in ("fcp7xml", "fcpxml", "edl", "otio", "vegas", "aftereffects")]
 
 
 def probe_specs(specs: Iterable[ClipSpec]) -> tuple[dict[str, SourceInfo], list[str]]:

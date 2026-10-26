@@ -546,7 +546,9 @@ def test_fcpxml_escapes_quotes_and_strips_control_chars():
     assert clip.get("name") == _clean(_NASTY_CLIP)
     marker = clip.find("marker")
     assert marker.get("value") == _clean(_NASTY_CLIP)
-    assert marker.findtext("note") == 'note "x" & <y>'
+    # FCPXML 1.9 declares <marker> EMPTY: the comment is the ``note``
+    # attribute, not a child element (validated against Apple's DTD).
+    assert marker.get("note") == 'note "x" & <y>'
     assert "\x07" not in text and "\x01" not in text
 
 

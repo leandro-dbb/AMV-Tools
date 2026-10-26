@@ -148,12 +148,12 @@
               "OTIO_SCHEMA": "TimeRange.1",
               "duration": {
                 "OTIO_SCHEMA": "RationalTime.1",
-                "rate": 25.0,
-                "value": 25.0
+                "rate": 23.976023976023978,
+                "value": 24.0
               },
               "start_time": {
                 "OTIO_SCHEMA": "RationalTime.1",
-                "rate": 25.0,
+                "rate": 23.976023976023978,
                 "value": 10.0
               }
             },
@@ -171,12 +171,12 @@
                   "OTIO_SCHEMA": "TimeRange.1",
                   "duration": {
                     "OTIO_SCHEMA": "RationalTime.1",
-                    "rate": 25.0,
+                    "rate": 23.976023976023978,
                     "value": 1.0
                   },
                   "start_time": {
                     "OTIO_SCHEMA": "RationalTime.1",
-                    "rate": 25.0,
+                    "rate": 23.976023976023978,
                     "value": 10.0
                   }
                 },
@@ -319,6 +319,26 @@
               }
             },
             "active_media_reference_key": "DEFAULT_MEDIA"
+          },
+          {
+            "OTIO_SCHEMA": "Gap.1",
+            "metadata": {},
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 23.976023976023978,
+                "value": 24.0
+              },
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 23.976023976023978,
+                "value": 0.0
+              }
+            },
+            "effects": [],
+            "markers": [],
+            "enabled": true
           }
         ],
         "kind": "Audio"

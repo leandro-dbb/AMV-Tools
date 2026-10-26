@@ -8,10 +8,36 @@ export const timelineStrings: Dict = {
     en: 'Exports a timeline that points at the original files — no re-encode.',
     fr: 'Exporte une timeline qui pointe vers les fichiers sources — sans réencoder.',
   },
-  'timeline.dialog.format': { en: 'Format', fr: 'Format' },
+  'timeline.dialog.format': { en: 'Editing software', fr: 'Logiciel de montage' },
   'timeline.dialog.formatHint': {
-    en: 'For Premiere / Resolve / Final Cut / AE / Vegas',
-    fr: 'Pour Premiere / Resolve / Final Cut / AE / Vegas',
+    en: 'Pick the software you will open the timeline in. The format and the import steps adapt to it.',
+    fr: 'Choisissez le logiciel dans lequel vous ouvrirez la timeline. Le format et les étapes d’import s’adaptent.',
+  },
+  'timeline.software.other': { en: 'Other (OTIO / EDL)', fr: 'Autre (OTIO / EDL)' },
+  'timeline.software.otherFormat': { en: 'File format', fr: 'Format de fichier' },
+  'timeline.import.premiere': {
+    en: 'Premiere Pro: File > Import…, select the .xml file (or drag it into a bin), then keep the source files where they are.',
+    fr: 'Premiere Pro : Fichier > Importer…, sélectionnez le fichier .xml (ou glissez-le dans un bac), puis laissez les fichiers sources à leur place.',
+  },
+  'timeline.import.resolve': {
+    en: 'DaVinci Resolve: File > Import > Timeline…, select the .fcpxml file. Relink the media only if Resolve asks for it.',
+    fr: 'DaVinci Resolve : Fichier > Importer > Timeline…, sélectionnez le fichier .fcpxml. Ne reliez les médias que si Resolve le demande.',
+  },
+  'timeline.import.aftereffects': {
+    en: 'After Effects: File > Scripts > Run Script File…, select the .jsx file. It creates the composition with every clip placed.',
+    fr: 'After Effects : Fichier > Scripts > Exécuter un fichier de script…, sélectionnez le fichier .jsx. Il crée la composition avec tous les clips placés.',
+  },
+  'timeline.import.vegas': {
+    en: 'Vegas Pro: File > Import > EDL, select the .txt file (CMX3600). Match the clips by name if Vegas asks.',
+    fr: 'Vegas Pro : Fichier > Importer > EDL, sélectionnez le fichier .txt (CMX3600). Associez les clips par leur nom si Vegas le demande.',
+  },
+  'timeline.import.finalcut': {
+    en: 'Final Cut Pro: File > Import > XML…, select the .fcpxml file. The clips stay linked to the originals.',
+    fr: 'Final Cut Pro : Fichier > Importer > XML…, sélectionnez le fichier .fcpxml. Les clips restent liés aux originaux.',
+  },
+  'timeline.import.other': {
+    en: 'OTIO: Resolve (File > Import > Timeline) and Kdenlive (Project > Open). EDL: a universal cut list with no media paths.',
+    fr: 'OTIO : Resolve (Fichier > Importer > Timeline) et Kdenlive (Projet > Ouvrir). EDL : une liste de coupes universelle, sans chemins de médias.',
   },
   'timeline.dialog.clips': { en: '{count} clips', fr: '{count} clips' },
   'timeline.dialog.duration': { en: '{duration} total', fr: '{duration} au total' },
@@ -58,6 +84,8 @@ export const timelineStrings: Dict = {
   'timeline.format.fcpxml': { en: 'FCPXML 1.9 — Final Cut Pro / Resolve', fr: 'FCPXML 1.9 — Final Cut Pro / Resolve' },
   'timeline.format.edl': { en: 'EDL CMX3600 — universal cut list', fr: 'EDL CMX3600 — liste de coupes universelle' },
   'timeline.format.otio': { en: 'OpenTimelineIO — Resolve / Kdenlive', fr: 'OpenTimelineIO — Resolve / Kdenlive' },
+  'timeline.format.vegas': { en: 'Vegas Pro (CMX3600 text)', fr: 'Vegas Pro (texte CMX3600)' },
+  'timeline.format.aftereffects': { en: 'After Effects (ExtendScript)', fr: 'After Effects (ExtendScript)' },
   'timeline.scope.all': { en: 'All keeps', fr: 'Tous les keeps' },
   'timeline.scope.folder': { en: 'This folder', fr: 'Ce dossier' },
   'timeline.scope.favorites': { en: 'Favorites', fr: 'Favoris' },
