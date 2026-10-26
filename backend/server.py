@@ -100,7 +100,7 @@ def make_app() -> FastAPI:
         # Cheap liveness probe used by the Windows smoke test and by anyone
         # wiring the sidecar into a launcher/healthcheck.  It must not touch
         # the DB or the models so it answers even while indexing runs.
-        return {"ok": True, "service": "amv-tools", "version": "0.4.0a0", "api": True}
+        return {"ok": True, "service": "amv-tools"}
 
     @app.exception_handler(ImportError)
     async def _import_error_handler(request: Request, exc: ImportError):
