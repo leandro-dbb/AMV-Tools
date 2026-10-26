@@ -794,7 +794,7 @@ def method_runner(name: str, args, dev):
         run.detector = [base]
         return run
     if name.startswith("stable"):
-        # stable[r<reach ‰>][e<erode px>][l<low %>][o<opaque %>][p<soft px>][x<solid reach x10>][k<core px>][j<extra hi %, 0: off>][i<extra lo ‰>][n][t][h][s][c][g]~<track>~<selector>:
+        # stable[r<reach ‰>][e<erode px>][l<low %>][o<opaque %>][p<soft px>][x<solid reach x10>][k<core px>][j<extra hi %, 0: off>][i<extra lo ‰>][b<background share %>][n][t][h][s][c][g]~<track>~<selector>:
         # the "stable" Auto (auto_roto.stable_masks): BiRefNet (runs/birefnet) pieces
         # that touch a character kept, SAM 3 (<selector>) only drops detached ones,
         # the tracked matte (<track>) and held objects (<root>/obj, as heldv) add to
@@ -804,8 +804,8 @@ def method_runner(name: str, args, dev):
         import re
         head, rest = name.split("~", 1)
         track_name, sel = rest.rsplit("~", 1)
-        mm = re.match(r"stable(?:r(\d+))?(?:e(\d+))?(?:l(\d+))?(?:o(\d+))?(?:p(\d+))?(?:x(\d+))?(?:k(\d+))?(?:j(\d+))?(?:i(\d+))?(n)?(t)?(h)?(s)?(c)?(g)?$", head)
-        rr, ee, ll, oo, pp, xx, kk, jj, ii, nn, tt, hh, ss, cc, gg = mm.groups()
+        mm = re.match(r"stable(?:r(\d+))?(?:e(\d+))?(?:l(\d+))?(?:o(\d+))?(?:p(\d+))?(?:x(\d+))?(?:k(\d+))?(?:j(\d+))?(?:i(\d+))?(?:b(\d+))?(n)?(t)?(h)?(s)?(c)?(g)?$", head)
+        rr, ee, ll, oo, pp, xx, kk, jj, ii, bb, nn, tt, hh, ss, cc, gg = mm.groups()
         from backend.models import auto_roto as ar
         root = Path(args.root)
 
@@ -831,11 +831,14 @@ def method_runner(name: str, args, dev):
             cuts = shot_cuts(root, sid)
             starts = {a for a, _b in cuts}
             out = np.zeros(det.shape, np.float32)
+            if bb:
+                ar.EXTRA_BG_SHARE = int(bb) / 100.0
+            ok = ar.det_seen(det, cuts)
             for i in range(n):
                 out[i] = ar.stable_frame(det[i], sl[i], None if tr is None else tr[i],
                                          None if H is None else H[i], **kw,
                                          prev=None if i in starts else out[i - 1],
-                                         rgb=None if gg else read_rgb(paths[i]))
+                                         rgb=None if gg else read_rgb(paths[i]), det_ok=ok[i])
             if not nn:
                 out, _fixed = ar.temporal_guard(out, paths, det, cuts, selector=sl)
             if not cc:

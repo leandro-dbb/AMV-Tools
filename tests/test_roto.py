@@ -841,3 +841,15 @@ def test_persist_selector_brings_a_swollen_mask_back_to_its_neighbours_shape():
     sel = [goku] * 4 + [aura] + [goku] * 4
     out = persist_selector(sel)
     assert out[4][60, 100] == 1.0 and out[4][60, 40] == 0.0
+
+
+def test_stable_frame_does_not_add_an_aura_sam3_glued_to_a_character_birefnet_sees():
+    from backend.models.auto_roto import det_seen, stable_frame
+    h, w = 400, 600
+    body = _blob(h, w, 250, 100, 350, 350)
+    sam3 = _blob(h, w, 150, 20, 450, 390)               # SAM 3 swallowed the aura around him
+    out = stable_frame(body, sam3)
+    assert out[200, 300] == 1.0 and out[200, 180] == 0.0
+    assert stable_frame(np.zeros_like(body), sam3, det_ok=False)[200, 180] == 1.0   # blurred frame: SAM 3 fills
+    det = np.stack([body] * 5); det[2] = 0.0
+    assert det_seen(det) == [True, True, False, True, True]
