@@ -738,21 +738,76 @@ def method_runner(name: str, args, dev):
             return np.stack(out)
         run.detector = [base]
         return run
+    if name in ("app_stable", "app_max"):
+        # the app's Auto chain end to end with the real models (as
+        # backend/api/segment.py _track_auto): BiRefNet, SAM 3 (character +
+        # held-object concepts, one batched pass; zoomed for max), SAM 2.1
+        # tiny tracking ("all"), then stable_masks or tighten, the temporal
+        # stabilisation (strength 0.25) and, for stable, the speck cleanup
+        from backend.models import auto_roto as ar
+        from backend.models.birefnet import BiRefNetModel
+        from backend.models.sam3_concept import Sam3Concept
+        from backend.finish.matte import postprocess_stack
+        bi = BiRefNetModel(dev, variant="general", idle_offload_seconds=0)
+        s3 = Sam3Concept(dev)
+        sam = SAM2Model(dev, variant="tiny", idle_offload_seconds=0)
+        stable = name == "app_stable"
+
+        def run(paths, gt0, k0):
+            frames = [read_rgb(p) for p in paths]
+            h, w = frames[0].shape[:2]
+            det = np.stack([np.clip(np.rint(a * 255), 0, 255).astype(np.uint8)
+                            for a in bi.alpha_batch(frames, batch=4)])
+            raw = det.copy()
+            keep, held = [], []
+            gated = ar.apply_selector(det, frames, s3, keep=keep, held=held, zoom=not stable,
+                                      reach_frac=ar.STABLE_REACH if stable else ar.GATE_FRAC)
+            small = [np.asarray(Image.fromarray(f).resize((256, max(2, round(256 * h / w))))) for f in frames]
+            track = ar.auto_track(paths, gated, sam, frames_dir=paths[0].parent, frame_size=(w, h), mode="all",
+                                  frames_small=small)
+            shots = ar.split_shots(small, len(frames))
+            if stable:
+                m = ar.stable_masks(raw, keep, track, held, frames=frames, shots=shots)
+            else:
+                m = ar.tighten(track, keep, quality="max", held=held)
+            m = postprocess_stack(m.astype(np.float32), frames, stabilize=True, strength=0.25)
+            return ar.clean_masks(m, shots, held) if stable else m
+        return run
+    if name.startswith("clean~"):
+        # clean~<base>: the stable mode's last step, background specks cleaned
+        # after the temporal stabilisation (auto_roto.clean_masks; held objects
+        # from the held cache of the SAM 3 run used by the base)
+        base = name.split("~", 1)[1]
+        from backend.models import auto_roto as ar
+        root = Path(args.root)
+
+        def run(paths, gt0, k0):
+            sid = paths[0].parent.parent.name
+            m = np.stack([read_alpha(root / "runs" / base / sid / f"{i:05d}.png") for i in range(len(paths))])
+            H = None
+            for c in sorted((root / "heldcache").glob(f"*/{sid}.npz")):
+                z = np.load(c)["h"]
+                if len(z) == len(paths):
+                    H = [x if x.any() else None for x in z]
+                    break
+            return ar.clean_masks(m, shot_cuts(root, sid), H)
+        run.detector = [base]
+        return run
     if name.startswith("stable"):
-        # stable[r<reach ‰>][e<erode px>][l<low %>][n][t][h][s]~<track>~<selector>: the "stable"
-        # Auto (auto_roto.stable_masks): BiRefNet (runs/birefnet) pieces that touch a
-        # character kept whole, SAM 3 (<selector>) only drops detached ones, the
-        # tracked matte (<track>) and held objects (<root>/obj, as heldv) add to it,
-        # collapsed frames refilled from their neighbours. n: no temporal guard;
-        # t: no track; h: no held objects; s: SAM 3's mask not added to the matte.
+        # stable[r<reach ‰>][e<erode px>][l<low %>][o<opaque %>][p<soft px>][x<solid reach x10>][k<core px>][j<extra hi %, 0: off>][i<extra lo ‰>][n][t][h][s][c][g]~<track>~<selector>:
+        # the "stable" Auto (auto_roto.stable_masks): BiRefNet (runs/birefnet) pieces
+        # that touch a character kept, SAM 3 (<selector>) only drops detached ones,
+        # the tracked matte (<track>) and held objects (<root>/obj, as heldv) add to
+        # it, collapsed frames refilled from their neighbours, specks cleaned.
+        # n: no temporal guard; t: no track; h: no held objects; s: SAM 3's mask
+        # not added; c: no speck cleanup; p0: no soft-edge limit; g: extras sorted by size only (no colours).
         import re
         head, rest = name.split("~", 1)
         track_name, sel = rest.rsplit("~", 1)
-        mm = re.match(r"stable(?:r(\d+))?(?:e(\d+))?(?:l(\d+))?(n)?(t)?(h)?(s)?$", head)
-        rr, ee, ll, nn, tt, hh, ss = mm.groups()
+        mm = re.match(r"stable(?:r(\d+))?(?:e(\d+))?(?:l(\d+))?(?:o(\d+))?(?:p(\d+))?(?:x(\d+))?(?:k(\d+))?(?:j(\d+))?(?:i(\d+))?(n)?(t)?(h)?(s)?(c)?(g)?$", head)
+        rr, ee, ll, oo, pp, xx, kk, jj, ii, nn, tt, hh, ss, cc, gg = mm.groups()
         from backend.models import auto_roto as ar
         root = Path(args.root)
-        prompts = list(ar.HELD_PROMPTS)
 
         def run(paths, gt0, k0):
             sid = paths[0].parent.parent.name
@@ -761,42 +816,68 @@ def method_runner(name: str, args, dev):
             S = [read_alpha(root / "runs" / sel / sid / f"{i:05d}.png") for i in range(n)]
             tr = None if tt else np.stack([read_alpha(root / "runs" / track_name / sid / f"{i:05d}.png")
                                            for i in range(n)])
-            H = None
-            od = root / "obj" / sid
-            if not hh and (od / "scores.json").exists():
-                sc = json.loads((od / "scores.json").read_text())
-                hm = []
-                for i in range(n):
-                    objs = []
-                    for p in prompts:
-                        lab = np.asarray(Image.open(od / p.replace(" ", "+") / f"{i:05d}.png"))
-                        objs += [lab == j + 1 for j, s_ in enumerate(sc[p][i]) if s_ >= 0.4]
-                    hm.append(ar.held_regions(det[i], S[i], objs, rgb=read_rgb(paths[i])))
-                H = [None if m is None or not np.any(m) else
-                     np.clip(np.rint(ar.keep_held(np.zeros(m.shape, np.float32), det[i], m) * 255), 0, 255).astype(np.uint8)
-                     for i, m in enumerate(ar.persist_held(hm))]
-            kw = {}
-            if rr:
-                kw["reach_frac"] = int(rr) / 1000.0
-            old_e, old_l = ar.STABLE_SEL_ERODE, ar.STABLE_DET_LOW
-            try:
-                if ee:
-                    ar.STABLE_SEL_ERODE = int(ee)
-                if ll:
-                    ar.STABLE_DET_LOW = int(ll) / 100.0
-                sl = [None] * n if ss else S
-                out = np.stack([ar.stable_frame(det[i], sl[i], None if tr is None else tr[i],
-                                                None if H is None else H[i], **kw,
-                                                low=ar.STABLE_DET_LOW, sel_erode=ar.STABLE_SEL_ERODE)
-                                for i in range(n)])
-            finally:
-                ar.STABLE_SEL_ERODE, ar.STABLE_DET_LOW = old_e, old_l
+            H = None if hh else held_cache(root, sid, paths, det, S, sel)
+            kw = dict(reach_frac=int(rr) / 1000.0 if rr else ar.STABLE_REACH,
+                      sel_erode=int(ee) if ee else ar.STABLE_SEL_ERODE,
+                      low=int(ll) / 100.0 if ll else ar.STABLE_DET_LOW,
+                      opaque=int(oo) / 100.0 if oo else ar.STABLE_OPAQUE,
+                      soft_px=float(pp) if pp else ar.STABLE_SOFT_PX,
+                      solid_reach=int(xx) / 10.0 if xx else ar.STABLE_SOLID_REACH,
+                      core_px=float(kk) if kk else ar.STABLE_CORE_PX,
+                      extra_hi=(int(jj) / 100.0 if int(jj) else None) if jj else ar.EXTRA_HI,
+                      extra_lo=(int(ii) / 1000.0 if ii else min(ar.EXTRA_LO, int(jj) / 100.0) if jj and int(jj)
+                                else ar.EXTRA_LO))
+            sl = [None] * n if ss else S
+            cuts = shot_cuts(root, sid)
+            starts = {a for a, _b in cuts}
+            out = np.zeros(det.shape, np.float32)
+            for i in range(n):
+                out[i] = ar.stable_frame(det[i], sl[i], None if tr is None else tr[i],
+                                         None if H is None else H[i], **kw,
+                                         prev=None if i in starts else out[i - 1],
+                                         rgb=None if gg else read_rgb(paths[i]))
             if not nn:
-                out, _fixed = ar.temporal_guard(out, paths, det, shot_cuts(root, sid))
+                out, _fixed = ar.temporal_guard(out, paths, det, cuts, selector=sl)
+            if not cc:
+                out = ar.clean_masks(out, cuts, H)
             return out
         run.detector = ["birefnet", sel] + ([] if tt else [track_name])
         return run
     raise SystemExit(f"unknown method {name}")
+
+
+def held_cache(root: Path, sid: str, paths: list, det: np.ndarray, S: list, sel: str) -> list:
+    """Per-frame held-object mattes of a shot as the app computes them
+    (SAM 3 object instances in <root>/obj, auto_roto.held_regions +
+    persist_held + keep_held), cached in <root>/heldcache/<sel>/<shot>.npz."""
+    from backend.models import auto_roto as ar
+    cache = root / "heldcache" / sel.replace("~", "_") / f"{sid}.npz"
+    n = len(paths)
+    if cache.exists():
+        z = np.load(cache)["h"]
+        if len(z) == n:
+            return [m if m.any() else None for m in z]
+    od = root / "obj" / sid
+    if not (od / "scores.json").exists():
+        return [None] * n
+    sc = json.loads((od / "scores.json").read_text())
+    hm = []
+    for i in range(n):
+        objs = []
+        for p in ar.HELD_PROMPTS:
+            lab = np.asarray(Image.open(od / p.replace(" ", "+") / f"{i:05d}.png"))
+            objs += [lab == j + 1 for j, s_ in enumerate(sc[p][i]) if s_ >= 0.4]
+        hm.append(ar.held_regions(det[i], S[i], objs, rgb=read_rgb(paths[i])))
+    H = []
+    for i, m in enumerate(ar.persist_held(hm)):
+        if m is None or not np.any(m):
+            H.append(np.zeros(det.shape[1:], np.uint8))
+        else:
+            H.append(np.clip(np.rint(ar.keep_held(np.zeros(m.shape, np.float32), det[i], m) * 255), 0, 255)
+                     .astype(np.uint8))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(cache, h=np.stack(H))
+    return [m if m.any() else None for m in H]
 
 
 def shot_cuts(root: Path, sid: str) -> list[tuple[int, int]]:
@@ -1192,7 +1273,7 @@ def score_method(root: Path, method: str, shots: list[dict], export: str = "v05"
             bgs["contam"].append(contamination(rgb_e, rgb, a_e, gt))
             # ground-truth contamination: the same export run on a composite
             # of this frame whose true colours are known (method's alpha)
-            syn = synthetic_composite(rgb, gt)
+            syn = None if os.environ.get("ROTO_NO_CONTAM") else synthetic_composite(rgb, gt)
             if syn is not None:
                 I_s, F_s, B_s, al_s = syn
                 col_s, a_s = export_post(export, I_s, a)
@@ -1235,13 +1316,15 @@ def stability(root: Path, sid: str, rd: Path, n: int) -> dict:
     ``jump_ids`` (frame numbers, for the visual check), and ``held_seq`` /
     ``held_min``: the held object kept on every frame that has a held
     reference in <root>/gt_held_seq (mean / worst %)."""
-    from backend.models.auto_roto import area_jumps, lost_frames
+    from backend.models.auto_roto import area_jumps, lost_frames, specks
     a = np.stack([read_alpha(rd / f"{i:05d}.png") for i in range(n)])
     cuts = shot_cuts(root, sid)
     lost = lost_frames(a, cuts)
     jumps = area_jumps(a, cuts)
+    sp = np.array([specks(x) for x in a], float)
     out = {"lost": len(lost), "jumps": len(jumps), "lost_ids": lost, "jump_ids": jumps, "n_frames": n,
-           "area_med": float(np.median([(x > 0.5).mean() * 100 for x in a]))}
+           "area_med": float(np.median([(x > 0.5).mean() * 100 for x in a])),
+           "islands": float(sp[:, 0].mean()), "orphans": float(sp[:, 1].mean())}
     hs = []
     hd = root / "gt_held_seq" / sid
     if hd.exists():
@@ -1305,10 +1388,10 @@ def stable_table(scores: dict, shots: list[dict]) -> str:
     for s in shots:
         if s["cat"] not in cats:
             cats.append(s["cat"])
-    lines = ["| méthode | catégorie | images | perdues | sauts > 25 % | scint. % | J | fond contour % | mangé % "
+    lines = ["| méthode | catégorie | images | perdues | sauts > 25 % | scint. % | J | fond contour % | (médiane) | mangé % "
              "| contour (fond + mangé) | fond intérieur % | objet tenu % | objet tenu, toutes images % "
-             "| images sans l'objet |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| images sans l'objet | îlots / image | px isolés / image |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for m, per in scores.items():
         for cat in cats + ["TOUT"]:
             ids = [s["id"] for s in shots if (cat == "TOUT" or s["cat"] == cat) and s["id"] in per
@@ -1317,10 +1400,11 @@ def stable_table(scores: dict, shots: list[dict]) -> str:
                 continue
             g = lambda k: float(np.nanmean([per[i].get(k, np.nan) for i in ids]))  # noqa: E731
             tot = lambda k: int(sum(per[i].get(k, 0) for i in ids))  # noqa: E731
+            med = lambda k: float(np.nanmedian([per[i].get(k, np.nan) for i in ids]))  # noqa: E731
             lines.append(f"| {m} | {cat} | {tot('n_frames')} | {tot('lost')} | {tot('jumps')} | {g('flicker'):.1f} | "
-                         f"{g('J'):.3f} | {g('bg_band'):.1f} | {g('eaten'):.1f} | {g('bg_band') + g('eaten'):.1f} | "
+                         f"{g('J'):.3f} | {g('bg_band'):.1f} | {med('bg_band'):.1f} | {g('eaten'):.1f} | {g('bg_band') + g('eaten'):.1f} | "
                          f"{g('bg_in'):.1f} | {g('held'):.1f} | {g('held_seq'):.1f} | "
-                         f"{tot('held_seq_lost')}/{tot('held_seq_n')} |")
+                         f"{tot('held_seq_lost')}/{tot('held_seq_n')} | {g('islands'):.2f} | {g('orphans'):.0f} |")
     return "\n".join(lines)
 
 
