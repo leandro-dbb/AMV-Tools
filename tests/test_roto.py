@@ -722,8 +722,8 @@ def test_stable_frame_drops_an_aura_flare_but_keeps_a_strand_and_does_not_blink(
     rgb[50:150, 300:330] = (70, 140, 230)
     rgb[50:75, 300:330] = (230, 120, 40)                           # 25 % sleeve, 75 % sky
     assert stable_frame(det3, body, rgb=rgb)[100, 320] == 0.0
-    rgb[50:110, 300:330] = (230, 120, 40)                          # 60 % sleeve, 40 % sky
-    assert stable_frame(det3, body, rgb=rgb)[100, 320] == 0.0      # over 35 %: out ...
+    rgb[50:120, 300:330] = (230, 120, 40)                          # 70 % sleeve, 30 % sky
+    assert stable_frame(det3, body, rgb=rgb)[100, 320] == 0.0      # over 25 %: out ...
     assert stable_frame(det3, body, rgb=rgb, prev=det3)[100, 320] == 1.0   # ... unless kept before (no blink)
 
 
