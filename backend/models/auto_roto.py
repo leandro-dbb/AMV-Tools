@@ -1027,7 +1027,14 @@ def stable_frame(det: np.ndarray, selector: Optional[np.ndarray], track: Optiona
                 seen = np.bincount(lab_s[d > low], minlength=n_s)
                 add = seen < SEL_FILL_SEEN * np.maximum(tot, 1)
                 add[0] = False
-                se = add[lab_s].astype(np.uint8)
+                keep_se = add[lab_s]
+                if prev is not None:
+                    # ... and what the previous frame's matte already had there
+                    # (a wing BiRefNet drops on one frame), never what it did not
+                    # have (an aura SAM 3 glues to the character)
+                    keep_se |= (se > 0) & (cv2.dilate((np.asarray(prev) > 0.5).astype(np.uint8),
+                                                      np.ones((3, 3), np.uint8)) > 0)
+                se = keep_se.astype(np.uint8)
         if sel_erode > 0 and se.any():
             k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * sel_erode + 1, 2 * sel_erode + 1))
             se = cv2.erode(se, k)
