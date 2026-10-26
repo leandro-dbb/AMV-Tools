@@ -577,6 +577,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
     import cv2
     from PIL import Image
 
+    from ..api.segment import _edge_mode
     from ..export.ffmpeg import alpha_partial_path, export_scene_with_alpha
     from ..state import get_state
     from .matte import postprocess_stack
@@ -646,8 +647,9 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
             del det
         if selector_masks:
             from ..models.auto_roto import tighten
+            from ..api.segment import _quality
             masks = list(tighten(np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
-                                           for m in masks]), selector_masks))
+                                           for m in masks]), selector_masks, quality=_quality(models_cfg)))
         del selector_masks
     finally:
         if jpg_dir is not None:
@@ -667,7 +669,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
         edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
         bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
-        edge_mode=str(models_cfg.get("mask_edge_mode", "fg")),
+        edge_mode=_edge_mode(models_cfg),
         raw_pipes=_i420_in_writer(),   # CUDA path, unchanged elsewhere
         check_cancel=ctx.check_cancel,
     )

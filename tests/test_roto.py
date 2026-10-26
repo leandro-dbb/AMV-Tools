@@ -359,3 +359,77 @@ def test_tighten_cuts_pockets_where_the_selector_sees_someone():
     assert out[0, 120, 201] > 0.9                                 # outline kept
     assert np.array_equal(out[1], m[1])                           # selector saw nobody: unchanged
     assert tighten(m, []) is m
+
+
+# ── 0.6 max quality (roto 3) ─────────────────────────────────────────────────
+def test_hug_with_tips_gives_back_opaque_tips_not_glow_or_pockets():
+    from backend.models.auto_roto import hug_with_tips
+    h, w = 608, 1080                              # working size (the reach scales with it)
+    body = _blob(h, w, 400, 100, 700, 560)
+    base = body.copy()
+    base[200:204, 375:400] = 1.0                  # opaque spike sticking out (a hair tip)
+    base[450:540, 700:715] = 0.4                  # semi-transparent glow next to the body
+    base[300:340, 700:740] = 1.0                  # opaque pocket between body and ...
+    base[290:350, 740:760] = 1.0                  # ... an arm (the pocket touches both)
+    sel = body.copy()
+    sel[290:350, 740:760] = 1.0                   # SAM 3: body + arm, not the pocket
+    out = hug_with_tips(base, sel, tight_frac=0.004, max_touch=0.3)
+    assert out[202, 380] == 1.0                   # tip given back
+    assert out[500, 712] == 0.0                   # glow cut
+    assert out[320, 725] == 0.0                   # pocket cut
+    assert out[320, 550] == 1.0
+
+
+def test_drop_fragments_removes_loose_bits_outside_the_selector():
+    from backend.models.auto_roto import drop_fragments
+    a = _blob(100, 200, 50, 10, 120, 90) + _blob(100, 200, 160, 40, 164, 44)   # body + a bit of halo
+    sel = _blob(100, 200, 50, 10, 120, 90)
+    out = drop_fragments(a, sel)
+    assert out[50, 80] == 1.0 and out[42, 162] == 0.0
+    keep = drop_fragments(a, sel + _blob(100, 200, 158, 38, 166, 46))   # the selector sees it: kept
+    assert keep[42, 162] == 1.0
+
+
+def test_finish_edges_max_keeps_the_ink_line_and_drops_the_glow():
+    from backend.models.edge_refine import finish_edges
+    h, w = 608, 1080
+    rgb = np.zeros((h, w, 3), np.uint8)
+    rgb[:] = (60, 120, 230)                       # blue sky
+    rgb[:, :500] = (240, 220, 120)                # blonde hair
+    rgb[:, 497:502] = (20, 15, 10)                # ink outline
+    rgb[:, 502:510] = (150, 170, 175)             # pale glow (half sky, half hair colour)
+    alpha = np.zeros((h, w), np.float32)
+    alpha[:, :502] = 1.0
+    alpha[:, 502:510] = 0.5                       # the model kept the glow at half alpha
+    col, a = finish_edges(rgb, alpha, "max")
+    assert (a[300, 497:502] == 1.0).all()         # ink untouched
+    assert a[300, 506] < 0.3                      # glow fades
+    col_fg, a_fg = finish_edges(rgb, alpha, "fg")
+    assert np.array_equal(a_fg, alpha)
+
+
+def test_quality_by_tier_and_setting():
+    class St:
+        def __init__(self, platform, tier):
+            self.sel = {"platform": platform, "effective_tier": tier}
+
+        def model_selection(self):
+            return self.sel
+
+    assert auto_roto.mask_quality(St("nvidia", "24gb")) == "max"
+    assert auto_roto.mask_quality(St("nvidia", "fast")) == "standard"
+    assert auto_roto.mask_quality(St("mac", "mac16")) is not None
+    assert auto_roto.mask_quality(St("cpu", "fast"), "auto") == "standard"
+    assert auto_roto.mask_quality(St("nvidia", "24gb"), "standard") == "standard"
+
+
+def test_tighten_max_quality_uses_the_tips_aware_hug():
+    from backend.models.auto_roto import tighten
+    h, w = 608, 1080
+    body = _blob(h, w, 400, 100, 700, 560)
+    base = body.copy()
+    base[200:204, 375:400] = 1.0
+    m = np.stack([base])
+    std = tighten(m, [body.astype(np.uint8)], quality="standard", tight_frac=0.004)
+    mx = tighten(m, [body.astype(np.uint8)], quality="max")
+    assert std[0, 202, 380] == 0.0 and mx[0, 202, 380] == 1.0

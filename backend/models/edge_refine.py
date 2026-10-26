@@ -133,13 +133,16 @@ def estimate_foreground(rgb: np.ndarray, alpha: np.ndarray, r1: int = 91, r2: in
             idx = np.clip(lab.astype(np.int64) - 1, 0, len(cy) - 1)
             near = img[cy[idx], cx[idx]]
             w = np.clip((nearest_below - a) / max(nearest_below, 1e-3), 0, 1)
+            if nearest_below > 1.0:   # every semi-transparent pixel: nearest opaque colour
+                w = (a < 0.999).astype(np.float32)
             F = w * near + (1 - w) * F
     # opaque pixels keep their exact colour
     F = np.where(a >= 0.999, img, F)
     return np.clip(np.rint(F * 255.0), 0, 255).astype(np.uint8)
 
 
-def colour_solve(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008) -> np.ndarray:
+def colour_solve(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008,
+                 in_frac: Optional[float] = None) -> np.ndarray:
     """Alpha re-solved from colour in a band around the outline (nearest
     character / background colours, compositing equation). Benchmark only:
     it eats ink lines (a black line is neither the hair nor the sky)."""
@@ -149,8 +152,10 @@ def colour_solve(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008) -
     m = (a > 0.5).astype(np.uint8)
     h, w = m.shape
     r = max(2, int(round(band_frac * np.hypot(h, w))))
+    ri = r if in_frac is None else max(0, int(round(in_frac * np.hypot(h, w))))
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-    core = cv2.erode(m, k) > 0
+    ki = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ri + 1, 2 * ri + 1))
+    core = (cv2.erode(m, ki) > 0) if ri > 0 else (m > 0)
     out_bg = cv2.dilate(m, k) == 0
     t = np.where(core, 1.0, np.where(out_bg, 0.0, 0.5)).astype(np.float32)
     _, a2 = clean_edges_with_background(rgb, t, resolve_alpha=True)
@@ -158,6 +163,34 @@ def colour_solve(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008) -
     res = a.copy()
     res[band] = np.minimum(a[band], a2[band])
     return res
+
+
+def colour_solve_safe(rgb: np.ndarray, alpha: np.ndarray, band_frac: float = 0.008,
+                      ink_margin: float = 0.12, in_frac: Optional[float] = None) -> np.ndarray:
+    """:func:`colour_solve` that never lowers the alpha of an ink pixel: a
+    pixel clearly darker than both the nearby character and background
+    colours is the outline, not a mix of the two. Only lowers alpha."""
+    import cv2
+    a = np.clip(alpha.astype(np.float32), 0, 1)
+    a2 = colour_solve(rgb, a, band_frac, in_frac=in_frac)
+    src = rgb.astype(np.float32) / 255.0
+    lum = src @ np.array([0.299, 0.587, 0.114], np.float32)
+    m = (a > 0.5).astype(np.uint8)
+    h, w = m.shape
+    r = max(2, int(round(band_frac * np.hypot(h, w))))
+    k = (4 * r + 1, 4 * r + 1)
+    fg = (cv2.erode(m, np.ones((2 * r + 1, 2 * r + 1), np.uint8)) > 0).astype(np.float32)
+    bg = (cv2.dilate(m, np.ones((2 * r + 1, 2 * r + 1), np.uint8)) == 0).astype(np.float32)
+    lf = cv2.blur(lum * fg, k) / (cv2.blur(fg, k) + 1e-6)
+    lb = cv2.blur(lum * bg, k) / (cv2.blur(bg, k) + 1e-6)
+    ink = lum < np.minimum(lf, lb) - ink_margin
+    return np.where(ink, a, np.minimum(a, a2)).astype(np.float32)
+
+
+def alpha_levels(alpha: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """Alpha levels: below ``lo`` -> 0 (faint glow, halo), above ``hi`` -> 1."""
+    a = np.clip((alpha.astype(np.float32) - lo) / max(hi - lo, 1e-3), 0, 1)
+    return a
 
 
 class EdgeRefiner:
@@ -209,3 +242,22 @@ class EdgeRefiner:
         out[unknown] = pred[unknown]
         out[core] = np.maximum(out[core], 1.0)
         return np.clip(out, 0, 1)
+
+
+MAX_EDGE_IN = 0.002    # outline band re-solved by colour, inside / outside (share of the diagonal)
+MAX_EDGE_OUT = 0.012
+
+
+def finish_edges(rgb: np.ndarray, alpha: np.ndarray, mode: str = "fg") -> tuple[np.ndarray, np.ndarray]:
+    """Export-time edge finishing, ``(rgb_uint8, alpha_float32)``.
+
+    ``fg``: alpha as is + foreground estimation of the edge colours.
+    ``max``: the alpha of a band 2 px inside / 12 px outside the outline is
+    first re-solved from the local character / background colours (glows,
+    halos and background-coloured fringes drop out), never on ink pixels
+    (a dark outline is neither colour), then foreground estimation —
+    contamination 27.5 -> 20.7 % on the benchmark, outline kept."""
+    a = np.clip(alpha.astype(np.float32, copy=False), 0.0, 1.0)
+    if mode == "max":
+        a = colour_solve_safe(rgb, a, band_frac=MAX_EDGE_OUT, in_frac=MAX_EDGE_IN)
+    return estimate_foreground(rgb, a), a

@@ -368,7 +368,10 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
         />
       </Row>
       <Row label={t('settings.models.edgeMode.label')} hint={t('settings.models.edgeMode.hint')}>
-        <Toggle on={(s.mask_edge_mode ?? 'fg') === 'fg'} onChange={(v) => patch('models', { mask_edge_mode: v ? 'fg' : 'legacy' })} />
+        <Toggle on={(s.mask_edge_mode ?? 'auto') !== 'legacy'} onChange={(v) => patch('models', { mask_edge_mode: v ? 'auto' : 'legacy' })} />
+      </Row>
+      <Row label={t('settings.models.maskQuality.label')} hint={t('settings.models.maskQuality.hint')}>
+        <Toggle on={(s.mask_quality ?? 'auto') !== 'standard'} onChange={(v) => patch('models', { mask_quality: v ? 'auto' : 'standard' })} />
       </Row>
       <Row label={t('settings.models.selector.label')} hint={t('settings.models.selector.hint')}>
         <Toggle on={s.mask_selector_enabled ?? true} onChange={(v) => patch('models', { mask_selector_enabled: v })} />

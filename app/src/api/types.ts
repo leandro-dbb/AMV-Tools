@@ -240,7 +240,8 @@ export interface AppSettings {
     mask_rgb_decontaminate_enabled: boolean;
     mask_edge_refine_enabled: boolean;
     mask_bg_aware_cleanup_enabled: boolean;
-    mask_edge_mode?: 'fg' | 'legacy';
+    mask_edge_mode?: 'auto' | 'fg' | 'max' | 'legacy';
+    mask_quality?: 'auto' | 'max' | 'standard';
     mask_selector_enabled?: boolean;
     mask_temporal_smooth_enabled: boolean;
     mask_temporal_smooth_strength: number;

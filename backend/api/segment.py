@@ -559,10 +559,11 @@ def session_cutout(session_id: str, idx: int):
     alpha = mask.astype(np.float32)
     if np.issubdtype(mask.dtype, np.floating):
         alpha = _clean_soft_alpha_for_frame(mask, sess.frame_paths[idx], models_cfg)
-    if str(models_cfg.get("mask_edge_mode", "fg")) == "fg":
-        # same colour decontamination as the video export
-        from ..models.edge_refine import estimate_foreground
-        rgb = estimate_foreground(rgb, np.clip(alpha, 0, 1))
+    edge_mode = _edge_mode(models_cfg)
+    if edge_mode in ("fg", "max"):
+        # same edge finishing as the video export
+        from ..models.edge_refine import finish_edges
+        rgb, alpha = finish_edges(rgb, np.clip(alpha, 0, 1), edge_mode)
     elif bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)):
         from ..models.mask_postprocess import clean_edges_with_background
         rgb, alpha = clean_edges_with_background(rgb, alpha, resolve_alpha=False)
@@ -784,7 +785,7 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
                              lambda seen, total: progress(int(n_frames * span * seen / max(1, total)), n_frames),
                              keep=sel_masks)
     if not use_tracker:
-        masks = tighten(det.astype(np.float32) / 255.0, sel_masks)
+        masks = tighten(det.astype(np.float32) / 255.0, sel_masks, quality=_quality(models_cfg))
         # Per-frame inference re-decides the silhouette on every frame:
         # a flow-aligned temporal median removes the flicker without
         # ghosting moving edges (see finish/matte.py for the numbers).
@@ -798,11 +799,27 @@ def _track_auto(sess: SegmentSession, body: "TrackRequest", progress, clicks: Op
         progress_cb=lambda seen, total: progress(n_frames // 2 + seen // 2, n_frames),
     )
     del det
-    masks = tighten(masks, sel_masks)
+    masks = tighten(masks, sel_masks, quality=_quality(models_cfg))
     del sel_masks
     # SAM 2's memory already keeps identity stable; a lighter stabilisation
     # pass only removes residual edge shimmer from the detector.
     return _postprocess(sess, masks, strength_scale=0.5)
+
+
+def _quality(models_cfg: dict) -> str:
+    """Auto engine quality for this machine: "max" (0.6 roto 3 pipeline) on
+    the tiers that have it, "standard" elsewhere or when forced."""
+    from ..models.auto_roto import mask_quality
+    return mask_quality(get_state(), models_cfg.get("mask_quality", "auto"))
+
+
+def _edge_mode(models_cfg: dict) -> str:
+    """Export edge mode: the setting, "auto" = "max" with the max-quality
+    pipeline, "fg" otherwise."""
+    mode = str(models_cfg.get("mask_edge_mode", "auto"))
+    if mode in ("fg", "legacy", "max"):
+        return mode
+    return "max" if _quality(models_cfg) == "max" else "fg"
 
 
 def _select_characters(det: np.ndarray, frames, models_cfg: dict, progress=None,
@@ -906,7 +923,7 @@ def export_alpha(scene_id: int, body: ExportAlphaRequest):
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
         edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
         bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
-        edge_mode=str(models_cfg.get("mask_edge_mode", "fg")),
+        edge_mode=_edge_mode(models_cfg),
         # CUDA: raw pipes instead of a PNG round-trip (same pixels, ~5x faster).
         raw_pipes=getattr(get_state().device, "backend", None) == "cuda",
     )
