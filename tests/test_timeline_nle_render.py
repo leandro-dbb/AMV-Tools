@@ -320,3 +320,64 @@ def test_export_reopens_and_renders_the_right_frames(fmt, seq_fps, media, tmp_pa
             got = _best(rendered[clip.record_start + offset], src, want)
             slack = 0 if same_rate and fmt != "edl" else 1
             assert abs(got - want) <= slack, (fmt, clip.name, offset, got, want)
+
+
+# ── same check on real episodes (opt-in) ────────────────────────────────────
+# AMV_NLE_MEDIA="/path/a.mkv:/path/b.mkv" runs it on real extracts (H.264 /
+# HEVC, long GOPs, 23.976): the files are linked under names with spaces,
+# accents and an apostrophe. Not in CI: the media is not in the repo.
+def _window(path: Path, first: int, count: int, fps: Fraction) -> np.ndarray:
+    raw = subprocess.run(
+        [FFMPEG, "-hide_banner", "-loglevel", "error", "-ss", f"{float(first / fps):.6f}", "-i", str(path),
+         "-frames:v", str(count), "-vf", f"scale={W}:{H}", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+        check=True, capture_output=True).stdout
+    return np.frombuffer(raw, dtype=np.uint8).reshape(-1, H, W).astype(np.float32)
+
+
+@pytest.mark.skipif(not __import__("os").environ.get("AMV_NLE_MEDIA"), reason="set AMV_NLE_MEDIA to real extracts")
+@pytest.mark.parametrize("fmt", READERS)
+def test_real_episodes_render_the_right_frames(fmt, tmp_path):
+    import os
+    real = [Path(p) for p in os.environ["AMV_NLE_MEDIA"].split(":") if p]
+    folder = tmp_path / "Épisodes d'essai"
+    folder.mkdir()
+    names = ["DBS Beerus 01 — l'été.mkv", "Black Clover S02E04 (日本).mkv"]
+    links = []
+    for src, name in zip(real, names):
+        (folder / name).symlink_to(src)
+        links.append(str(folder / name))
+    sources = {p: probe_source(p) for p in links}
+    specs = []
+    for i, p in enumerate(links):
+        fps = sources[p].fps
+        # Mid-GOP in points, a 2-frame clip, a long clip.
+        specs.append(ClipSpec(source_path=p, in_frame=int(37.3 * fps), out_frame=int(37.3 * fps) + 50, name=f"{i} a"))
+        specs.append(ClipSpec(source_path=p, in_frame=int(81.7 * fps), out_frame=int(81.7 * fps) + 2, name=f"{i} b"))
+    timeline = build_timeline(specs, sources, TimelineOptions(sequence_fps="first", layout="gaps", gap_frames=2))
+    rate = timeline.sequence_fps
+    seq = float(rate)
+    text = WRITERS[fmt](timeline, TimelineOptions())
+    (tmp_path / "timeline.jsx").write_text(text, encoding="utf-8")
+    reader = {"fcp7xml": lambda: _read_otio(text, "fcp_xml", seq),
+              "edl": lambda: _read_otio(text, "cmx_3600", seq),
+              "otio": lambda: _read_otio(text, "otio_json", seq),
+              "fcpxml": lambda: _read_fcpxml(text, seq),
+              "vegas": lambda: _read_vegas(text, seq),
+              "aftereffects": lambda: _read_ae(text, seq, tmp_path)}[fmt]
+    events = reader()
+    assert [(e.rec_start, e.dur) for e in events] == [(c.record_start, c.record_duration) for c in timeline.clips]
+    rendered = _render_mlt(events, rate, tmp_path / "mlt")
+    checked: list[bool] = []
+    for clip in timeline.clips:
+        for offset in (0, clip.record_duration - 1):
+            want = clip.in_frame + offset
+            win = _window(Path(clip.source.path), want - 4, 9, clip.source.fps)
+            frame = rendered[clip.record_start + offset]
+            errs = [float(np.mean((w - frame) ** 2)) for w in win]
+            # Anime holds drawings for 2-3 frames (and stills for longer):
+            # identical neighbours tie, so the wanted frame must be AS GOOD
+            # as the best one, and strictly better than any differing one.
+            assert errs[4] <= min(errs) + 1.0, (fmt, clip.name, offset, [round(e) for e in errs])
+            checked.append(max(errs) - errs[4] > 5.0)
+    # At least half of the probes landed where neighbours differ (not all stills).
+    assert sum(checked) >= len(checked) // 2, checked
