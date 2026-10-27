@@ -3,6 +3,7 @@ indexed shots, export it (timeline / markers only) and render a preview."""
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -30,6 +31,8 @@ _AUDIO_MIME = {
 }
 
 _cache: Optional[AnalysisCache] = None
+_warm_lock = threading.Lock()
+_warm_started = False
 _previews: Optional[PreviewManager] = None
 
 
@@ -87,8 +90,32 @@ def analyze(body: AnalyzeBody):
     return _public(data)
 
 
+def _warm_up() -> None:
+    """librosa's numba kernels compile on first use (10-20 s on a slow CPU):
+    do it while the user is still picking a file."""
+    global _warm_started
+    with _warm_lock:
+        if _warm_started:
+            return
+        _warm_started = True
+
+    def run():
+        try:
+            import numpy as np
+
+            from ..music.analysis import analyze_signal
+
+            analyze_signal(np.random.default_rng(0).standard_normal(22050 * 6).astype("float32") * 0.1)
+        except Exception:  # best effort only
+            log.debug("music warm-up failed", exc_info=True)
+
+    threading.Thread(target=run, name="music-warmup", daemon=True).start()
+
+
 @router.get("/api/music/tracks")
 def tracks():
+    # The Music tab lists tracks when it opens: warm the analyser up then.
+    _warm_up()
     return {"tracks": get_cache().tracks()}
 
 
