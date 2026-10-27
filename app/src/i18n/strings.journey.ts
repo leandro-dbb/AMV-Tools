@@ -73,5 +73,9 @@ export const journeyStrings: Dict = {
     en: 'Searching… (the first search after launch loads the model: up to a minute without a GPU)',
     fr: "Recherche… (la première recherche après le lancement charge le modèle : jusqu'à une minute sans GPU)",
   },
+  'journey.library.leftover': {
+    en: 'These folders were waiting when the app was last closed (indexing interrupted or never started). Start the indexing to finish them: episodes already done are skipped, an interrupted one starts over.',
+    fr: "Ces dossiers attendaient déjà à la dernière fermeture de l'appli (indexation interrompue ou jamais lancée). Lance l'indexation pour les terminer : les épisodes finis sont ignorés, celui qui a été interrompu repart du début.",
+  },
   'journey.library.removeQueued': { en: 'Remove from the queue', fr: 'Retirer de la file' },
 };

@@ -15,6 +15,8 @@ const VIDEO_FILE_FILTERS = [{
   extensions: ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'webm', 'ts', 'm2ts', 'mts', 'mpg', 'mpeg', 'vob', 'm4v', 'f4v', '3gp', 'ogv', 'mxf'],
 }];
 
+let leftoverChecked = false;
+
 export default function LibraryTab({ progress = null, failures = [] }: { progress?: ProgressEvent | null; failures?: IndexFailure[] } = {}) {
   const t = useT();
   const [databases, setDatabases] = useState<{ path: string; scenes: number; videos: number; size_kb: number; primary: boolean }[]>([]);
@@ -30,6 +32,19 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
     setDatabases(dbs.databases);
     setQueue(q.items);
   }
+
+  // Queue left from a previous session (app closed mid-indexing, or folders
+  // added but never started): nothing said so, and nothing resumes it.
+  // Checked once per app launch (first visit of the tab).
+  const [leftover, setLeftover] = useState(false);
+  useEffect(() => {
+    if (leftoverChecked) return;
+    leftoverChecked = true;
+    api.queue().then((q) => {
+      if (q.items.length > 0 && progress?.type !== 'indexing') setLeftover(true);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { refresh().catch(() => {}); }, []);
 
@@ -67,6 +82,7 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
 
   async function startIndex(phases: ('tag' | 'embed')[]) {
     if (busy || indexing) return;
+    setLeftover(false);
     setBusy(true);
     try { await api.startIndexing(phases); }
     finally { setBusy(false); refresh(); }
@@ -172,6 +188,11 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
                   </div>
                 ))}
               </div>
+              {leftover && !indexing && (
+                <div data-testid="queue-leftover" className="text-xs text-[#A1A1AA] bg-[#8B5CF6]/10 border border-[#8B5CF6]/30 rounded-lg px-3 py-2 mb-3">
+                  {t('journey.library.leftover')}
+                </div>
+              )}
               {missingModels.length > 0 && !indexing && (
                 <div data-testid="models-download-note" className="text-xs text-[#FBBF24] bg-[#F59E0B]/10 border border-[#F59E0B]/30 rounded-lg px-3 py-2 mb-3">
                   {t('journey.library.modelsDownload', { models: missingModels.join(' + ') })}
