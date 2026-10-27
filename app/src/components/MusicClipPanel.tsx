@@ -92,10 +92,10 @@ export default function MusicClipPanel({
             <dt className="text-[#71717A]">{t('music.clip.intensity')}</dt>
             <dd className="text-[#FAFAFA] flex flex-col gap-1">
               <span>
-                {clip.intensity == null ? t('music.clip.unknown') : pct(clip.intensity)}
+                {(clip.intensity_rank ?? clip.intensity) == null ? t('music.clip.unknown') : pct((clip.intensity_rank ?? clip.intensity) as number)}
                 <span className="text-[#71717A]"> · {t('music.clip.wanted', { value: pct(clip.target) })}</span>
               </span>
-              <IntensityBar value={clip.intensity} target={clip.target} />
+              <IntensityBar value={clip.intensity_rank ?? clip.intensity} target={clip.target} />
             </dd>
           </dl>
         </div>
@@ -124,7 +124,7 @@ export default function MusicClipPanel({
                   </div>
                   <div className="px-1.5 py-1 flex flex-col gap-1">
                     <span className="text-[10px] text-[#A1A1AA] truncate">{a.video_name}</span>
-                    <IntensityBar value={a.intensity} target={clip.target} />
+                    <IntensityBar value={a.intensity_rank ?? a.intensity} target={clip.target} />
                   </div>
                 </button>
               ))}

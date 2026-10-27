@@ -33,9 +33,11 @@ function MusicEditStrip({ clips, sectionTypes, ppm, height, selectedSlot, playin
             className={`absolute top-0 overflow-hidden rounded-[3px] bg-[#27272A] transition-shadow ${
               sel ? 'ring-2 ring-[#FAFAFA] z-10' : playing ? 'ring-1 ring-[#A1A1AA]' : 'hover:ring-1 hover:ring-[#71717A]'
             }`}
-            style={{ left, width, height, borderBottom: `3px solid ${col}` }}
+            // Too thin for a thumbnail (1-2 beat cuts zoomed out): show the
+            // passage colour instead of an empty dark sliver.
+            style={{ left, width, height, borderBottom: `3px solid ${col}`, ...(width < 3 ? { background: `${col}99` } : {}) }}
           >
-            {width >= 6 && (
+            {width >= 3 && (
               <img
                 src={api.thumbnailUrl(c.scene_id)}
                 alt=""

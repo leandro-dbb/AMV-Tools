@@ -138,6 +138,7 @@ export function clipToAlternative(c: ProposedClip | ClipAlternative): ClipAltern
     src_in_ms: c.src_in_ms,
     src_out_ms: c.src_out_ms,
     intensity: c.intensity,
+    intensity_rank: c.intensity_rank ?? null,
     motion_type: c.motion_type,
     score: c.score,
   };
@@ -159,6 +160,7 @@ export function applyAlternative(clip: ProposedClip, alt: ClipAlternative): Prop
     src_in_ms: alt.src_in_ms,
     src_out_ms: alt.src_out_ms,
     intensity: alt.intensity,
+    intensity_rank: alt.intensity_rank ?? null,
     motion_type: alt.motion_type,
     score: alt.score,
     alternatives: [clipToAlternative(clip), ...others],

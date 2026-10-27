@@ -159,6 +159,7 @@ class ClipBody(BaseModel):
     src_in_ms: int
     src_out_ms: int
     intensity: Optional[float] = None
+    intensity_rank: Optional[float] = None
     motion_type: Optional[str] = None
     target: float = 0.5
     score: float = 0.0
