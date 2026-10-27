@@ -51,7 +51,7 @@ sessions : charge 13 à 40). Aucun GPU utilisé.
 | Aperçu | `backend/music/preview.py` | MP4 360p avec la musique, image près |
 | API | `backend/api/music.py` | routes `/api/music/*` |
 | Interface | `app/src/components/Music*.tsx`, `musicUtils.ts`, `app/src/api/music.ts`, `app/src/i18n/strings.music.ts` | onglet Musique |
-| Tests | `tests/test_music.py` (29 tests), `tests/eval/music_synth.py`, `music_bench.py`, `music_real.py` | tests unitaires, banc de mesure, vérification réelle |
+| Tests | `tests/test_music.py` (34 tests), `tests/eval/music_synth.py`, `music_bench.py`, `music_real.py` | tests unitaires, banc de mesure, vérification réelle |
 
 **Pas de migration SQLite** : les analyses appartiennent à un morceau, pas
 à une bibliothèque ; elles sont stockées en fichiers dans le dossier de
@@ -210,7 +210,10 @@ Aperçu MP4 de 3 min 45 : 56 à 90 s.
   qui contiennent une coupe de l'épisode sont marqués en rouge dans la bande
   avec un message ; les coupes trouvées sont mémorisées par vidéo et les
   propositions suivantes découpent ces plans. Mesuré : 35 coupes hors temps
-  à la 1re proposition → **7 à la suivante** (bibliothèque : 79 → 103 plans).
+  à la 1re proposition → **7 à la suivante** (bibliothèque : 79 → 103 plans),
+  et 7 encore à une 3e passe faite après les corrections de la relecture
+  (86 % des coupes prévues visibles dans le MP4, à 10,7 ms des temps en
+  moyenne, 21 ms au maximum).
 
 ## 7. Exports
 
@@ -251,8 +254,8 @@ Aperçu MP4 de 3 min 45 : 56 à 90 s.
 
 Captures et aperçu : `/home/leandro/dev/amv-v06-captures/music/`
 (`musique-1-import.png` … `musique-6-apercu.png`,
-`apercu-take-the-lead-dbs-blackclover.mp4`, mesures `mesures-passe1.json`
-et `mesures-passe2.json`).
+`apercu-take-the-lead-dbs-blackclover.mp4` (3e passe), mesures
+`mesures-passe1.json`, `mesures-passe2.json`, `mesures-passe3.json`).
 
 ## 9. Bugs trouvés
 
@@ -270,7 +273,33 @@ Dans mon code (corrigés) :
   (75 %) ; plans de 1-2 temps invisibles à zoom 1× ; avertissements affichés
   en codes bruts (`reused:97`).
 
+Trouvés par une relecture indépendante du code (agent relecteur, chaque
+point vérifié puis corrigé, avec un test) :
+
+- OTIO : quand un épisode n'a pas la cadence de la séquence (23,976 / 25),
+  les arrondis s'additionnaient et les coupes dérivaient jusqu'à 1,5 image ;
+  chaque plan reçoit maintenant la durée exacte de son créneau.
+- Aperçu : un trou dans le montage (créneau sans plan) décalait toute la
+  suite ou étirait le plan précédent → rendu en noir ; un épisode 4:3
+  cassait l'assemblage (tailles d'image différentes) → sortie fixe 640×360
+  avec bandes ; ffmpeg bloqué (partage réseau injoignable) bloquait tous les
+  aperçus → délai maximal ; suppression d'un ancien aperçu encore ouvert
+  sous Windows → erreur 500 évitée.
+- « Régénérer ce passage » sur un drop choisissait la moitié de plans
+  calmes (cibles classées à l'intérieur du seul passage).
+- EDL : un épisode nommé `music.mkv` partageait la bobine « MUSIC » de la
+  chanson.
+- Cadence invalide (`1/0`) dans l'export de marqueurs → 500 au lieu de 400.
+- Interface : une réponse arrivée après un changement de morceau
+  s'appliquait au nouveau morceau.
+
 Dans l'existant ou l'environnement (non corrigés, hors de mon périmètre) :
+
+- **Glisser-déposer de fichiers** (onglet Musique, et déjà l'onglet
+  Bibliothèque) : le code lit `File.path`, supprimé depuis Electron 32
+  (l'appli est en 33.2.1) ; il faut exposer `webUtils.getPathForFile` dans
+  le preload (`app/electron/**`, propriété de la session A). Le bouton
+  « Choisir une musique » fonctionne, lui.
 
 - **Indexation CPU d'un MKV HEVC (Black Clover)** : bloquée plus de 20 min à
   « Extraction des images médianes », et pendant ce temps **le serveur ne
@@ -305,8 +334,9 @@ Dans l'existant ou l'environnement (non corrigés, hors de mon périmètre) :
 
 ## 11. Ce que Léandro doit tester lui-même
 
-1. Sous Windows, dans l'application Electron : glisser un mp3 sur l'onglet
-   Musique, choisir via le bouton, écouter avec la barre d'espace, zoomer.
+1. Sous Windows, dans l'application Electron : choisir un mp3 via le bouton
+   (le glisser-déposer ne marchera pas tant que le preload n'est pas
+   corrigé, voir § 9), écouter avec la barre d'espace, zoomer.
 2. **Écouter** l'aperçu : les coupes tombent-elles « sur le temps » à
    l'oreille ? Les drops sont-ils au bon endroit sur 2-3 de tes morceaux ?
 3. Importer `edit.xml` (FCP 7 XML) dans **Premiere Pro** et **Vegas Pro**,
