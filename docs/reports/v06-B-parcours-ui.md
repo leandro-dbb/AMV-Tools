@@ -12,7 +12,7 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
   (SigLIP 2 base + wd-tagger v3 ; aucun mode de test, aucune maquette), sur
   deux **vrais extraits** de 2 min 30 (DBS Beerus 01, Black Clover S02E04)
   rangés dans `~/dev/amv-testdata/Séries test/` (espaces + accents).
-- **21 bugs trouvés, 20 corrigés**, tous avec un test de non-régression
+- **22 bugs trouvés, 21 corrigés**, tous avec un test de non-régression
   (vitest, pytest ou E2E) sauf un changement de texte. Les plus gênants : le glisser-déposer de dossiers
   ne faisait **rien** (Electron 33), l'indexation restait figée sur « 5 % »
   pendant plus de 10 minutes sans dire ce qu'elle faisait, un fichier
@@ -112,6 +112,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
 | 18 | Recherche : bouger le curseur Seuil ou changer le tri ne relançait pas la recherche ; première recherche (30 s+ sur CPU) sans retour visible ; suggestions « Gojo combat / Eva 01 rage / Pikachu cute » sur n'importe quelle bibliothèque. | gênant | corrigé | E2E étape 3 (curseur) |
 | 19 | Export timeline : le bouton restait « Annuler » après un export réussi. | mineur | corrigé | E2E étape 4 |
 | 21 | Échap ne fermait pas l'éditeur de scène (seulement la petite croix). | mineur | corrigé (sauf si une fenêtre ouverte depuis l'éditeur est au-dessus) | E2E étape 4 |
+| 22 | Dérushage : sur les vrais extraits, deux « Garder » de suite laissaient le panier **vide, sans aucun signe**. Deux causes : tant que la vidéo de l'épisode n'est pas chargée, les flèches ne changeaient pas de scène (le 2e clic retirait la 1re) ; et en changeant d'épisode, l'ancienne liste de scènes restait active quelques instants (un clic rapide visait une scène de l'épisode précédent). Trouvé par la suite E2E jouée sur les vrais extraits. | majeur | corrigé | E2E étape 4 (« 1 gardées » puis « Scène 2/… » puis « 2 gardées ») |
 | 20 | Un épisode interrompu (appli fermée en pleine indexation) apparaît comme indexé (« 1 épisode · 82 scènes ») puis est **entièrement refait** à la reprise. | gênant | **non corrigé** (touche au pipeline et au schéma) | — |
 
 ## 4. Ce qui reste confus (non corrigé)
