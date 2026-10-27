@@ -45,6 +45,8 @@ Playwright on real anime extracts
   become `Clip_t_01`).
 - Derush export summary translated; timeline dialog says *Close* once done;
   the backend-unreachable screen no longer shows a developer command.
+- Escape closes the scene editor; a queue left from the previous session is
+  explained in the Library at launch.
 - Small copy fixes (Derush empty state pointed to Settings instead of Library).
 
 ### Models — non-commercial candidates re-evaluated (chantier 4b)
