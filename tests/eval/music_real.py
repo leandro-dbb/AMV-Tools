@@ -127,9 +127,21 @@ def main() -> None:
         cuts = detected_cuts(mp4, args.scene_threshold)
         plan = np.asarray(plan_cuts)
         report["preview_detected_cuts"] = len(cuts)
-        report["preview_cut_vs_plan"] = stats([1000 * nearest(plan, t) for t in cuts])
-        report["preview_cut_vs_beat"] = stats([1000 * nearest(marks, t) for t in cuts])
-        report["preview_cut_vs_beat_only"] = stats([1000 * nearest(beats, t) for t in cuts])
+        det = np.asarray(cuts)
+        frame_ms = 1000 / 23.976
+        # Each planned cut: is there a visible cut within one frame in the
+        # render, and how far?  (A cut between two moments of the same shot
+        # can be invisible to the detector.)
+        seen = [1000 * nearest(det, t) for t in plan]
+        hit = [e for e in seen if abs(e) <= frame_ms + 1]
+        report["preview_planned_cuts_seen"] = round(len(hit) / max(1, len(plan)), 3)
+        report["preview_seen_cut_vs_plan"] = stats(hit)
+        report["preview_seen_cut_vs_beat"] = stats([1000 * nearest(marks, t) for t in det
+                                                    if abs(nearest(plan, t)) * 1000 <= frame_ms + 1])
+        # Detected cuts far from every planned cut = cuts inside the source
+        # "shots" (missed by the indexer's shot detection).
+        extra = [t for t in det if abs(nearest(plan, t)) * 1000 > 2 * frame_ms]
+        report["preview_cuts_inside_shots"] = len(extra)
     (out / "report.json").write_text(json.dumps(report, indent=1, ensure_ascii=False))
     print(json.dumps(report, indent=1, ensure_ascii=False))
 
