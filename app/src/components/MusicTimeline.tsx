@@ -23,6 +23,8 @@ interface Props {
   onSelectSection: (index: number) => void;
   sectionQueries: Record<string, string>;
   emptyStrip?: React.ReactNode;
+  /** Slots whose shot contains a cut of the episode (found by the preview). */
+  flaggedSlots?: ReadonlySet<number>;
 }
 
 const SECTION_ROW_H = 22;
@@ -31,7 +33,7 @@ const STRIP_H = 56;
 
 export default function MusicTimeline({
   analysis, clips, zoom, currentMs, playing, getTimeMs, onSeek,
-  selectedSlot, onSelectClip, selectedSection, onSelectSection, sectionQueries, emptyStrip,
+  selectedSlot, onSelectClip, selectedSection, onSelectSection, sectionQueries, emptyStrip, flaggedSlots,
 }: Props) {
   const t = useT();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -158,6 +160,7 @@ export default function MusicTimeline({
                 selectedSlot={selectedSlot}
                 playingSlot={playingSlot}
                 onSelect={onSelectClip}
+                flaggedSlots={flaggedSlots}
               />
             </div>
           ) : (

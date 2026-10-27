@@ -246,4 +246,8 @@ export const musicStrings: Dict = {
     fr: 'L’EDL ne porte pas de marqueurs : exporte-les à part (« marqueurs seulement »).',
   },
   'music.warn.other': { en: 'Note: {code}', fr: 'Remarque : {code}' },
+  'music.preview.cutsInside': {
+    en: '{n} shots contain a cut of the episode itself (it falls off the beat; marked in red). Click “Regenerate”: AMV Tools now knows these cuts and will avoid them.',
+    fr: '{n} plans contiennent eux-mêmes une coupe de l’épisode (elle tombe hors du temps ; marqués en rouge). Clique « Régénérer » : AMV Tools connaît maintenant ces coupes et les évitera.',
+  },
 };

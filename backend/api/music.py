@@ -15,7 +15,7 @@ from ..db import schema
 from ..music import export as music_export
 from ..music import library, matcher
 from ..music.audio import AudioDecodeError
-from ..music.cache import AnalysisCache, valid_hash
+from ..music.cache import AnalysisCache, ShotCuts, valid_hash
 from ..music.preview import PreviewManager
 from ..paths import user_data_dir
 from ..state import get_state
@@ -54,6 +54,10 @@ def get_previews() -> PreviewManager:
     if _previews is None or _previews.folder != folder:
         _previews = PreviewManager(folder)
     return _previews
+
+
+def get_shot_cuts() -> ShotCuts:
+    return ShotCuts(_music_dir() / "shot_cuts.json")
 
 
 def _analysis_or_404(file_hash: str) -> dict:
@@ -207,7 +211,7 @@ def propose(body: ProposeBody):
     schema.init_db(state.primary_db)
     warnings: list[str] = []
     with schema.get_conn(state.primary_db) as conn:
-        shots = library.load_shots(conn)
+        shots = library.split_shots(library.load_shots(conn), get_shot_cuts().load())
         chars = library.character_scene_ids(conn, body.constraints.characters)
         scores = _query_scores(conn, body.constraints, warnings)
     c = body.constraints
@@ -323,7 +327,7 @@ def start_preview(body: PreviewBody):
     missing = sorted({p for p in paths.values() if not Path(p).is_file()})
     if missing:
         raise HTTPException(404, "source file(s) missing: " + ", ".join(missing))
-    return get_previews().start(clips, paths, music_path).as_dict()
+    return get_previews().start(clips, paths, music_path, on_inner_cuts=get_shot_cuts().add).as_dict()
 
 
 def _job_or_404(job_id: str):

@@ -137,6 +137,8 @@ export interface PreviewJob {
   message: string;
   output: string | null;
   error: string | null;
+  /** Slots whose shot turned out to contain a cut of the episode (off-beat cut). */
+  cut_slots?: number[];
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {

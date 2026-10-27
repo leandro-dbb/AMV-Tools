@@ -320,6 +320,12 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
   }, [job?.id, job?.status]);
 
   const previewStale = previewReady && jobKey !== clipsKey(clips);
+  // Shots the preview found to contain a cut of the episode (an off-beat
+  // cut): flagged in the strip until the edit changes.
+  const flaggedSlots = useMemo(
+    () => new Set<number>(job?.status === 'done' && !previewStale ? job.cut_slots ?? [] : []),
+    [job, previewStale],
+  );
 
   // ── render ──────────────────────────────────────────────────────────────
   const libraryEmpty = libraryScenes === 0 || (proposal?.library?.scenes === 0);
@@ -428,6 +434,7 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
                 onSelectSection={onSelectSection}
                 sectionQueries={constraints.sectionQueries}
                 emptyStrip={proposal && (clips?.length ?? 0) === 0 ? t('music.edit.noClips') : t('music.edit.empty')}
+                flaggedSlots={flaggedSlots}
               />
 
               {/* legend */}
@@ -568,6 +575,9 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
                 )}
                 {previewStale && (
                   <div className="text-[11px] text-amber-300 flex items-center gap-1.5"><AlertTriangle size={12} /> {t('music.preview.stale')}</div>
+                )}
+                {flaggedSlots.size > 0 && (
+                  <div className="text-[11px] text-amber-300 flex items-start gap-1.5"><AlertTriangle size={12} className="shrink-0 mt-0.5" /> {t('music.preview.cutsInside', { n: flaggedSlots.size })}</div>
                 )}
 
                 {job && (job.status === 'queued' || job.status === 'running') ? (

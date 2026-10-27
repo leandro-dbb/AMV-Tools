@@ -9,6 +9,7 @@ away instead of round-tripping through their editor.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -45,10 +46,13 @@ class PreviewJob:
     output: Optional[str] = None
     error: Optional[str] = None
     created: float = field(default_factory=time.time)
+    # Slots whose shot turned out to contain a hard cut (off-beat cut).
+    cut_slots: list[int] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {"id": self.id, "status": self.status, "progress": round(self.progress, 3),
-                "message": self.message, "output": self.output, "error": self.error}
+                "message": self.message, "output": self.output, "error": self.error,
+                "cut_slots": list(self.cut_slots)}
 
 
 def plan_segments(clips: list[dict], fps: Fraction = PREVIEW_FPS) -> list[dict]:
@@ -64,31 +68,51 @@ def plan_segments(clips: list[dict], fps: Fraction = PREVIEW_FPS) -> list[dict]:
     return out
 
 
-def _render_segment(seg: dict, src: str, dst: Path, fps: Fraction) -> None:
+# scdet score (0-100) above which a frame starts a new shot; 14 finds the
+# same cuts as select='gt(scene,0.3)' on the test episodes.  scdet (unlike
+# select) passes every frame, so a shot without any cut is not an error.
+SCENE_CUT_THRESHOLD = 14
+_PTS_RE = re.compile(r"lavfi\.scd\.time:\s*([0-9.]+)")
+
+
+def _render_segment(seg: dict, src: str, dst: Path, fps: Fraction) -> list[float]:
+    """Encode one shot; returns the hard cuts seen *inside* it (seconds from
+    its start) — the indexer missed those, and they would cut off-beat."""
     start = max(0.0, int(seg["src_in_ms"]) / 1000.0)
+    frames = int(seg["frames"])
     vf = (f"scale=-2:{PREVIEW_HEIGHT}:flags=bilinear,fps={fps.numerator}/{fps.denominator},"
           "format=yuv420p,setsar=1")
+    graph = (f"[0:v:0]{vf},split=2[enc][det];"
+             f"[det]scale=160:-2,scdet=threshold={SCENE_CUT_THRESHOLD}[cuts]")
     cmd = [
-        ffmpeg_exe(), "-v", "error", "-nostdin", "-y",
+        ffmpeg_exe(), "-hide_banner", "-v", "info", "-nostats", "-nostdin", "-y",
         "-ss", f"{start:.3f}", "-i", f"file:{src}",
-        "-map", "0:v:0", "-an", "-sn", "-dn",
-        "-vf", vf, "-frames:v", str(int(seg["frames"])),
+        "-filter_complex", graph,
+        "-map", "[enc]", "-an", "-sn", "-dn", "-frames:v", str(frames),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
         # No B-frames: the raw streams are glued byte-wise and re-timed by
         # frame count, which needs decode order == display order.
         "-bf", "0", "-g", "48", "-threads", "2",
         "-f", "h264", str(dst),
+        "-map", "[cuts]", "-frames:v", str(frames), "-f", "null", "-",
     ]
     proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                           creationflags=_flags())
+    err = proc.stderr.decode("utf-8", "replace")
     if proc.returncode != 0 or not dst.exists():
-        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or ["ffmpeg failed"]
-        raise RuntimeError(f"segment {seg.get('slot')}: {tail[0]}")
+        lines = [ln for ln in err.strip().splitlines() if "lavfi.scd" not in ln]
+        raise RuntimeError(f"segment {seg.get('slot')}: {(lines[-1:] or ['ffmpeg failed'])[0]}")
+    frame_s = 1.0 / float(fps)
+    length = frames * frame_s
+    return [float(t) for t in _PTS_RE.findall(err)
+            if 1.5 * frame_s < float(t) < length - 0.5 * frame_s]
 
 
 def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: str,
                    out_path: Path, *, fps: Fraction = PREVIEW_FPS,
-                   progress=None, workers: int = 3) -> Path:
+                   progress=None, workers: int = 3, inner_cuts: Optional[list] = None) -> Path:
+    """Render the preview; ``inner_cuts`` (if a list) receives the shots that
+    turned out to contain a hard cut: {slot, scene_id, path, cuts_ms}."""
     if not clips:
         raise ValueError("the edit is empty")
     segs = plan_segments(clips, fps)
@@ -99,12 +123,18 @@ def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: s
     try:
         done = 0
         lock = threading.Lock()
+        found: list[dict] = []
 
         def one(i_seg):
             nonlocal done
             i, seg = i_seg
             dst = tmp / f"seg{i:05d}.h264"
-            _render_segment(seg, scene_paths[int(seg["scene_id"])], dst, fps)
+            inner = _render_segment(seg, scene_paths[int(seg["scene_id"])], dst, fps)
+            if inner:
+                with lock:
+                    found.append({"slot": int(seg.get("slot", i)), "scene_id": int(seg["scene_id"]),
+                                  "path": scene_paths[int(seg["scene_id"])],
+                                  "cuts_ms": [int(seg["src_in_ms"]) + int(round(t * 1000)) for t in inner]})
             with lock:
                 done += 1
                 if progress:
@@ -140,6 +170,8 @@ def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: s
             tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or ["ffmpeg failed"]
             raise RuntimeError(f"preview mux failed: {tail[0]}")
         part.replace(out_path)
+        if inner_cuts is not None:
+            inner_cuts.extend(sorted(found, key=lambda x: x["slot"]))
         if progress:
             progress(1.0, "done")
         return out_path
@@ -156,7 +188,8 @@ class PreviewManager:
         self._lock = threading.Lock()
         self._run_lock = threading.Lock()
 
-    def start(self, clips: list[dict], scene_paths: dict[int, str], music_path: str) -> PreviewJob:
+    def start(self, clips: list[dict], scene_paths: dict[int, str], music_path: str,
+              on_inner_cuts=None) -> PreviewJob:
         job = PreviewJob(id=uuid.uuid4().hex[:12])
         with self._lock:
             self.jobs[job.id] = job
@@ -172,8 +205,16 @@ class PreviewManager:
                     job.message = msg
 
                 try:
+                    inner: list[dict] = []
                     out = render_preview(clips, scene_paths, music_path,
-                                         self.folder / f"preview-{job.id}.mp4", progress=progress)
+                                         self.folder / f"preview-{job.id}.mp4", progress=progress,
+                                         inner_cuts=inner)
+                    job.cut_slots = [int(x["slot"]) for x in inner]
+                    if inner and on_inner_cuts is not None:
+                        try:
+                            on_inner_cuts(inner)
+                        except Exception:
+                            log.exception("could not store the cuts found in shots")
                     job.output = str(out)
                     job.status = "done"
                 except Exception as exc:  # reported to the UI, never crashes the sidecar

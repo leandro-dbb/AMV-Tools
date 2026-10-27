@@ -424,3 +424,26 @@ def test_beat_markers_are_numbered_in_the_bar():
                 "downbeats_ms": [1000, 3000]}
     names = [m.name for m in music_export.music_markers(analysis, Fraction(24), beat_markers=True)]
     assert names == ["3", "4", "1", "2", "3", "4", "1"]
+
+
+def test_preview_finds_cuts_inside_shots_and_proposals_split_them(media, tmp_path):
+    from backend.music.cache import ShotCuts
+    from backend.music.library import split_shots
+
+    video = str(media["video"])
+    # Slot 1 straddles the red → blue change at 2.0 s of the episode.
+    clips = [
+        {"slot": 0, "scene_id": 1, "start_ms": 0, "end_ms": 1000, "src_in_ms": 200, "src_out_ms": 1200},
+        {"slot": 1, "scene_id": 2, "start_ms": 1000, "end_ms": 2000, "src_in_ms": 1500, "src_out_ms": 2500},
+    ]
+    inner: list = []
+    render_preview(clips, {1: video, 2: video}, str(media["song"]), tmp_path / "p.mp4", inner_cuts=inner)
+    assert [x["slot"] for x in inner] == [1]
+    assert all(abs(c - 2000) <= 60 for c in inner[0]["cuts_ms"])
+
+    store = ShotCuts(tmp_path / "cuts.json")
+    store.add(inner)
+    shot = {"scene_id": 9, "filepath": video, "start_ms": 0, "end_ms": 4000}
+    pieces = split_shots([shot], store.load())
+    assert [(p["start_ms"], p["end_ms"]) for p in pieces] == [(0, inner[0]["cuts_ms"][0]),
+                                                              (inner[0]["cuts_ms"][0], 4000)]
