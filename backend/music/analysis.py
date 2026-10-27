@@ -113,6 +113,14 @@ def _features(y: np.ndarray, sr: int) -> dict:
     }
 
 
+def _beat_fit(onset_env: np.ndarray, frames: np.ndarray) -> float:
+    """How well beats sit on attacks (mean local onset peak, normalised)."""
+    if not len(frames):
+        return 0.0
+    o = onset_env / (np.percentile(onset_env, 95) + 1e-9)
+    return float(np.mean([o[max(0, f - 1):f + 2].max() for f in frames if f < len(o)] or [0.0]))
+
+
 def _track_beats(onset_env: np.ndarray, sr: int, duration: float) -> tuple[float, np.ndarray, bool]:
     """(bpm, beat times, variable_tempo)."""
     import librosa
@@ -129,7 +137,13 @@ def _track_beats(onset_env: np.ndarray, sr: int, duration: float) -> tuple[float
                                   aggregate=None)
     local = np.asarray(local, dtype=np.float64)
     variable = False
-    bpm_arg: float | np.ndarray = tempo
+
+    def track(bpm) -> np.ndarray:
+        _, fr = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, hop_length=HOP,
+                                        bpm=bpm, trim=True, units="frames")
+        return np.asarray(fr, dtype=int)
+
+    frames = track(tempo)
     if local.size > 8 and np.all(np.isfinite(local)):
         # Ignore octave flips of the local estimate (60 ↔ 120 BPM) when
         # judging drift: only a gradual change means a real tempo change.
@@ -138,11 +152,17 @@ def _track_beats(onset_env: np.ndarray, sr: int, duration: float) -> tuple[float
         folded = _smooth(folded, 40).astype(np.float64)
         p10, p90 = np.percentile(folded, [10, 90])
         if p90 / max(1e-6, p10) > 1.12:
-            variable = True
-            bpm_arg = folded
-    _, frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr,
-                                        hop_length=HOP, bpm=bpm_arg, trim=True,
-                                        units="frames")
+            # Local tempo estimates are noisy on real songs (4 of our 6 real
+            # test songs drift by >12 % without any tempo change): follow the
+            # varying tempo only if its beats land clearly better on attacks.
+            # A steady accelerando/ritardando (tempo correlated with time) is
+            # trusted with a smaller margin.
+            trend = abs(float(np.corrcoef(np.arange(folded.size), folded)[0, 1]))
+            margin = 1.0 if trend > 0.8 else 1.05
+            var_frames = track(folded)
+            if _beat_fit(onset_env, var_frames) > margin * _beat_fit(onset_env, frames):
+                variable = True
+                frames = var_frames
     beats = librosa.frames_to_time(np.asarray(frames, dtype=int), sr=sr, hop_length=HOP)
     beats = beats + LATENCY_S
     beats = np.asarray([t for t in beats if 0.0 <= t < duration], dtype=np.float64)
@@ -379,6 +399,37 @@ def _snap(t: float, candidates: np.ndarray, tol: float) -> float:
     return float(t)
 
 
+def _beat_novelty(beat_frames: np.ndarray, feats: dict, intensity: np.ndarray,
+                  width: int = 4) -> np.ndarray:
+    """Foote novelty at beat resolution (value i = change just before beat i)."""
+    n = feats["n"]
+    bounds = np.append(np.clip(beat_frames, 0, n - 1), n)
+    beats = {
+        "intensity": _span_mean(intensity, bounds)[0],
+        "bass": _span_mean(feats["bass"], bounds)[0],
+        "timbre": _span_mean(feats["mfcc"], bounds),
+        "harmony": _span_mean(feats["chroma"], bounds),
+    }
+    return _novelty(beats, width=width)
+
+
+def _refine_boundary(start: float, beats: np.ndarray, beat_nov: np.ndarray, reach: int = 2) -> float:
+    """Move a bar-line boundary to the beat (within ±reach beats) where the
+    music changes most: a wrong bar phase must not put a section change —
+    or a drop — half a bar off."""
+    if not beats.size or beat_nov.size != beats.size:
+        return start
+    k = int(np.argmin(np.abs(beats - start)))
+    lo, hi = max(1, k - reach), min(len(beats) - 1, k + reach)
+    if hi < lo:
+        return start
+    best = lo + int(np.argmax(beat_nov[lo:hi + 1]))
+    # Only move for a clearly stronger change than at the bar line itself.
+    if beat_nov[best] > 1.2 * beat_nov[k]:
+        return float(beats[best])
+    return float(beats[k]) if abs(beats[k] - start) < 0.05 else start
+
+
 def _refine_drop(start: float, bar_s: float, intensity: np.ndarray, times: np.ndarray,
                  beats: np.ndarray, strong: np.ndarray) -> float:
     """Exact drop time.
@@ -464,10 +515,13 @@ def _segments(y: np.ndarray, sr: int) -> dict:
                 if last["type"] in ("verse", "bridge") and tail["bar_start"] - last["bar_start"] <= 8:
                     last["type"] = "outro"
         _label_energy = bars["intensity"]
+        beat_nov = _beat_novelty(beat_frames, feats, intensity)
         for s in segs:
             a, b = s["bar_start"], s["bar_end"]
             start = float(bar_times[a])
             end = float(bar_times[b]) if b < len(bar_times) else duration
+            if a > 0:
+                start = _refine_boundary(start, beats, beat_nov)
             if s["type"] == "drop":
                 start = _refine_drop(start, float(np.median(np.diff(bar_times))),
                                      intensity, times, beats, strong)
