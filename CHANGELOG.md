@@ -21,6 +21,9 @@ All notable changes to AMV Tools are documented here.
   decode now need a detected NVIDIA GPU and a failing hardware encode falls
   back to libx264. Sidecar log lines were mojibake (cp1252 pipe). ffmpeg
   error output with Japanese names could not be decoded.
+- **First indexing**: SigLIP 2 / wd-tagger are downloaded up front with
+  progress in the status bar ("SigLIP 2 base (NaFlex) ↓ 512 / 1500 MB")
+  instead of silently inside the first batch (16 min at "0 %" on a slow day).
 - **First run**: the setup screen suggests the backend matching the detected
   GPU (CUDA 13, CUDA 12.6 for pre-RTX cards or drivers < 580, DirectML for
   AMD/Intel, CPU) instead of always CUDA 13 (`GET /api/setup/hardware`).
