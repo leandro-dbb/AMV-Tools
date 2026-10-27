@@ -24,7 +24,8 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
   profondeur) n'a pu se terminer sur ce CPU (plus d'une heure pour 4 s de
   1080p) ; le lancement, la progression et l'annulation l'ont été.
 - **Suite E2E rejouable** : `cd app && npm run build && npm run e2e`
-  (parcours 1 → 4 + paramètres + cas d'erreur + relancement, 2 à 5 min selon la charge), et un job
+  (parcours 1 → 4 + paramètres + cas d'erreur + relancement : 1 min 30 à
+  5 min sur clips synthétiques, 12 min sur les vrais extraits), et un job
   CI Linux optionnel dans un fichier séparé (`.github/workflows/e2e-linux.yml`,
   déclenchement manuel) que la session A pourra reprendre.
 - Captures avant/après : `/home/leandro/dev/amv-v06-captures/` (`avant/`,
@@ -186,8 +187,12 @@ confus ou faux ; **mineur** = texte, cosmétique.
 
 - Suite E2E : `app/e2e/parcours.e2e.mjs`, `helpers.mjs`,
   `playwright.config.mjs`, `run.mjs` (`npm run e2e`, Xvfb automatique si pas
-  d'écran ; `AMV_E2E_MEDIA`, `AMV_E2E_CAPTURES`). Dernier passage : **7/7 en
-  2 min 10** (5 min 15 sous la charge des autres sessions). Scripts
+  d'écran ; `AMV_E2E_MEDIA`, `AMV_E2E_CAPTURES`). Derniers passages :
+  **7/7 en 1 min 30** sur les clips synthétiques, et **6/6 (+1 sauté) en
+  11 min 45 sur les deux vrais extraits** (`AMV_E2E_MEDIA="…/Séries test"`,
+  indexation réelle comprise ; le test qui supprime un fichier source est
+  sauté sur de vrais médias). Captures : `apres/e2e/` et
+  `apres/e2e-extraits-reels/` (5 min 15 sous la charge des autres sessions). Scripts
   d'exploration réelle : `app/e2e/explore/`.
 - Job CI optionnel : `.github/workflows/e2e-linux.yml` (manuel, met en cache
   les poids des modèles). **Fichier nouveau, les workflows existants ne sont
@@ -216,3 +221,17 @@ confus ou faux ; **mineur** = texte, cosmétique.
 - Backend : `backend/indexing/pipeline.py` (événements de progression),
   `backend/api/{status,setup,settings,derush}.py`, `backend/models/device.py`.
   Aucune migration de schéma.
+
+## 8. Vérifications finales (27 octobre, 3 h 15)
+
+- `uv run --no-sync pytest -m "not slow"` : **358 réussis**, 1 sauté (matériel
+  réel). Un passage précédent sous forte charge a vu
+  `test_finish.py::test_registry_download_checksum_and_delete` échouer une
+  fois ; il passe isolé, dans son fichier (2/2) et dans la suite complète
+  relancée : test sensible à la charge, sans lien avec ce chantier (le
+  registre de finition n'est pas modifié). Note : `uv run` sans `--no-sync`
+  resynchroniserait l'environnement de dev (il retirerait onnxruntime et
+  changerait torch) ; c'est pour cela que `--no-sync` a été utilisé partout.
+- `npx tsc --noEmit`, `npx vitest run` (42 tests), `npm run build` : OK.
+- `npm run e2e` : 7/7 (synthétique) et 6/6 + 1 sauté (vrais extraits).
+
