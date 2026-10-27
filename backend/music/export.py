@@ -105,20 +105,16 @@ def music_markers(analysis: dict, fps: Fraction, *, beat_markers: bool, lang: st
         section_frames = {m.frame for m in out}
         downbeats = {int(d) for d in analysis.get("downbeats_ms") or []}
         meter = int(analysis.get("meter") or 4)
-        count = 0
-        first_db = min(downbeats) if downbeats else None
-        for t in analysis.get("beats_ms") or []:
-            t = int(t)
-            if first_db is not None and t == first_db:
-                count = 0
+        beats = [int(t) for t in analysis.get("beats_ms") or []]
+        # Beat number in the bar, counted from the first downbeat (a pickup
+        # before it ends the previous bar: … 3, 4 | 1).
+        first = next((i for i, t in enumerate(beats) if t in downbeats), 0)
+        for i, t in enumerate(beats):
             is_bar = t in downbeats
-            if is_bar:
-                count = 0
-            count += 1
             f = ms_to_frames(t, fps)
             if f in section_frames:
                 continue
-            label = str(((count - 1) % meter) + 1)
+            label = str((i - first) % meter + 1)
             out.append(MusicMarker(f, 1, "bar" if is_bar else "beat", label))
     out.sort(key=lambda m: (m.frame, m.kind not in SECTION_NAMES["en"]))
     return out

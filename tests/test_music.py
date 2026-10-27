@@ -417,3 +417,10 @@ def test_api_flow(client, db_path, media, tmp_path):
     assert st["status"] == "done", st
     assert client.get(f"/api/music/preview/{job}/video").status_code == 200
     assert client.get("/api/music/preview/unknown").status_code == 404
+
+
+def test_beat_markers_are_numbered_in_the_bar():
+    analysis = {"bpm": 120, "meter": 4, "sections": [], "beats_ms": [0, 500, 1000, 1500, 2000, 2500, 3000],
+                "downbeats_ms": [1000, 3000]}
+    names = [m.name for m in music_export.music_markers(analysis, Fraction(24), beat_markers=True)]
+    assert names == ["3", "4", "1", "2", "3", "4", "1"]
