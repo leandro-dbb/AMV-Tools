@@ -371,6 +371,10 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
   const seekTo = useCallback((ms: number) => {
     const el = videoRef.current;
     if (el) el.currentTime = Math.max(0, ms / 1000);
+    // Also move the playhead state: while the episode is still being prepared
+    // (no playable video yet) ←/→ did nothing, so a second "Keep" un-kept the
+    // first scene instead of keeping the next one. timeupdate corrects it.
+    setCurrentMs(Math.max(0, ms));
     followOnce.current = true;   // bring the playhead back into view when zoomed
   }, []);
 
