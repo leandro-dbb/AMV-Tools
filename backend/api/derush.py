@@ -70,7 +70,8 @@ class ExportBody(BaseModel):
 
 
 def _sanitize(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip("_ ") or "scene"
+    # Keeps accented / Japanese letters (\w is Unicode-aware), see export.py.
+    return re.sub(r"[^\w. -]+", "_", name).strip("_ ") or "scene"
 
 
 # ── listing ─────────────────────────────────────────────────────────────────

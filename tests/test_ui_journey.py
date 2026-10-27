@@ -110,3 +110,12 @@ def test_cpu_chosen_on_purpose_is_not_labelled_a_fallback():
     from backend.models.device import detect_device
 
     assert detect_device("cpu").name == "CPU"
+
+
+def test_export_names_keep_accented_and_japanese_letters():
+    from backend.api import derush, export
+
+    assert export._sanitize("Clip été 01") == "Clip_été_01"
+    assert export._sanitize("Pokémon: 進撃/の巨人?") == "Pokémon_進撃_の巨人"
+    assert derush._sanitize("Black Clover · scène 3") == "Black Clover _ scène 3"
+    assert export._sanitize('a<b>c:"d|e*') == "a_b_c_d_e"
