@@ -41,6 +41,25 @@ def load_shots(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
+def split_shots(shots: list[dict], cuts_by_path: dict[str, list[int]], min_ms: int = 250) -> list[dict]:
+    """Split shots at hard cuts the indexer missed (found by a preview
+    render), so a proposed window never straddles a change of shot."""
+    if not cuts_by_path:
+        return shots
+    out = []
+    for s in shots:
+        cuts = [c for c in cuts_by_path.get(s.get("filepath") or "", [])
+                if s["start_ms"] + min_ms < c < s["end_ms"] - min_ms]
+        if not cuts:
+            out.append(s)
+            continue
+        edges = [s["start_ms"], *cuts, s["end_ms"]]
+        for a, b in zip(edges, edges[1:]):
+            if b - a >= min_ms:
+                out.append({**s, "start_ms": a, "end_ms": b})
+    return out
+
+
 def character_scene_ids(conn: sqlite3.Connection, character_ids: list[int]) -> set[int]:
     if not character_ids:
         return set()

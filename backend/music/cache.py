@@ -91,3 +91,32 @@ class AnalysisCache:
             })
         out.sort(key=lambda t: -float(t["analyzed_at"] or 0))
         return out
+
+
+class ShotCuts:
+    """Hard cuts found inside indexed shots (by the preview render), per
+    video file: later proposals split those shots so no window crosses one."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def load(self) -> dict[str, list[int]]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {str(k): sorted({int(x) for x in v}) for k, v in data.items() if isinstance(v, list)}
+
+    def add(self, found: list[dict]) -> None:
+        data = self.load()
+        for item in found:
+            key = str(item["path"])
+            data[key] = sorted(set(data.get(key, [])) | {int(x) for x in item["cuts_ms"]})
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise

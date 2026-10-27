@@ -13,9 +13,10 @@ interface Props {
   selectedSlot: number | null;
   playingSlot: number | null;
   onSelect: (slot: number) => void;
+  flaggedSlots?: ReadonlySet<number>;
 }
 
-function MusicEditStrip({ clips, sectionTypes, ppm, height, selectedSlot, playingSlot, onSelect }: Props) {
+function MusicEditStrip({ clips, sectionTypes, ppm, height, selectedSlot, playingSlot, onSelect, flaggedSlots }: Props) {
   return (
     <div className="relative" style={{ height }}>
       {clips.map((c) => {
@@ -46,6 +47,9 @@ function MusicEditStrip({ clips, sectionTypes, ppm, height, selectedSlot, playin
                 className="w-full h-full object-cover pointer-events-none select-none"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
               />
+            )}
+            {flaggedSlots?.has(c.slot) && (
+              <span className="absolute inset-x-0 top-0 h-[3px] bg-[#EF4444] pointer-events-none" />
             )}
             {c.locked && (
               <span className="absolute top-0.5 left-0.5 bg-black/70 rounded p-0.5 text-[#FBBF24]">
