@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 PREVIEW_FPS = Fraction(24000, 1001)
 PREVIEW_HEIGHT = 360
+PREVIEW_WIDTH = 640
 MAX_JOBS_KEPT = 6
 
 
@@ -56,15 +57,23 @@ class PreviewJob:
 
 
 def plan_segments(clips: list[dict], fps: Fraction = PREVIEW_FPS) -> list[dict]:
-    """Frame counts per clip so cut k lands on frame round(start_k * fps)."""
-    out = []
+    """Frame counts per clip so cut k lands on frame round(start_k * fps).
+
+    Holes in the edit (a slot no shot could fill, the start of the song
+    before the first clip) become black ``gap`` segments, so the picture
+    never drifts from the music and no shot is stretched past its out point.
+    """
+    out: list[dict] = []
+    cursor = 0
     for c in sorted(clips, key=lambda c: int(c["start_ms"])):
-        a = ms_to_frames(int(c["start_ms"]), fps)
+        a = max(cursor, ms_to_frames(int(c["start_ms"]), fps))
         b = ms_to_frames(int(c["end_ms"]), fps)
-        out.append({**c, "rec_start": a, "frames": max(1, b - a)})
-    # Contiguity: each segment runs until the next one starts.
-    for cur, nxt in zip(out, out[1:]):
-        cur["frames"] = max(1, nxt["rec_start"] - cur["rec_start"])
+        if b <= a:
+            continue
+        if a > cursor:
+            out.append({"gap": True, "rec_start": cursor, "frames": a - cursor})
+        out.append({**c, "rec_start": a, "frames": b - a})
+        cursor = b
     return out
 
 
@@ -75,13 +84,43 @@ SCENE_CUT_THRESHOLD = 14
 _PTS_RE = re.compile(r"lavfi\.scd\.time:\s*([0-9.]+)")
 
 
+def _timeout_for(frames: int) -> float:
+    # Generous (a seek in a long HEVC episode on a slow CPU), but a hung
+    # ffmpeg (unreachable network share) must not block every preview.
+    return 120.0 + frames * 0.5
+
+
+def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                              creationflags=_flags(), timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"ffmpeg took more than {int(timeout)} s") from exc
+
+
+def _render_gap(frames: int, dst: Path, fps: Fraction) -> None:
+    cmd = [
+        ffmpeg_exe(), "-v", "error", "-nostdin", "-y",
+        "-f", "lavfi", "-i", f"color=c=black:s={PREVIEW_WIDTH}x{PREVIEW_HEIGHT}:r={fps.numerator}/{fps.denominator}",
+        "-frames:v", str(int(frames)), "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-bf", "0", "-g", "48",
+        "-f", "h264", str(dst),
+    ]
+    proc = _run(cmd, timeout=_timeout_for(frames))
+    if proc.returncode != 0 or not dst.exists():
+        raise RuntimeError("could not render a gap: " + proc.stderr.decode("utf-8", "replace")[-200:])
+
+
 def _render_segment(seg: dict, src: str, dst: Path, fps: Fraction) -> list[float]:
     """Encode one shot; returns the hard cuts seen *inside* it (seconds from
     its start) — the indexer missed those, and they would cut off-beat."""
     start = max(0.0, int(seg["src_in_ms"]) / 1000.0)
     frames = int(seg["frames"])
-    vf = (f"scale=-2:{PREVIEW_HEIGHT}:flags=bilinear,fps={fps.numerator}/{fps.denominator},"
-          "format=yuv420p,setsar=1")
+    # Fixed 640x360 (letterboxed): segments are glued byte-wise, so every
+    # one must have the same picture size whatever the episode's aspect.
+    vf = (f"scale={PREVIEW_WIDTH}:{PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease:flags=bilinear,"
+          f"pad={PREVIEW_WIDTH}:{PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+          f"fps={fps.numerator}/{fps.denominator},format=yuv420p,setsar=1")
     graph = (f"[0:v:0]{vf},split=2[enc][det];"
              f"[det]scale=160:-2,scdet=threshold={SCENE_CUT_THRESHOLD}[cuts]")
     cmd = [
@@ -96,8 +135,7 @@ def _render_segment(seg: dict, src: str, dst: Path, fps: Fraction) -> list[float
         "-f", "h264", str(dst),
         "-map", "[cuts]", "-frames:v", str(frames), "-f", "null", "-",
     ]
-    proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                          creationflags=_flags())
+    proc = _run(cmd, timeout=_timeout_for(frames))
     err = proc.stderr.decode("utf-8", "replace")
     if proc.returncode != 0 or not dst.exists():
         lines = [ln for ln in err.strip().splitlines() if "lavfi.scd" not in ln]
@@ -116,7 +154,8 @@ def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: s
     if not clips:
         raise ValueError("the edit is empty")
     segs = plan_segments(clips, fps)
-    missing = sorted({str(s["scene_id"]) for s in segs if not scene_paths.get(int(s["scene_id"]))})
+    missing = sorted({str(s["scene_id"]) for s in segs
+                      if not s.get("gap") and not scene_paths.get(int(s["scene_id"]))})
     if missing:
         raise FileNotFoundError("unknown shot(s): " + ", ".join(missing))
     tmp = Path(tempfile.mkdtemp(prefix="amv-music-preview-"))
@@ -129,7 +168,11 @@ def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: s
             nonlocal done
             i, seg = i_seg
             dst = tmp / f"seg{i:05d}.h264"
-            inner = _render_segment(seg, scene_paths[int(seg["scene_id"])], dst, fps)
+            if seg.get("gap"):
+                _render_gap(int(seg["frames"]), dst, fps)
+                inner = []
+            else:
+                inner = _render_segment(seg, scene_paths[int(seg["scene_id"])], dst, fps)
             if inner:
                 with lock:
                     found.append({"slot": int(seg.get("slot", i)), "scene_id": int(seg["scene_id"]),
@@ -150,7 +193,7 @@ def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: s
             for p in parts:
                 with open(p, "rb") as src:
                     shutil.copyfileobj(src, fh)
-        total_frames = sum(int(sg["frames"]) for sg in segs)
+        total_frames = int(segs[-1]["rec_start"]) + int(segs[-1]["frames"])
         out_path.parent.mkdir(parents=True, exist_ok=True)
         part = out_path.with_name(out_path.stem + ".part.mp4")
         cmd = [
@@ -164,8 +207,7 @@ def render_preview(clips: list[dict], scene_paths: dict[int, str], music_path: s
             "-t", f"{total_frames / float(fps):.6f}",
             "-movflags", "+faststart", str(part),
         ]
-        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                              creationflags=_flags())
+        proc = _run(cmd, timeout=_timeout_for(total_frames))
         if proc.returncode != 0:
             tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or ["ffmpeg failed"]
             raise RuntimeError(f"preview mux failed: {tail[0]}")
@@ -185,6 +227,13 @@ class PreviewManager:
     def __init__(self, folder: Path):
         self.folder = folder
         self.jobs: dict[str, PreviewJob] = {}
+        # Previews of earlier sessions are not reachable any more.
+        for old in Path(folder).glob("preview-*.mp4"):
+            try:
+                if time.time() - old.stat().st_mtime > 3600:
+                    old.unlink()
+            except OSError:
+                pass
         self._lock = threading.Lock()
         self._run_lock = threading.Lock()
 
@@ -235,4 +284,7 @@ class PreviewManager:
             old = finished.pop(0)
             self.jobs.pop(old.id, None)
             if old.output:
-                Path(old.output).unlink(missing_ok=True)
+                try:
+                    Path(old.output).unlink(missing_ok=True)
+                except OSError:  # still open by the player (Windows)
+                    pass

@@ -329,19 +329,35 @@ def _otio_music_track(music_path: str, frames: int, fps: Fraction, markers: list
 
 
 def _add_music_otio(text: str, music_path: str, frames: int, fps: Fraction,
-                    markers: list[MusicMarker]) -> str:
+                    markers: list[MusicMarker], timeline: Optional[Timeline] = None) -> str:
     data = json.loads(text)
     tracks = data["tracks"]["children"]
+    if timeline is not None:
+        # OTIO places clips back to back by their source_range, in each
+        # source's own rate: with mixed frame rates the per-clip rounding
+        # adds up and cuts drift off the beats.  Give every clip the exact
+        # (fractional) source length of its slot on the sequence.
+        seq = timeline.sequence_fps
+        for track in tracks:
+            items = [c for c in track.get("children", []) if c.get("OTIO_SCHEMA", "").startswith("Clip")]
+            placed = [pc for pc in timeline.clips
+                      if track.get("kind") != "Audio" or pc.source.has_audio]
+            for item, pc in zip(items, placed):
+                if pc.source.fps == seq:
+                    continue
+                exact = (pc.record_end - pc.record_start) * pc.source.fps / seq
+                item["source_range"]["duration"]["value"] = float(exact)
     # Audio tracks after the picture; the song first among them.
     tracks.insert(1, _otio_music_track(music_path, frames, fps, markers))
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
-def _edl_music_event(event: int, music_path: str, frames: int, fps: Fraction, channel: str) -> list[str]:
+def _edl_music_event(event: int, music_path: str, frames: int, fps: Fraction, channel: str,
+                     reel: str = "MUSIC") -> list[str]:
     tc_in = frames_to_timecode(0, fps)
     tc_out = frames_to_timecode(frames, fps)
     return [
-        f"{event:03d}  MUSIC    {channel:<5} C        {tc_in} {tc_out} {tc_in} {tc_out}",
+        f"{event:03d}  {reel:<8} {channel:<5} C        {tc_in} {tc_out} {tc_in} {tc_out}",
         f"* FROM CLIP NAME: {posix_name(music_path)}"[:80],
         f"* FROM FILE: {music_path}"[:80] if len(music_path) < 66 else "* FROM FILE: " + posix_name(music_path)[:66],
     ]
@@ -351,7 +367,11 @@ def _add_music_edl(text: str, music_path: str, frames: int, fps: Fraction, has_s
     lines = text.rstrip("\n").split("\n")
     events = [ln for ln in lines if ln[:3].isdigit()]
     last = int(events[-1][:3]) if events else 0
-    lines.extend(_edl_music_event(last + 1, music_path, frames, fps, "A2" if has_source_audio else "A"))
+    # The song's reel must not reuse a source's reel name (a "music.mkv"
+    # episode would get "MUSIC"): editors link events by reel.
+    used = {ln.split()[1] for ln in events if len(ln.split()) > 1}
+    reel = next(r for r in ["MUSIC"] + [f"MUSIC{i}" for i in range(2, 1000)] if r not in used)
+    lines.extend(_edl_music_event(last + 1, music_path, frames, fps, "A2" if has_source_audio else "A", reel))
     return "\n".join(lines) + "\n"
 
 
@@ -375,7 +395,7 @@ def export_edit(fmt: str, output: str, analysis: dict, music_path: str, clips: l
     elif fmt == "fcpxml":
         content = _add_music_fcpxml(fcpxml.dumps(timeline), music_path, frames, fps, markers)
     elif fmt == "otio":
-        content = _add_music_otio(otio.dumps(timeline), music_path, frames, fps, markers)
+        content = _add_music_otio(otio.dumps(timeline), music_path, frames, fps, markers, timeline)
     else:
         content = _add_music_edl(edl.dumps(timeline), music_path, frames, fps,
                                  include_source_audio and any(c.source.has_audio for c in timeline.clips))
@@ -487,7 +507,10 @@ def export_markers(fmt: str, output: str, analysis: dict, music_path: str, *,
                    title: Optional[str] = None) -> dict:
     if fmt not in MARKER_FORMATS:
         raise ValueError(f"unknown marker format: {fmt!r}")
-    rate = parse_rate(fps or DEFAULT_MARKER_FPS)
+    try:
+        rate = parse_rate(fps or DEFAULT_MARKER_FPS)
+    except (ValueError, ZeroDivisionError):
+        rate = None
     if rate is None or rate <= 0:
         raise ValueError(f"invalid frame rate: {fps!r}")
     out = output_path(output, fmt)
