@@ -124,6 +124,11 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   await win.locator('div.group.cursor-pointer').first().click();
   // Regression: at 1280×720 the player pushed the transport bar off-screen.
   await expect(win.getByRole('button', { name: /^(Lecture|Pause) \(Espace/ })).toBeInViewport({ ratio: 1 });
+  // Regression: the Finishing menu opened under the player (only "Upscale"
+  // was reachable). A trial click fails if something covers the entry.
+  await win.getByRole('button', { name: /^Finition/ }).first().click();
+  await win.getByRole('button', { name: /^Profondeur/ }).click({ trial: true });
+  await win.getByRole('button', { name: /^Finition/ }).first().click();
   await win.getByRole('button', { name: /^Exporter .* s$/ }).click();
   await expect(win.getByText(/Exporté :/)).toBeVisible({ timeout: 120_000 });
   await capture(win, 'e2e-04-editeur-export');

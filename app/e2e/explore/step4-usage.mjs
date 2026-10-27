@@ -69,6 +69,7 @@ try {
   async function finishRun(kind, label, cap, { cancel = false } = {}) {
     await win.getByRole('button', { name: 'Recherche', exact: true }).first().click();
     const box = win.getByPlaceholder(/./).first();
+    if (process.env.SYNTH) await win.locator('input[type=range]').first().fill('0');
     await box.fill('gros plan visage'); await box.press('Enter');
     await win.locator('div.group.cursor-pointer').first().waitFor({ timeout: 60000 });
     await win.locator('div.group.cursor-pointer').first().click();
