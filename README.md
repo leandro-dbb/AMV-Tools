@@ -250,7 +250,7 @@ CC-BY-NC-4.0 / CC-BY-NC-SA-4.0, flagged in Settings).
 The **Music** tab turns a song into a first cut made of your own indexed
 shots:
 
-1. **Drop your song** (mp3, wav, flac, m4a, ogg, or the audio of a video).
+1. **Pick your song** (mp3, wav, flac, m4a, ogg, or the audio of a video).
    AMV Tools finds the tempo, every beat and bar, the strong hits, an energy
    curve and the parts of the song — intro, verse, build-up, drop, chorus,
    calm part, outro — with the drops flagged on the waveform. About 1.5-4 s
