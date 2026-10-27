@@ -52,6 +52,8 @@ export interface ClipAlternative {
   src_in_ms: number;
   src_out_ms: number;
   intensity: number | null;
+  /** Intensity relative to the library (0 calmest … 1 most intense). */
+  intensity_rank?: number | null;
   motion_type: string | null;
   score: number;
 }
@@ -72,6 +74,8 @@ export interface ProposedClip {
   src_in_ms: number;
   src_out_ms: number;
   intensity: number | null;
+  /** Intensity relative to the library (0 calmest … 1 most intense): what the match uses. */
+  intensity_rank?: number | null;
   motion_type: string | null;
   /** Target intensity the music asked for at this slot, 0-1. */
   target: number;

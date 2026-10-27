@@ -254,6 +254,9 @@ def _clip(slot: Slot, shot: dict, window: tuple[int, int], score: float, locked:
         "src_in_ms": int(window[0]),
         "src_out_ms": int(window[1]),
         "intensity": None if shot.get("intensity") is None else round(float(shot["intensity"]), 3),
+        # Where the shot sits in *this* library (0 calmest … 1 most intense):
+        # what the matching uses, and what the UI should show next to target.
+        "intensity_rank": round(float(shot.get("_rank", 0.5)), 3),
         "motion_type": shot.get("motion_type"),
         "target": round(float(slot.target), 3),
         "score": round(float(score), 3),
@@ -271,6 +274,7 @@ def _alt(shot: dict, window: tuple[int, int], score: float) -> dict:
         "src_in_ms": int(window[0]),
         "src_out_ms": int(window[1]),
         "intensity": None if shot.get("intensity") is None else round(float(shot["intensity"]), 3),
+        "intensity_rank": round(float(shot.get("_rank", 0.5)), 3),
         "motion_type": shot.get("motion_type"),
         "score": round(float(score), 3),
     }
