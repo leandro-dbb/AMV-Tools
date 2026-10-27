@@ -143,7 +143,9 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   const keep = win.getByRole('button', { name: /Garder la scène/ });
   await expect(keep).toBeVisible({ timeout: 60_000 });
   await keep.click();
+  await expect(win.getByText('1 gardées dans cet épisode')).toBeVisible();
   await win.keyboard.press('ArrowRight');
+  await expect(win.getByText(/^Scène 2\//)).toBeVisible();
   await keep.click();
   // Real footage regression: while "Preparing episode…", → did not move, so
   // the second click un-kept the first scene (basket stayed empty).
