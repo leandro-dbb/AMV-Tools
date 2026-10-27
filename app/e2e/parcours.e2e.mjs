@@ -145,6 +145,9 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   await keep.click();
   await win.keyboard.press('ArrowRight');
   await keep.click();
+  // Real footage regression: while "Preparing episode…", → did not move, so
+  // the second click un-kept the first scene (basket stayed empty).
+  await expect(win.getByText('2 gardées dans cet épisode')).toBeVisible();
   await capture(win, 'e2e-04-derush');
   await win.getByRole('button', { name: /^Bibliothèque \(\d+\)$/ }).click();
   await expect(win.getByRole('button', { name: /Tout exporter \(2\)/ })).toBeVisible();
