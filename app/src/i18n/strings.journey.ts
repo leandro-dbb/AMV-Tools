@@ -69,5 +69,9 @@ export const journeyStrings: Dict = {
     fr: "Peu de plans : décris-le autrement (l'anglais en trouve souvent plus), ou",
   },
   'journey.search.lowerThreshold': { en: 'lower the threshold to 5 %', fr: 'baisse le seuil à 5 %' },
+  'journey.search.loading': {
+    en: 'Searching… (the first search after launch loads the model: up to a minute without a GPU)',
+    fr: "Recherche… (la première recherche après le lancement charge le modèle : jusqu'à une minute sans GPU)",
+  },
   'journey.library.removeQueued': { en: 'Remove from the queue', fr: 'Retirer de la file' },
 };

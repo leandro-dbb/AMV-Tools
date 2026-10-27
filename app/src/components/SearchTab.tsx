@@ -324,6 +324,14 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
         <div className="max-w-[750px] mx-auto mb-4 bg-red-500/10 border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2">{error}</div>
       )}
 
+      {loading && results.length === 0 && (
+        <div data-testid="search-loading" className="flex items-center justify-center gap-2 mt-12 text-sm text-[#A1A1AA]">
+          <Loader2 size={16} className="animate-spin text-[#8B5CF6]" />
+          {/* The first search of a session loads SigLIP: 30 s+ on a CPU. */}
+          {t('journey.search.loading')}
+        </div>
+      )}
+
       {!submitted && !loading && results.length === 0 && libraryScenes !== null && libraryScenes > 0 && (
         <div data-testid="search-ready" className="flex flex-col items-center justify-center text-center max-w-md mx-auto mt-12 text-[#71717A]">
           <Search size={40} className="mb-3 text-[#8B5CF6]/60" />

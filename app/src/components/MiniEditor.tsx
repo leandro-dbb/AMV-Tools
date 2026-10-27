@@ -282,8 +282,9 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
   return (
     <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-8" onClick={onClose}>
       <div className="w-full h-full bg-gradient-to-br from-[#18181B] via-[#0F0F11] to-[#18181B] rounded-2xl border-2 border-[#27272A] flex flex-col overflow-hidden shadow-2xl shadow-[#8B5CF6]/20" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b-2 border-[#27272A] bg-[#18181B]/50 backdrop-blur-sm">
+        {/* Header. relative z-20: backdrop-blur makes it a stacking context, so
+            the Finishing menu opened under the player (only "Upscale" showed). */}
+        <div className="relative z-20 flex items-center justify-between p-5 border-b-2 border-[#27272A] bg-[#18181B]/50 backdrop-blur-sm">
           <div className="flex items-center gap-3 min-w-0">
             {queryLabel && (
               <>
