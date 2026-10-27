@@ -64,5 +64,10 @@ export const journeyStrings: Dict = {
     fr: "Le moteur d'analyse d'AMV Tools ne répond plus. Attends quelques secondes (il se reconnecte tout seul), sinon ferme et rouvre l'appli. Si ça se répète, joins le dossier des logs (Paramètres > Diagnostic) à un rapport de bug.",
   },
   'journey.library.countOne': { en: '1 episode · {scenes} scenes', fr: '1 épisode · {scenes} scènes' },
+  'journey.search.few': {
+    en: 'Few shots: describe it differently (English often finds more), or',
+    fr: "Peu de plans : décris-le autrement (l'anglais en trouve souvent plus), ou",
+  },
+  'journey.search.lowerThreshold': { en: 'lower the threshold to 5 %', fr: 'baisse le seuil à 5 %' },
   'journey.library.removeQueued': { en: 'Remove from the queue', fr: 'Retirer de la file' },
 };
