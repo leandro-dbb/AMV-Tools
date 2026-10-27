@@ -94,6 +94,12 @@ test('3. recherche : texte FR / EN, aperçu au survol, filtres, plans similaires
     await expect(win.locator('div.group.cursor-pointer img').first()).toBeVisible({ timeout: 90_000 });
   }
   await capture(win, 'e2e-03-recherche');
+  // The threshold slider re-runs the search by itself (used to need Enter).
+  const slider = win.locator('input[type=range]').first();
+  await slider.fill('100');
+  await expect(win.locator('div.group.cursor-pointer')).toHaveCount(0);
+  await slider.fill(media.synthetic ? '0' : '10');
+  await expect(win.locator('div.group.cursor-pointer img').first()).toBeVisible({ timeout: 90_000 });
   const card = win.locator('div.group.cursor-pointer').first();
   await card.hover();
   if (media.synthetic) {
@@ -116,6 +122,8 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   const { win, app } = ctx;
   // Open a scene, export the trimmed clip into the (accented) export folder.
   await win.locator('div.group.cursor-pointer').first().click();
+  // Regression: at 1280×720 the player pushed the transport bar off-screen.
+  await expect(win.getByRole('button', { name: /^(Lecture|Pause) \(Espace/ })).toBeInViewport({ ratio: 1 });
   await win.getByRole('button', { name: /^Exporter .* s$/ }).click();
   await expect(win.getByText(/Exporté :/)).toBeVisible({ timeout: 120_000 });
   await capture(win, 'e2e-04-editeur-export');
@@ -150,6 +158,8 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
     await expect.poll(() => fs.readdirSync(exportDir).some((n) => n.startsWith(`timeline-${f}`)), { timeout: 60_000 }).toBe(true);
     if (f === formats[0]) await capture(win, 'e2e-04-timeline');
   }
+  await win.getByRole('button', { name: 'Annuler', exact: true }).click();
+  await expect(select).toHaveCount(0);
 });
 
 test('6. paramètres : dossier d’export refusé, langue FR ⇄ EN', async () => {

@@ -16,7 +16,8 @@ function loadFilters(): SearchFilters {
   try { return JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') as SearchFilters; } catch { return {}; }
 }
 
-const DEFAULT_RECENT = ['Gojo combat', 'Eva 01 rage', 'Pikachu cute'];
+// Shown until the first searches: generic shots any anime library has.
+const DEFAULT_RECENT = ['explosion', 'close-up face', 'gros plan visage'];
 
 interface Props {
   onOpenScene: (scene: SceneResult, allScenes: SceneResult[], index: number) => void;
@@ -86,10 +87,13 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     setLoading(true);
     setError(null);
     setSubmitted(q.trim() || '[filters]');
+    lastTextQuery.current = q;
     setSuggestionsOpen(false);
     try {
       const res = await api.search({ query: q.trim() || undefined, threshold: threshold / 100, sort, top_k: maxResults, filters: f });
       setResults(res.results);
+      // The chips under the box only ever showed the searches of the last launch.
+      if (q.trim()) setRecent((prev) => [q.trim(), ...prev.filter((x) => x !== q.trim())].slice(0, 5));
       setEmpty(res.results.length === 0);
     } catch (err) {
       setError((err as Error).message);
@@ -104,6 +108,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     setLoading(true);
     setError(null);
     setSubmitted(`[similar] ${sceneId}`);
+    lastTextQuery.current = null;
     try {
       const res = await api.similarScenes(sceneId, {
         top_k: maxResults, exclude_same_video: opts.excludeSameVideo, same_group: opts.sameGroup,
@@ -119,6 +124,19 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
       setLoading(false);
     }
   }, [sort, maxResults, activeFilters]);
+
+  // Moving the threshold slider or changing the sort did nothing until the
+  // user pressed Enter again: re-run the last text search (debounced).
+  const lastTextQuery = useRef<string | null>(null);
+  const firstOptionsRun = useRef(true);
+  useEffect(() => {
+    if (firstOptionsRun.current) { firstOptionsRun.current = false; return; }
+    const q = lastTextQuery.current;
+    if (q === null || similar || imagePreview) return;
+    const id = window.setTimeout(() => { runTextSearch(q); }, 350);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threshold, sort]);
 
   // Requests from other tabs (Tags, Derush, MiniEditor, Characters).
   const lastNonce = useRef<number | null>(null);
@@ -141,6 +159,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     setError(null);
     setSimilar(null);
     setSubmitted(`[image] ${file.name}`);
+    lastTextQuery.current = null;
     const url = URL.createObjectURL(file);
     setImagePreview(url);
     try {
@@ -212,6 +231,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
               onFocus={() => setSuggestionsOpen(true)}
               onBlur={() => setTimeout(() => setSuggestionsOpen(false), 150)}
               type="text"
+              spellCheck={false}
               placeholder={t('search.placeholder')}
               className="w-full bg-[#18181B]/80 backdrop-blur-xl border-2 border-[#27272A] rounded-xl pl-14 pr-24 py-4 text-[#FAFAFA] text-lg placeholder:text-[#71717A] focus:outline-none focus:border-[#8B5CF6] transition-all shadow-2xl shadow-[#8B5CF6]/5"
             />
@@ -326,7 +346,16 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
 
       {results.length > 0 && (
         <div className="flex items-center justify-between mb-3 relative z-10">
-          <div className="text-xs text-[#71717A]">{t('timeline.scope.searchResults')} · {results.length}</div>
+          <div className="text-xs text-[#71717A] flex items-center gap-3 flex-wrap">
+            <span>{t('timeline.scope.searchResults')} · {results.length}</span>
+            {/* Real run: "gros plan visage" found 1 shot where "close-up face" found 6 at 10 %. */}
+            {results.length < 5 && !similar && !imagePreview && submitted && !submitted.startsWith('[') && threshold > 5 && (
+              <span data-testid="few-results" className="text-[#FBBF24]">
+                {t('journey.search.few')}{' '}
+                <button onClick={() => setThreshold(5)} className="underline hover:text-[#FAFAFA]">{t('journey.search.lowerThreshold')}</button>
+              </span>
+            )}
+          </div>
           <button onClick={() => setTimelineOpen(true)} className="flex items-center gap-2 border-2 border-[#8B5CF6]/50 bg-[#18181B] text-[#FAFAFA] px-4 py-2 rounded-xl text-sm font-semibold hover:bg-[#8B5CF6]/15">
             <Clapperboard size={14} className="text-[#8B5CF6]" />
             {t('timeline.button')}

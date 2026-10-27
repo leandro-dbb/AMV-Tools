@@ -373,11 +373,13 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
         </div>
 
         {/* Video player */}
-        <div className="flex-1 flex items-center justify-center p-8 relative">
+        {/* min-h-0 + a height-bound player: a width-bound 16:9 box pushed the
+            transport bar (play, timecode) out of the window below ~1000 px. */}
+        <div className="flex-1 min-h-0 flex items-center justify-center p-6 relative">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#8B5CF6]/10 rounded-full blur-[150px] pointer-events-none"></div>
-          <div className="relative w-full max-w-6xl">
+          <div className="relative w-full max-w-6xl h-full flex items-center justify-center">
             <div className="absolute -inset-4 bg-gradient-to-r from-[#8B5CF6]/20 via-[#EC4899]/20 to-[#8B5CF6]/20 rounded-2xl blur-xl"></div>
-            <div className="relative aspect-video bg-black rounded-xl overflow-hidden border-2 border-[#8B5CF6]/30 shadow-2xl shadow-[#8B5CF6]/30">
+            <div className="relative aspect-video h-full max-h-full max-w-full bg-black rounded-xl overflow-hidden border-2 border-[#8B5CF6]/30 shadow-2xl shadow-[#8B5CF6]/30">
               <video
                 ref={videoRef}
                 src={scene.proxy_path ? api.proxyUrl(scene.id) : api.sourceUrl(scene.id)}
