@@ -11,9 +11,10 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   retries: 0,
-  // Real indexing with the real models on CPU dominates the run time.
-  timeout: 8 * 60_000,
-  globalTimeout: 10 * 60_000,
+  // Real indexing with the real models on CPU dominates the run time; real
+  // episodes (AMV_E2E_MEDIA) take tens of minutes on a CPU.
+  timeout: (process.env.AMV_E2E_MEDIA ? 50 : 8) * 60_000,
+  globalTimeout: (process.env.AMV_E2E_MEDIA ? 70 : 10) * 60_000,
   expect: { timeout: 20_000 },
   reporter: [['list']],
   outputDir: path.join(os.tmpdir(), 'amv-e2e-results'),

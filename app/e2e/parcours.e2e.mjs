@@ -65,7 +65,7 @@ test('2. bibliothèque : ajout d’un dossier piège, indexation suivie jusqu’
   await expect(win.getByRole('button', { name: /Lancer l'indexation/ })).toBeDisabled();
   await expect(win.getByTestId('index-stage')).toBeVisible();
   await capture(win, 'e2e-02-indexation');
-  await expect(win.getByText('Inactif')).toBeVisible({ timeout: 7 * 60_000 });
+  await expect(win.getByText('Inactif')).toBeVisible({ timeout: (media.synthetic ? 7 : 45) * 60_000 });
   await expect(win.getByText(`${media.files.length} épisodes`, { exact: false })).toBeVisible();
   if (media.corrupt) {
     // The broken file is reported by name, in plain words, after the run.
