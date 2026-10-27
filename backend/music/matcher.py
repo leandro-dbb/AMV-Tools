@@ -363,7 +363,15 @@ def propose(analysis: dict, shots: list[dict], constraints: Constraints,
     for c in keep:
         usage.add(int(c["scene_id"]), int(c["src_in_ms"]), int(c["src_out_ms"]))
 
-    target_ranks = _rank01([s.target for s in slots]) if slots else []
+    slots = sorted(slots, key=lambda s: s.start_ms)
+    # Targets are ranked against the whole song, also when only one passage
+    # is regenerated (ranking that passage alone would spread a drop's
+    # targets from calm to intense).
+    reference = [s.target for s in slots]
+    if previous and regenerate_sections:
+        reference = [_energy_at(analysis, int(c["start_ms"]), int(c["end_ms"])) for c in previous]
+    ranks_all = _rank01(reference + [s.target for s in slots]) if slots else []
+    target_ranks = ranks_all[len(reference):]
     # Calm passages ask for the calm end of the library even when the whole
     # song is loud: blend the song-relative rank with the absolute energy.
     target_ranks = [0.6 * r + 0.4 * s.target for r, s in zip(target_ranks, slots)]
@@ -372,7 +380,7 @@ def propose(analysis: dict, shots: list[dict], constraints: Constraints,
     unfilled = 0
     new_clips: list[dict] = []
     keep_sorted = sorted(keep, key=lambda c: int(c["start_ms"]))
-    for slot, trank in zip(sorted(slots, key=lambda s: s.start_ms), target_ranks):
+    for slot, trank in zip(slots, target_ranks):
         length = slot.duration_ms
         prev_sid = _previous_scene(keep_sorted, new_clips, slot.start_ms)
         scored = []

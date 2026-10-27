@@ -430,8 +430,9 @@ def test_preview_finds_cuts_inside_shots_and_proposals_split_them(media, tmp_pat
     from backend.music.cache import ShotCuts
     from backend.music.library import split_shots
 
-    video = str(media["video"])
-    # Slot 1 straddles the red → blue change at 2.0 s of the episode.
+    # A clear change (black → white at 2.0 s); slot 1 straddles it.
+    video = str(make_solid_clip(tmp_path / "bw.mp4", ("black", "white"), seconds_per_color=2.0,
+                                size="640x360", fps=24))
     clips = [
         {"slot": 0, "scene_id": 1, "start_ms": 0, "end_ms": 1000, "src_in_ms": 200, "src_out_ms": 1200},
         {"slot": 1, "scene_id": 2, "start_ms": 1000, "end_ms": 2000, "src_in_ms": 1500, "src_out_ms": 2500},
@@ -447,3 +448,68 @@ def test_preview_finds_cuts_inside_shots_and_proposals_split_them(media, tmp_pat
     pieces = split_shots([shot], store.load())
     assert [(p["start_ms"], p["end_ms"]) for p in pieces] == [(0, inner[0]["cuts_ms"][0]),
                                                               (inner[0]["cuts_ms"][0], 4000)]
+
+
+def test_preview_fills_gaps_with_black_and_letterboxes(media, tmp_path):
+    av = pytest.importorskip("av")
+    narrow = make_solid_clip(tmp_path / "ep43.mp4", ("red", "green"), seconds_per_color=2.0,
+                             size="320x240", fps=25)
+    clips = [  # starts at 0.5 s, hole between 1.5 and 2.0 s, 4:3 source
+        {"slot": 0, "scene_id": 1, "start_ms": 500, "end_ms": 1500, "src_in_ms": 100, "src_out_ms": 1100},
+        {"slot": 1, "scene_id": 2, "start_ms": 2000, "end_ms": 3000, "src_in_ms": 200, "src_out_ms": 1200},
+    ]
+    segs = plan_segments(clips)
+    assert [bool(s.get("gap")) for s in segs] == [True, False, True, False]
+    out = render_preview(clips, {1: str(media["video"]), 2: str(narrow)}, str(media["song"]), tmp_path / "g.mp4")
+    with av.open(str(out)) as c:
+        st = c.streams.video[0]
+        frames = sum(1 for _ in c.decode(video=0))
+        assert (st.codec_context.width, st.codec_context.height) == (640, 360)
+    assert frames == round(3.0 * 24000 / 1001)
+
+
+def test_otio_mixed_rates_keep_cuts_on_beats(media, tmp_path):
+    other = make_solid_clip(tmp_path / "ep25.mp4", ("red", "blue", "green", "white", "black", "yellow"),
+                            seconds_per_color=2.0, fps=25)
+    paths = {i + 1: (str(media["video"]) if i % 2 == 0 else str(other)) for i in range(6)}
+    res = music_export.export_edit("otio", str(tmp_path / "mixed"), media["analysis"], str(media["song"]),
+                                   media["clips"], paths)
+    data = json.loads(Path(res["output"]).read_text())
+    video = data["tracks"]["children"][0]["children"]
+    clips = iter(sorted(media["clips"], key=lambda c: c["start_ms"]))
+    t = 0.0
+    for item in video:
+        if item["OTIO_SCHEMA"].startswith("Clip"):
+            # each clip starts within half a sequence frame of its beat
+            assert abs(t * 1000 - next(clips)["start_ms"]) <= 1000 / 48 + 1
+        d = item["source_range"]["duration"]
+        t += d["value"] / d["rate"]
+
+
+def test_edl_music_reel_does_not_collide(media, tmp_path):
+    music_named = tmp_path / "music.mp4"
+    shutil.copy(media["video"], music_named)
+    paths = {i + 1: str(music_named) for i in range(6)}
+    res = music_export.export_edit("edl", str(tmp_path / "e"), media["analysis"], str(media["song"]),
+                                   media["clips"], paths)
+    lines = [ln for ln in Path(res["output"]).read_text().splitlines() if ln[:3].isdigit()]
+    reels = {ln.split()[1] for ln in lines[:-1]}
+    assert "MUSIC" in reels and lines[-1].split()[1] == "MUSIC2"
+
+
+def test_markers_reject_bad_frame_rate(media, tmp_path):
+    with pytest.raises(ValueError):
+        music_export.export_markers("csv", str(tmp_path / "m"), media["analysis"], str(media["song"]), fps="1/0")
+
+
+def test_regenerating_a_drop_keeps_intense_targets(edm):
+    data, _ = edm
+    shots = _shots()
+    first = matcher.propose(data, shots, matcher.Constraints(), seed=2)["clips"]
+    drop_idx = next(s["index"] for s in data["sections"] if s["type"] == "drop")
+    regen = matcher.propose(data, shots, matcher.Constraints(), previous=first,
+                            regenerate_sections=[drop_idx], seed=11)["clips"]
+    on_drop = [c["intensity"] for c in regen if c["section_index"] == drop_idx]
+    calm = [c["intensity"] for c in regen
+            if next(s["type"] for s in data["sections"] if s["index"] == c["section_index"]) in ("intro", "bridge")]
+    assert min(on_drop) > np.mean(calm)

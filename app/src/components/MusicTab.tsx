@@ -63,6 +63,9 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [source, setSource] = useState<MediaSource>('audio');
   const sourceRef = useRef<MediaSource>('audio');
+  // Track the replies belong to: a proposal / preview answer that arrives
+  // after the user opened another song must be dropped.
+  const hashRef = useRef<string | null>(initial?.hash ?? null);
   sourceRef.current = source;
   const [playing, setPlaying] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
@@ -132,6 +135,7 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
     setProposeError(null);
     setZoom(1);
     setAnalysis(a);
+    hashRef.current = a.hash;
     setHash(a.hash);
     setShowImport(false);
     setImportError(null);
@@ -249,6 +253,7 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
         ...(mode === 'section' && sectionIndex != null ? { regenerate_sections: [sectionIndex] } : {}),
       };
       const p = await musicApi.propose(body);
+      if (hashRef.current !== hash) return;
       const next: EditProposal = { ...p, clips: p.clips ?? [], warnings: p.warnings ?? [] };
       setProposal(next);
       setSelectedSlot((s) => (s != null && next.clips.some((c) => c.slot === s) ? s : null));
@@ -289,6 +294,7 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
     switchSource('audio');
     try {
       const j = await musicApi.startPreview({ hash, clips });
+      if (hashRef.current !== hash) return;
       setJobKey(clipsKey(clips));
       setJob(j);
       if (j.status === 'failed') setPreviewError(j.error || j.message || '?');
@@ -299,9 +305,11 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
 
   useEffect(() => {
     if (!job || job.status === 'done' || job.status === 'failed') return;
+    const owner = hashRef.current;
     const id = window.setInterval(() => {
       musicApi.previewJob(job.id)
         .then((j) => {
+          if (hashRef.current !== owner) return;
           setJob(j);
           if (j.status === 'failed') setPreviewError(j.error || j.message || '?');
         })
