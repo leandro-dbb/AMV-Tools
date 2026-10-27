@@ -163,7 +163,8 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
     await expect.poll(() => fs.readdirSync(exportDir).some((n) => n.startsWith(`timeline-${f}`)), { timeout: 60_000 }).toBe(true);
     if (f === formats[0]) await capture(win, 'e2e-04-timeline');
   }
-  await win.getByRole('button', { name: 'Annuler', exact: true }).click();
+  // Once exported, the dialog offers "Fermer", not "Annuler".
+  await win.getByRole('button', { name: 'Fermer', exact: true }).click();
   await expect(select).toHaveCount(0);
 });
 
