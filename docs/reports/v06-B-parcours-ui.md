@@ -48,8 +48,8 @@ Deux façons de rejouer :
 
 - **Exploration réelle** (`app/e2e/explore/*.mjs`) : les scripts qui ont servi
   cette nuit sur les vrais extraits, avec une capture par étape.
-- **Suite rejouable** (`npm run e2e`) : le parcours 1 → 4 + paramètres + un cas
-  d'erreur, sur deux petits clips synthétiques générés par ffmpeg dans un
+- **Suite rejouable** (`npm run e2e`) : le parcours 1 → 4 + paramètres + cas
+  d'erreur + relancement de l'appli, sur deux petits clips synthétiques générés par ffmpeg dans un
   dossier piège `Séries test/Épisode spécial/` (+ un faux épisode corrompu),
   avec les vrais modèles. `AMV_E2E_MEDIA=<dossier>` la fait tourner sur de
   vrais épisodes.
@@ -73,7 +73,7 @@ testé contre un backend simulé.
 | 3. Personnage | Beerus créé depuis 3 plans proposés par « purple cat god… » : 86 scènes sur 98 retenues au seuil auto, dont des plans de Goku — avec 3 exemples, c'est peu discriminant ; il faut rejeter (« Ce n'est pas lui ») pour affiner. | réel |
 | 3. Plans similaires, filtres (mouvement, intensité, durée) | fonctionnent ; les badges de mouvement (« Pano gauche », « Zoom avant », « Tremblement »…) sont justes sur les captures. | réel + E2E |
 | 3. Aperçu au survol | ne marchait jamais (bug 5) ; maintenant lu depuis la source (H.264 et, ici, aussi le HEVC du DBS). | réel + E2E |
-| 4. Panier de dérush | garder des plans au clavier/bouton dans les deux épisodes (HEVC compris), panier « Bibliothèque (3) », export des clips, export timeline pour **chaque** format proposé (OTIO, FCPXML, EDL…) écrit sur disque. **Pas de réordonnancement possible** dans le panier (voir § 5). | réel (panier) + E2E (exports) |
+| 4. Panier de dérush | garder des plans au clavier/bouton dans les deux épisodes (HEVC compris), panier « Bibliothèque (3) », export des clips, export timeline pour **chaque** format proposé (OTIO, FCPXML, FCP 7 XML, EDL) écrit sur disque. **Pas de réordonnancement possible** dans le panier (voir § 5). | réel (panier) + E2E (exports) |
 | 4. Export d'un clip depuis l'éditeur | OK dans un dossier `Exports AMV été`. | E2E |
 | 5. Finition | Upscale (1080p, 88 images) : lancé, mais **1 image en 8 min** sur ce CPU → arrêté (l'appli prévient « plusieurs minutes par seconde de vidéo »). Ralenti ×2 en 360p : progression et temps restant affichés, 26 % en 8 min. Profondeur : téléchargement, mise en file, **annulation** OK. Aucun résultat de finition n'a pu aller au bout en CPU cette nuit. | réel (1080p) + synthétique (360p) |
 | 6. Paramètres | toutes les sections s'ouvrent ; FR ⇄ EN instantané ; dossier d'export en lecture seule refusé (après correction) ; Diagnostic complet (versions, moteur, disque, poids des modèles). | réel + E2E |
@@ -113,7 +113,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
 | 18 | Recherche : bouger le curseur Seuil ou changer le tri ne relançait pas la recherche ; première recherche (30 s+ sur CPU) sans retour visible ; suggestions « Gojo combat / Eva 01 rage / Pikachu cute » sur n'importe quelle bibliothèque. | gênant | corrigé | E2E étape 3 (curseur) |
 | 19 | Export timeline : le bouton restait « Annuler » après un export réussi. | mineur | corrigé | E2E étape 4 |
 | 21 | Échap ne fermait pas l'éditeur de scène (seulement la petite croix). | mineur | corrigé (sauf si une fenêtre ouverte depuis l'éditeur est au-dessus) | E2E étape 4 |
-| 22 | Dérushage : sur les vrais extraits, deux « Garder » de suite laissaient le panier **vide, sans aucun signe**. Deux causes : tant que la vidéo de l'épisode n'est pas chargée, les flèches ne changeaient pas de scène (le 2e clic retirait la 1re) ; et en changeant d'épisode, l'ancienne liste de scènes restait active quelques instants (un clic rapide visait une scène de l'épisode précédent). Trouvé par la suite E2E jouée sur les vrais extraits. | majeur | corrigé | E2E étape 4 (« 1 gardées » puis « Scène 2/… » puis « 2 gardées ») |
+| 22 | Dérushage : sur les vrais extraits, deux « Garder » de suite laissaient le panier **vide, sans aucun signe**. Trois causes : pendant « Préparation de l'épisode… » (remux du MKV), **tous** les raccourcis du Dérushage étaient coupés ; tant que la vidéo n'était pas chargée, un changement de scène était annulé par le lecteur (le 2e clic retirait la 1re) ; et en changeant d'épisode, l'ancienne liste de scènes restait active quelques instants (un clic rapide visait une scène de l'épisode précédent). Trouvé par la suite E2E jouée sur les vrais extraits. | majeur | corrigé | E2E étape 4 (« 1 gardées » puis « Scène 2/… » puis « 2 gardées ») |
 | 20 | Un épisode interrompu (appli fermée en pleine indexation) apparaît comme indexé (« 1 épisode · 82 scènes ») puis est **entièrement refait** à la reprise. | gênant | **non corrigé** (touche au pipeline et au schéma) | — |
 
 ## 4. Ce qui reste confus (non corrigé)
@@ -139,8 +139,9 @@ confus ou faux ; **mineur** = texte, cosmétique.
   épisode** (le tagger est déchargé entre les phases, utile seulement pour la
   mémoire des cartes graphiques) : 1 à 2 min perdues par épisode sur ce VPS.
   Pas modifié : cela touche le mode « streaming » d'Apple Silicon.
-- Personnages : avec peu d'exemples, presque toute la série est retenue ; rien
-  n'explique qu'il faut rejeter des plans pour affiner.
+- Personnages : avec peu d'exemples, presque toute la série est retenue (une
+  phrase d'aide a été ajoutée : rejeter les mauvais plans et ajouter des
+  exemples) ; la qualité de reconnaissance elle-même n'a pas été travaillée.
 
 ## 5. Les 5 améliorations d'ergonomie les plus utiles pour un monteur AMV
 
@@ -192,12 +193,12 @@ confus ou faux ; **mineur** = texte, cosmétique.
   11 min 45 sur les deux vrais extraits** (`AMV_E2E_MEDIA="…/Séries test"`,
   indexation réelle comprise ; le test qui supprime un fichier source est
   sauté sur de vrais médias). Captures : `apres/e2e/` et
-  `apres/e2e-extraits-reels/` (5 min 15 sous la charge des autres sessions). Scripts
+  `apres/e2e-extraits-reels/`. Scripts
   d'exploration réelle : `app/e2e/explore/`.
 - Job CI optionnel : `.github/workflows/e2e-linux.yml` (manuel, met en cache
   les poids des modèles). **Fichier nouveau, les workflows existants ne sont
   pas touchés** ; jamais exécuté sur GitHub (pas de push).
-- Tests : `tests/test_ui_journey.py` (8 tests backend), vitest
+- Tests : `tests/test_ui_journey.py` (9 tests backend), vitest
   `dropPaths`, `indexProgress`, `searchDefaults`, `derushExport`.
 - Ancien travail DeepSeek : scripts à chemins en dur et profil dans
   `/tmp/opencode` remplacés ; le reformatage de `package.json` (tableaux de
