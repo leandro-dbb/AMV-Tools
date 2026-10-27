@@ -198,7 +198,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
 - Job CI optionnel : `.github/workflows/e2e-linux.yml` (manuel, met en cache
   les poids des modèles). **Fichier nouveau, les workflows existants ne sont
   pas touchés** ; jamais exécuté sur GitHub (pas de push).
-- Tests : `tests/test_ui_journey.py` (9 tests backend), vitest
+- Tests : `tests/test_ui_journey.py` (8 tests backend), vitest
   `dropPaths`, `indexProgress`, `searchDefaults`, `derushExport`.
 - Ancien travail DeepSeek : scripts à chemins en dur et profil dans
   `/tmp/opencode` remplacés ; le reformatage de `package.json` (tableaux de
