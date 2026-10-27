@@ -27,7 +27,7 @@ import numpy as np
 
 from .audio import DEFAULT_SR, decode_audio, fingerprint_file
 
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 HOP = 512
 N_FFT = 2048
 METER = 4
