@@ -12,7 +12,7 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
   (SigLIP 2 base + wd-tagger v3 ; aucun mode de test, aucune maquette), sur
   deux **vrais extraits** de 2 min 30 (DBS Beerus 01, Black Clover S02E04)
   rangés dans `~/dev/amv-testdata/Séries test/` (espaces + accents).
-- **20 bugs trouvés, 19 corrigés**, tous avec un test de non-régression
+- **21 bugs trouvés, 20 corrigés**, tous avec un test de non-régression
   (vitest, pytest ou E2E) sauf un changement de texte. Les plus gênants : le glisser-déposer de dossiers
   ne faisait **rien** (Electron 33), l'indexation restait figée sur « 5 % »
   pendant plus de 10 minutes sans dire ce qu'elle faisait, un fichier
@@ -24,7 +24,7 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
   profondeur) n'a pu se terminer sur ce CPU (plus d'une heure pour 4 s de
   1080p) ; le lancement, la progression et l'annulation l'ont été.
 - **Suite E2E rejouable** : `cd app && npm run build && npm run e2e`
-  (parcours 1 → 4 + paramètres + cas d'erreur, 2 à 5 min selon la charge), et un job
+  (parcours 1 → 4 + paramètres + cas d'erreur + relancement, 2 à 5 min selon la charge), et un job
   CI Linux optionnel dans un fichier séparé (`.github/workflows/e2e-linux.yml`,
   déclenchement manuel) que la session A pourra reprendre.
 - Captures avant/après : `/home/leandro/dev/amv-v06-captures/` (`avant/`,
@@ -111,6 +111,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
 | 17 | Éditeur de scène : la barre de lecture (Lecture, timecode) sortait de l'écran sous ~1000 px de haut, et le **menu Finition s'ouvrait sous le lecteur** (seul « Upscale » cliquable). | majeur | corrigé | E2E étape 4 (bouton Lecture entièrement visible, clic d'essai sur « Profondeur ») |
 | 18 | Recherche : bouger le curseur Seuil ou changer le tri ne relançait pas la recherche ; première recherche (30 s+ sur CPU) sans retour visible ; suggestions « Gojo combat / Eva 01 rage / Pikachu cute » sur n'importe quelle bibliothèque. | gênant | corrigé | E2E étape 3 (curseur) |
 | 19 | Export timeline : le bouton restait « Annuler » après un export réussi. | mineur | corrigé | E2E étape 4 |
+| 21 | Échap ne fermait pas l'éditeur de scène (seulement la petite croix). | mineur | corrigé (sauf si une fenêtre ouverte depuis l'éditeur est au-dessus) | E2E étape 4 |
 | 20 | Un épisode interrompu (appli fermée en pleine indexation) apparaît comme indexé (« 1 épisode · 82 scènes ») puis est **entièrement refait** à la reprise. | gênant | **non corrigé** (touche au pipeline et au schéma) | — |
 
 ## 4. Ce qui reste confus (non corrigé)
@@ -120,11 +121,11 @@ confus ou faux ; **mineur** = texte, cosmétique.
   Chaque lancement interroge aussi Hugging Face (requêtes HEAD) même quand les
   modèles sont là : à vérifier hors ligne.
 - **Épisode interrompu** : affiché comme indexé, puis refait entièrement à la
-  reprise ; et la reprise n'est pas proposée (il faut savoir recliquer).
+  reprise. La reprise reste manuelle, mais la Bibliothèque dit maintenant au
+  relancement que des dossiers attendent encore (E2E étape 8).
 - **Échecs d'indexation** : la liste rouge disparaît au redémarrage de l'appli.
 - **Fermer l'appli** pendant une indexation ou une finition ne demande pas de
   confirmation ; le job de finition est perdu.
-- **Échap** ne ferme pas l'éditeur de scène (il faut la croix).
 - **Tutoiement / vouvoiement** mélangés selon les écrans (accueil « tes
   épisodes », tutoriel « Ajoutez votre bibliothèque »).
 - Jargon : le tutoriel parle de « wd-tagger + SigLIP 2 », les paramètres de
@@ -159,7 +160,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
    la bibliothèque (personnages créés, tags fréquents) plutôt que des
    exemples génériques.
 5. **Confirmations et raccourcis de monteur** : confirmation avant de fermer
-   pendant un travail long, Échap pour fermer, et un bouton « Envoyer vers
+   pendant un travail long (indexation, finition), et un bouton « Envoyer vers
    Premiere/Resolve » qui ouvre directement la timeline exportée dans le
    logiciel choisi.
 
@@ -184,7 +185,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
 
 - Suite E2E : `app/e2e/parcours.e2e.mjs`, `helpers.mjs`,
   `playwright.config.mjs`, `run.mjs` (`npm run e2e`, Xvfb automatique si pas
-  d'écran ; `AMV_E2E_MEDIA`, `AMV_E2E_CAPTURES`). Dernier passage : **6/6 en
+  d'écran ; `AMV_E2E_MEDIA`, `AMV_E2E_CAPTURES`). Dernier passage : **7/7 en
   2 min 10** (5 min 15 sous la charge des autres sessions). Scripts
   d'exploration réelle : `app/e2e/explore/`.
 - Job CI optionnel : `.github/workflows/e2e-linux.yml` (manuel, met en cache

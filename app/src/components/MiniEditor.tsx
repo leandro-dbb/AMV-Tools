@@ -129,6 +129,12 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement | null)?.tagName === 'INPUT' || (e.target as HTMLElement | null)?.tagName === 'TEXTAREA') return;
+      // Escape closes the editor, unless a dialog opened from it (finishing,
+      // timeline) is on top: that one closes first.
+      if (e.key === 'Escape') {
+        if (document.querySelectorAll('.fixed.inset-0').length <= 1) onClose();
+        return;
+      }
       const v = videoRef.current;
       if (!v) return;
       if (e.key === 'k' || e.key === 'K' || e.code === 'Space') {

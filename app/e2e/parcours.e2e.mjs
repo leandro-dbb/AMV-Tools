@@ -132,7 +132,9 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   await win.getByRole('button', { name: /^Exporter .* s$/ }).click();
   await expect(win.getByText(/Exporté :/)).toBeVisible({ timeout: 120_000 });
   await capture(win, 'e2e-04-editeur-export');
-  await win.getByRole('button', { name: 'Fermer' }).click();
+  // Escape closes the editor (it used to need the small × button).
+  await win.keyboard.press('Escape');
+  await expect(win.getByRole('button', { name: /^Exporter .* s$/ })).toHaveCount(0);
   expect(fs.readdirSync(exportDir).some((f) => /\.(mp4|mov|mkv)$/.test(f))).toBe(true);
 
   // Derush: keep two scenes of the first episode, they land in the basket.
@@ -210,4 +212,19 @@ test('7. cas d’erreur : fichier source supprimé après indexation', async () 
   } finally {
     fs.renameSync(`${victim}.moved`, victim);
   }
+});
+
+test('8. reprise : une file laissée en attente est signalée au relancement', async () => {
+  const { win, app, profile } = ctx;
+  await apiCall(win, 'POST', '/api/index/queue', { paths: [{ path: media.dir, recursive: true }] });
+  await closeApp(app);
+  Object.assign(ctx, await launchApp({ ...profile, tutorialSeen: true }, { width: 1280, height: 720, lang: 'fr' }));
+  await waitForShell(ctx.win);
+  await ctx.win.getByRole('button', { name: 'Bibliothèque', exact: true }).first().click();
+  await expect(ctx.win.getByTestId('queue-leftover')).toBeVisible();
+  await capture(ctx.win, 'e2e-08-file-en-attente-au-relancement');
+  // Starting it clears the note; finished episodes are skipped (fast).
+  await ctx.win.getByRole('button', { name: /Lancer l'indexation/ }).click();
+  await expect(ctx.win.getByTestId('queue-leftover')).toHaveCount(0);
+  await expect(ctx.win.getByText('Inactif')).toBeVisible({ timeout: 3 * 60_000 });
 });
