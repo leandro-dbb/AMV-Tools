@@ -66,12 +66,29 @@ def _ffmpeg_path() -> str:
     return _FFMPEG_PATH
 
 
+_NVIDIA_PRESENT: Optional[bool] = None
+
+
 def _nvidia_gpu_present() -> bool:
+    global _NVIDIA_PRESENT
+    if _NVIDIA_PRESENT is not None:
+        return _NVIDIA_PRESENT
+    present = False
     if sys.platform.startswith("linux"):
-        return os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl")
-    if sys.platform == "win32":
-        return shutil.which("nvidia-smi") is not None
-    return False
+        present = os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl")
+    elif sys.platform == "win32":
+        # nvidia-smi on PATH is not enough (left over after a GPU swap, some
+        # VM images): it must list at least one GPU.
+        exe = shutil.which("nvidia-smi")
+        if exe:
+            try:
+                out = subprocess.run([exe, "-L"], capture_output=True, text=True, timeout=10,
+                                     creationflags=subprocess.CREATE_NO_WINDOW).stdout or ""
+                present = "GPU 0" in out
+            except Exception:
+                present = False
+    _NVIDIA_PRESENT = present
+    return present
 
 
 def _ffmpeg_has_cuda(path: str) -> bool:
@@ -155,7 +172,10 @@ def _ffmpeg_hw_profile() -> Optional[dict]:
             capture_output=True, text=True, timeout=10, creationflags=flags,
         ).stdout or ""
 
-        if "cuda" in accels and "scale_cuda" in filters:
+        # The Windows ffmpeg build ships CUDA support whatever the machine:
+        # without an NVIDIA GPU every hw decode attempt failed ("Could not
+        # dynamically load CUDA") on AMD/Intel/GPU-less PCs.
+        if "cuda" in accels and "scale_cuda" in filters and _nvidia_gpu_present():
             # `scale_cuda` must declare its GPU output pixel format explicitly,
             # otherwise hwdownload chokes with EINVAL on some ffmpeg builds
             # (ours included). Force NV12 → CPU.
@@ -253,6 +273,9 @@ def _pyav_hwaccel_handle() -> Optional[av.codec.hwaccel.HWAccel]:
     if not _PYAV_HW_PROBED:
         _PYAV_HW_PROBED = True
         device_type = "videotoolbox" if sys.platform == "darwin" else "cuda"
+        if device_type == "cuda" and not _nvidia_gpu_present():
+            _PYAV_HW = None
+            return _PYAV_HW
         try:
             _PYAV_HW = av.codec.hwaccel.HWAccel(device_type=device_type, allow_software_fallback=True)
             log.info("%s enabled for PyAV fallback path", device_type)

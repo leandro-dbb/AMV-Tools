@@ -4,6 +4,41 @@ All notable changes to AMV Tools are documented here.
 
 ## 0.5.0-alpha — unreleased
 
+### Windows "works the first time" + timeline export for every editor (v06 A)
+
+([report](docs/reports/v06-A-windows-timeline.md),
+[import guide](docs/import-timeline.md))
+
+- **Windows smoke test on a real VM** (`.github/workflows/windows-smoke.yml`):
+  builds the NSIS installer, installs it silently, launches the installed app
+  with a user-data path holding spaces and accents, installs the CPU backend,
+  indexes, searches, exports a clip and every timeline format, checks the
+  degraded paths (offline download message, DirectML/CUDA requested without a
+  GPU), quits and checks no process is left. Screenshots and logs as
+  artifacts.
+- **Fixed on Windows**: clip export failed (500) on every PC without an
+  NVIDIA GPU — the bundled ffmpeg lists NVENC/CUDA everywhere; NVENC and CUDA
+  decode now need a detected NVIDIA GPU and a failing hardware encode falls
+  back to libx264. Sidecar log lines were mojibake (cp1252 pipe). ffmpeg
+  error output with Japanese names could not be decoded.
+- **First indexing**: SigLIP 2 / wd-tagger are downloaded up front with
+  progress in the status bar ("SigLIP 2 base (NaFlex) ↓ 512 / 1500 MB")
+  instead of silently inside the first batch (16 min at "0 %" on a slow day).
+- **First run**: the setup screen suggests the backend matching the detected
+  GPU (CUDA 13, CUDA 12.6 for pre-RTX cards or drivers < 580, DirectML for
+  AMD/Intel, CPU) instead of always CUDA 13 (`GET /api/setup/hardware`).
+- **Timeline export by editor**: Premiere Pro, DaVinci Resolve, After Effects,
+  Vegas Pro, Final Cut Pro or Other, each with its import steps (FR/EN). New
+  **Vegas EDL text** (`File → Import → EDL Text File`) and **After Effects
+  script** (`.jsx`) exports.
+- **Timeline fixes**: FCP 7 `pathurl` spelled like Premiere
+  (`file://localhost/C%3a/...`); EDL source/record durations always equal and
+  never zero; FROM CLIP NAME / FROM FILE no longer cut at 80 columns; OTIO
+  source in points exact for mixed frame rates; FCPXML markers valid against
+  Apple's DTD; exports byte-identical on every OS.
+- **Validation**: FCPXML against Apple's 1.9 DTD (pinned); every format read
+  back by third-party readers and rendered frame by frame with MLT.
+
 ### Models — non-commercial candidates re-evaluated (chantier 4b)
 
 AMV Tools is non-commercial, so models rejected in chantier 4 only for a

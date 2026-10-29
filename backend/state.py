@@ -688,6 +688,10 @@ class AppState:
             overlap = None
             try:
                 self.publish({"type": "indexing", "message": "Starting", "percent": 0})
+                # First run: fetch SigLIP/tagger now, with visible progress,
+                # instead of silently inside the first batch (never raises).
+                from .model_prefetch import prefetch_indexing_models
+                prefetch_indexing_models(self, self.publish, should_stop=self._cancel_event.is_set)
                 self._set_proxy_source_cache()
                 from .indexing import onepass as _op
                 video_done = None

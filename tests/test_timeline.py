@@ -242,7 +242,8 @@ def test_fcp7_structure_and_exact_frames():
     assert items[1].findtext("rate/ntsc") == "FALSE"
 
     url = items[0].findtext("file/pathurl")
-    assert url == "file:///C:/AMV%20Golden/clip_%C3%A9%20%E6%97%A5%E6%9C%AC.mp4"
+    # Premiere's own spelling: localhost host, drive colon percent-encoded.
+    assert url == "file://localhost/C%3a/AMV%20Golden/clip_%C3%A9%20%E6%97%A5%E6%9C%AC.mp4"
 
     # Audio included: one audio clipitem for the first source only.
     audio_items = seq.findall("media/audio/track/clipitem")
@@ -454,7 +455,7 @@ def test_collect_media_copies_without_transcoding(synthetic_media, tmp_path):
     assert len(urls) == 3
     for url in urls:
         assert url.startswith("file://")
-        assert url.startswith(to_file_url(media_dir) + "/")
+        assert url.startswith(fcp7.xmeml_pathurl(to_file_url(media_dir)) + "/")
     assert "%E3%82%AF%E3%83%AA%E3%83%83%E3%83%97" in text
 
     # FCPXML / OTIO / EDL point at the same copies, relative to the timeline.
@@ -546,7 +547,9 @@ def test_fcpxml_escapes_quotes_and_strips_control_chars():
     assert clip.get("name") == _clean(_NASTY_CLIP)
     marker = clip.find("marker")
     assert marker.get("value") == _clean(_NASTY_CLIP)
-    assert marker.findtext("note") == 'note "x" & <y>'
+    # FCPXML 1.9 declares <marker> EMPTY: the comment is the ``note``
+    # attribute, not a child element (validated against Apple's DTD).
+    assert marker.get("note") == 'note "x" & <y>'
     assert "\x07" not in text and "\x01" not in text
 
 

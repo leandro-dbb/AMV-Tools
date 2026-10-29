@@ -1,0 +1,118 @@
+# End-to-end smoke test on a REAL Windows VM (GitHub-hosted runner).
+#
+# Builds the same NSIS installer as the release, installs it silently, starts
+# the installed app, then drives its sidecar through the HTTP API: CPU backend
+# install, model download, indexing, search, clip export and every timeline
+# export format. It checks the produced files, captures a screenshot of the
+# real window, quits the app through the normal path and verifies no process
+# is left behind.
+#
+# The driving itself lives in .github/scripts/windows-smoke.ps1 (one step:
+# the runner kills a step's background processes when the step ends).
+# Test-only hooks it uses (inert for normal users, see app/electron/main.ts):
+#   AMV_TOKEN, AMV_SIDECAR_PORT       fixed token/port for the sidecar
+#   AMV_SMOKE_CONTROL_DIR             reload / screenshot / quit command files
+#   AMV_SMOKE_SCREENSHOT_DIR          where window captures are written
+# Run it from the Actions tab (Run workflow) or by pushing to jarvis/**.
+name: windows-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['jarvis/**']
+    # Docs-only commits don't need a 10-20 min Windows run.
+    paths-ignore: ['docs/**', '**/*.md']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Install + index + export on windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Fetch uv binary (bundled by the installer)
+        shell: pwsh
+        run: |
+          irm https://astral.sh/uv/install.ps1 | iex
+          New-Item -ItemType Directory -Force .uv | Out-Null
+          Copy-Item "$env:USERPROFILE\.local\bin\uv.exe" .uv\uv.exe
+          .\.uv\uv.exe --version
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+
+      - name: Build renderer + main
+        working-directory: app
+        run: npm run build
+
+      - name: Package NSIS installer (same as release, unsigned)
+        working-directory: app
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win nsis --publish never
+
+      - name: Locate and install the installer silently
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem app/release/*.exe | Select-Object -First 1
+          if (-not $installer) { throw "No NSIS installer produced" }
+          Write-Host "Installer: $($installer.FullName) ($([math]::Round($installer.Length/1MB,1)) MB)"
+          $p = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          Write-Host "Installer exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "Silent install failed with $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\AMV Tools\AMV Tools.exe'
+          if (-not (Test-Path $exe)) {
+            $exe = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter 'AMV Tools.exe' |
+                    Select-Object -First 1).FullName
+          }
+          if (-not $exe) { throw "Installed app not found under %LOCALAPPDATA%\Programs" }
+          Write-Host "Installed exe: $exe"
+          "AMV_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Launch, set up, index, search, export, quit (installed app)
+        shell: pwsh
+        timeout-minutes: 50
+        run: ./.github/scripts/windows-smoke.ps1 -Exe $env:AMV_EXE -ArtDir (Join-Path $env:RUNNER_TEMP 'amv-artifacts')
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $s = Join-Path $env:RUNNER_TEMP 'amv-artifacts\summary.json'
+          if (Test-Path $s) {
+            "## Windows smoke`n" + '```json' + "`n" + (Get-Content -Raw $s) + "`n" + '```' |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      # Keep the logs, screenshots and produced files, not the multi-GB venv /
+      # model cache that live in the user-data folder.
+      - name: Upload artifacts (screenshots, logs, exports)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-smoke-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/amv-artifacts
+            !${{ runner.temp }}/amv-artifacts/**/.venv
+            !${{ runner.temp }}/amv-artifacts/**/.uv
+            !${{ runner.temp }}/amv-artifacts/**/.uv_cache
+            !${{ runner.temp }}/amv-artifacts/**/models
+            !${{ runner.temp }}/amv-artifacts/**/hf-offline
+            !${{ runner.temp }}/amv-artifacts/**/*.mp4
+            !${{ runner.temp }}/amv-artifacts/**/*.mkv
+          if-no-files-found: warn
+          retention-days: 14
