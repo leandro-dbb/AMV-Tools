@@ -27,10 +27,14 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
   const [relinkDb, setRelinkDb] = useState<string | null>(null);
   const [showDbs, setShowDbs] = useState(false);
 
+  const [running, setRunning] = useState(false);   // sidecar's indexing thread (incl. its proxy pass)
+  const [startError, setStartError] = useState<string | null>(null);
+
   async function refresh() {
     const [dbs, q] = await Promise.all([api.listDatabases(), api.queue()]);
     setDatabases(dbs.databases);
     setQueue(q.items);
+    setRunning(!!q.running);
   }
 
   // Queue left from a previous session (app closed mid-indexing, or folders
@@ -59,7 +63,7 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
 
   // Indexing runs in the sidecar: follow it so the episode list and the
   // queue do not stay frozen on what they were when the tab opened.
-  const indexing = progress?.type === 'indexing';
+  const indexing = progress?.type === 'indexing' || (running && progress?.type !== 'idle');
   const finishedFile = indexing && (progress?.percent ?? 0) >= 100 ? progress?.video : null;
   useEffect(() => { refresh().catch(() => {}); }, [indexing, finishedFile, progress?.file_index]);
 
@@ -83,9 +87,15 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
   async function startIndex(phases: ('tag' | 'embed')[]) {
     if (busy || indexing) return;
     setLeftover(false);
+    setStartError(null);
     setBusy(true);
-    try { await api.startIndexing(phases); }
-    finally { setBusy(false); refresh(); }
+    try {
+      const r = await api.startIndexing(phases);
+      // refused (a re-index, a merge or a run already going): say so
+      if (!r.started) setStartError(t(`fix.library.busy.${r.reason ?? 'indexing'}`));
+    } catch (e) {
+      setStartError((e as Error).message);
+    } finally { setBusy(false); refresh().catch(() => {}); }
   }
 
   async function addDb() {
@@ -221,6 +231,10 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
             </div>
           )}
         </div>
+
+        {startError && (
+          <div role="alert" data-testid="index-start-error" className="bg-red-500/10 border-2 border-red-500/40 rounded-xl p-3 text-sm text-red-300">{startError}</div>
+        )}
 
         {totals.incomplete > 0 && !indexing && (
           <div data-testid="library-incomplete" className="bg-[#F59E0B]/10 border-2 border-[#F59E0B]/40 rounded-xl p-4 flex items-center gap-3 flex-wrap">
@@ -378,7 +392,7 @@ function EpisodeFoldersPanel({ refreshKey }: { refreshKey?: string }) {
     >
       <GripVertical size={10} className="text-[#3F3F46] shrink-0" />
       <span className="truncate max-w-[240px]">{v.display_name}</span>
-      {!['completed', 'tags_only', 'embeddings_only'].includes(v.status) && (
+      {!['completed', 'tags_only', 'embeddings_only', 'indexing'].includes(v.status) && (
         <span className="px-1 rounded bg-[#F59E0B]/20 text-[#FBBF24] text-[10px] shrink-0" title={t('fix.library.incompleteChip.title')}>{t('fix.library.incompleteChip')}</span>
       )}
     </div>

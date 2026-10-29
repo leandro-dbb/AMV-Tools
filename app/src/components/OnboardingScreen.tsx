@@ -274,7 +274,7 @@ export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
         )}
 
         <div className="mt-6 text-xs text-[#71717A] text-center">
-          {pythonVer ? `Python ${pythonVer} - ` : ''}{t('onboarding.version')}
+          {pythonVer ? `Python ${pythonVer} - ` : ''}{t('onboarding.version', { version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '' })}
         </div>
       </div>
     </div>
