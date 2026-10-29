@@ -332,21 +332,9 @@ def _add_music_otio(text: str, music_path: str, frames: int, fps: Fraction,
                     markers: list[MusicMarker], timeline: Optional[Timeline] = None) -> str:
     data = json.loads(text)
     tracks = data["tracks"]["children"]
-    if timeline is not None:
-        # OTIO places clips back to back by their source_range, in each
-        # source's own rate: with mixed frame rates the per-clip rounding
-        # adds up and cuts drift off the beats.  Give every clip the exact
-        # (fractional) source length of its slot on the sequence.
-        seq = timeline.sequence_fps
-        for track in tracks:
-            items = [c for c in track.get("children", []) if c.get("OTIO_SCHEMA", "").startswith("Clip")]
-            placed = [pc for pc in timeline.clips
-                      if track.get("kind") != "Audio" or pc.source.has_audio]
-            for item, pc in zip(items, placed):
-                if pc.source.fps == seq:
-                    continue
-                exact = (pc.record_end - pc.record_start) * pc.source.fps / seq
-                item["source_range"]["duration"]["value"] = float(exact)
+    # Mixed frame rates: the OTIO writer already gives each clip's duration
+    # on the sequence rate (the track adds up to the record positions), so
+    # the cuts stay on the beats without any fix-up here.
     # Audio tracks after the picture; the song first among them.
     tracks.insert(1, _otio_music_track(music_path, frames, fps, markers))
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
