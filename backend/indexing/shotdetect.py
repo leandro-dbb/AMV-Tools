@@ -70,12 +70,15 @@ def _rows(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return rows
 
 
-def distance(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
-    """(motion-compensated mean abs difference, histogram distance), both in
-    [0, 1], between two working-size frames, on their picture rows."""
+def _span(a: np.ndarray, b: np.ndarray) -> tuple[int, int]:
     rows = _rows(a, b)
-    lo = int(np.argmax(rows))
-    hi = len(rows) - int(np.argmax(rows[::-1]))
+    return int(np.argmax(rows)), len(rows) - int(np.argmax(rows[::-1]))
+
+
+def motion_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """Mean abs difference in [0, 1] between two working-size frames, on
+    their picture rows, after the best shift of up to ±``_R`` px."""
+    lo, hi = _span(a, b)
     if hi - lo > 2 * _R + 2:
         core = b[lo + _R:hi - _R, _R:_SW - _R]
         # every shift of ``a`` at once: (2R+1, 2R+1, h, w) views
@@ -83,10 +86,20 @@ def distance(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
         best = float(np.abs(shifts - core).mean(axis=(2, 3)).min())
     else:
         best = float(np.abs(a[lo:hi] - b[lo:hi]).mean())
+    return best / 255.0
+
+
+def hist_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """Gray histogram distance in [0, 1] on the picture rows."""
+    lo, hi = _span(a, b)
     ha = np.bincount((a[lo:hi] // 8).astype(np.int32).ravel(), minlength=32).astype(np.float64)
     hb = np.bincount((b[lo:hi] // 8).astype(np.int32).ravel(), minlength=32).astype(np.float64)
-    hist = 0.5 * float(np.abs(ha / max(ha.sum(), 1) - hb / max(hb.sum(), 1)).sum())
-    return best / 255.0, hist
+    return 0.5 * float(np.abs(ha / max(ha.sum(), 1) - hb / max(hb.sum(), 1)).sum())
+
+
+def distance(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+    """(motion_diff, hist_diff)."""
+    return motion_diff(a, b), hist_diff(a, b)
 
 
 def strength_at(frames: list, d: list, t: int, min_change: float = MIN_CHANGE) -> float:
@@ -103,17 +116,17 @@ def strength_at(frames: list, d: list, t: int, min_change: float = MIN_CHANGE) -
     ratio = dt / ((nb[-2] if len(nb) > 1 else 0.0) + 0.02)
     if ratio <= MIN_RATIO:
         return 0.0
-    _, hist = distance(frames[t - 1], frames[t])
+    hist = hist_diff(frames[t - 1], frames[t])
     change = dt + HIST_WEIGHT * hist
     if change <= min_change:
         return 0.0
     # a flash / impact frame: the old picture comes back
     for j in range(t + 1, min(n, t + _FLASH + 1)):
-        if distance(frames[t - 1], frames[j])[0] <= MIN_NEW * dt:
+        if motion_diff(frames[t - 1], frames[j]) <= MIN_NEW * dt:
             return 0.0
     # the end of such a flash: the new picture was there just before
     for i in range(max(0, t - _BACK), t - 1):
-        if distance(frames[i], frames[t])[0] <= MIN_NEW * dt:
+        if motion_diff(frames[i], frames[t]) <= MIN_NEW * dt:
             return 0.0
     return float(change * min(ratio, 3.0))
 
@@ -134,7 +147,7 @@ class ShotDetector:
     def push(self, gray) -> list[int]:
         f = _small(gray)
         if self._frames:
-            self._d.append(distance(self._frames[-1], f)[0])
+            self._d.append(motion_diff(self._frames[-1], f))
         else:
             self._d.append(0.0)
         self._frames.append(f)
