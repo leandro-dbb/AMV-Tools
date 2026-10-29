@@ -34,7 +34,10 @@ def get_queue():
     state = get_state()
     schema.init_db(state.primary_db)
     with schema.get_conn(state.primary_db) as conn:
-        return {"items": queries.get_queue(conn)}
+        items = queries.get_queue(conn)
+    # the indexing thread also runs the post-queue proxy pass: the UI must
+    # not offer "Start" while it is alive (the start would be refused)
+    return {"items": items, "running": state.indexing_running()}
 
 
 @router.post("/api/index/queue")
@@ -72,8 +75,10 @@ class StartIndexBody(BaseModel):
 def start_indexing(body: StartIndexBody | None = None):
     requested = (body.phases if body and body.phases else ["tag", "embed"])
     phases = tuple(p for p in requested if p in ("tag", "embed")) or ("tag", "embed")
-    started = get_state().start_indexing(phases=phases)
-    return {"started": started, "phases": list(phases)}
+    state = get_state()
+    started = state.start_indexing(phases=phases)
+    reason = None if started else state.indexing_busy_reason()
+    return {"started": started, "phases": list(phases), "reason": reason}
 
 
 @router.post("/api/index/stop")

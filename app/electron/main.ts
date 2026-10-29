@@ -425,7 +425,11 @@ async function createWindow() {
     const own = useVite ? bare.startsWith('http://localhost:5173') : bare === pathToFileURL(distIndex).href;
     if (!own) e.preventDefault();
   });
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // target="_blank" links (model licences, docs) open in the browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   mainWindow.webContents.once('did-finish-load', () => {
     rendererReady = true;

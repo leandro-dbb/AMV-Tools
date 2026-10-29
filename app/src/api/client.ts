@@ -191,7 +191,7 @@ export const api = {
   scenePreview: (sceneId: number) =>
     req<{ frames: string[]; proxy_url?: string }>(`/api/scene/${sceneId}/preview`),
 
-  queue: () => req<{ items: IndexQueueItem[] }>('/api/index/queue'),
+  queue: () => req<{ items: IndexQueueItem[]; running?: boolean }>('/api/index/queue'),
   modelsStatus: () =>
     req<{ models: { key: string; label: string; enabled: boolean; present: boolean }[] }>('/api/models/status'),
   removeFromQueue: (id: number) =>
@@ -202,7 +202,7 @@ export const api = {
       body: JSON.stringify({ paths }),
     }),
   startIndexing: (phases: ('tag' | 'embed')[] = ['tag', 'embed']) =>
-    req<{ started: boolean; phases: string[] }>('/api/index/start', {
+    req<{ started: boolean; phases: string[]; reason?: 'indexing' | 'reembed' | 'merge' | null }>('/api/index/start', {
       method: 'POST',
       body: JSON.stringify({ phases }),
     }),

@@ -945,19 +945,25 @@ def index_queue(
     # (filepath, group) pairs — the queue item's user-chosen import group is
     # stamped on every video found under it.
     all_files: list[tuple[str, str | None]] = []
+    # queued items that give nothing to index: said, not silently dropped
+    skipped: list[tuple[str, str]] = []
     for item in items:
         p = Path(item["path"])
         group = item.get("group_name") or None
         if not p.exists():
+            skipped.append((str(p), "not found (moved, renamed or drive unplugged?)"))
             continue
         if p.is_file():
             if p.suffix.lower() in VIDEO_EXTENSIONS:
                 all_files.append((str(p), group))
             continue
+        before = len(all_files)
         pattern_iter = p.rglob("*") if item["recursive"] else p.iterdir()
         for sub in pattern_iter:
             if sub.is_file() and sub.suffix.lower() in VIDEO_EXTENSIONS:
                 all_files.append((str(sub), group))
+        if len(all_files) == before:
+            skipped.append((str(p), "no video file in this folder"))
 
     # Episodes whose last run did not finish (app closed, Stop, failure) are
     # picked up again even when their folder already left the queue; their
@@ -968,9 +974,17 @@ def index_queue(
             f"SELECT filepath, group_name FROM videos WHERE status IN ({','.join('?' * len(UNFINISHED_STATUSES))}) "
             "ORDER BY id", UNFINISHED_STATUSES).fetchall()
     for fp, group in unfinished:
-        if fp not in seen and os.path.exists(fp):
+        if fp in seen:
+            continue
+        if os.path.exists(fp):
             all_files.append((fp, group))
             seen.add(fp)
+        else:
+            skipped.append((fp, "not found: cannot finish indexing it (moved, renamed or drive unplugged?)"))
+    if progress_cb:
+        for path_, why in skipped:
+            progress_cb({"type": "indexing", "video": Path(path_).name, "percent": 0,
+                         "message": f"Failed: {why}", "failed": True, "path": path_})
 
     video_done_cb = kwargs.pop("video_done_cb", None)
     pending = None

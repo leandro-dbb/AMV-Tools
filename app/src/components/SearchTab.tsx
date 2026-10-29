@@ -111,7 +111,7 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
     lastTextQuery.current = null;
     try {
       const res = await api.similarScenes(sceneId, {
-        top_k: maxResults, exclude_same_video: opts.excludeSameVideo, same_group: opts.sameGroup,
+        top_k: Math.min(maxResults, 1000), exclude_same_video: opts.excludeSameVideo, same_group: opts.sameGroup,
         sort, filters: activeFilters,
       });
       setSimilar({ seed: res.seed, ...opts });
