@@ -32,7 +32,7 @@ from typing import Callable, Iterable, Optional
 import numpy as np
 from PIL import Image
 
-from . import cuts
+from . import cuts, shotdetect
 
 log = logging.getLogger(__name__)
 
@@ -357,9 +357,9 @@ class _Scanner:
         self.overflow = False      # open scene outgrew the buffer
         self.cuts_ms: list[int] = [0]
         self.medians: dict[int, Image.Image] = {}
-        self.prev_hist: Optional[np.ndarray] = None
-        self.last_detect_ms = 0
-        self.stride_ms = int(cuts._FRAME_STRIDE * 1000 / self.fps) + 1
+        self.detector = shotdetect.ShotDetector(threshold)
+        # a cut is confirmed this late (the detector's flash look-ahead)
+        self.stride_ms = int((shotdetect.LOOKAHEAD + 1) * 1000 / self.fps) + 1
 
     # frame index <-> timestamp, exactly as the pipeline computes it
     def ts(self, idx: int) -> int:
@@ -394,38 +394,29 @@ class _Scanner:
         return self.buf[start:start + min(want, self.cap - start)]
 
     def commit(self, k: int) -> None:
-        """Process the ``k`` frames just written after frame ``n``."""
+        """Process the ``k`` frames just written after frame ``n``: every
+        frame goes to the cut detector, the sampled ones to motion analysis."""
         stride = cuts._FRAME_STRIDE
         first, end = self.n, self.n + k
         self.n = end
-        idx = first + (-first % stride)
         if self.cancelled is not None and first // 256 != end // 256 and self.cancelled():
             raise Cancelled()
-        while idx < end:
-            ts = self.ts(idx)
-            buf = self.frame(idx)
-            gray = _gray_of(buf, self.gray_lut)
-            hist = cuts._hist_from_plane_bytes(gray.tobytes(), cuts._DIFF_W, cuts._DIFF_H)
-            if self.frame_sink is not None:
-                self.frame_sink(ts, gray)
-            if self.prev_hist is not None:
-                diff = float(np.abs(hist - self.prev_hist).sum()) * 0.5
-                if diff > self.threshold and ts > self.last_detect_ms + cuts._MIN_CUT_GAP_MS:
-                    self.last_detect_ms = ts
-                    # frames since the previous sample (the oldest ones may
-                    # predate the stream): the cut moves to the largest
-                    # consecutive jump among them
-                    between = [self.frame(i) for i in range(max(0, idx - stride), idx + 1)]
-                    exact = cuts._exact_cut_index(idx, between, self.hist_of)
-                    cut = max(self.cuts_ms[-1] + 1, int((exact / self.fps) * 1000))
-                    self.close_scene(self.cuts_ms[-1], cut)
-                    self.cuts_ms.append(cut)
-                    self.overflow = False
-                    self.keep = max(self.keep, self.first_at(cut))
-            self.prev_hist = hist
-            self._advance_floor(idx)
-            idx += stride
+        for idx in range(first, end):
+            gray = _gray_of(self.frame(idx), self.gray_lut)
+            if self.frame_sink is not None and idx % stride == 0:
+                self.frame_sink(self.ts(idx), gray)
+            self._cuts(self.detector.push(gray))
+            if idx % stride == 0:
+                self._advance_floor(idx)
         self._advance_floor(end - 1)
+
+    def _cuts(self, found: list[int]) -> None:
+        for c in found:
+            cut = max(self.cuts_ms[-1] + 1, self.ts(c))
+            self.close_scene(self.cuts_ms[-1], cut)
+            self.cuts_ms.append(cut)
+            self.overflow = False
+            self.keep = max(self.keep, self.first_at(cut))
 
     def _advance_floor(self, idx: int) -> None:
         # The open scene's median can't be earlier than half-way to now —
@@ -439,6 +430,7 @@ class _Scanner:
             self.keep = idx + 1
 
     def finish(self, duration_ms: int) -> tuple[list[int], dict[int, Image.Image], int]:
+        self._cuts(self.detector.finish())
         if self.n:
             self.close_scene(self.cuts_ms[-1], duration_ms)
         self.cuts_ms.append(duration_ms)

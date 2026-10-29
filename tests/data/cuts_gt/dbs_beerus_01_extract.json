@@ -1,0 +1,412 @@
+{
+ "video": "DBS Beerus 01 - extrait.mkv",
+ "fps": "24000/1001",
+ "n_frames": 3642,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 4,
+   "t_ms": 167,
+   "pts": 167,
+   "note": "frames 0-3 are the tail of a previous shot"
+  },
+  {
+   "frame": 96,
+   "t_ms": 4004,
+   "pts": 4004
+  },
+  {
+   "frame": 224,
+   "t_ms": 9343,
+   "pts": 9343
+  },
+  {
+   "frame": 400,
+   "t_ms": 16683,
+   "pts": 16683,
+   "note": "hard cut to black; the title text then fades in on black (~402-440) inside the same shot"
+  },
+  {
+   "frame": 520,
+   "t_ms": 21688,
+   "pts": 21688
+  },
+  {
+   "frame": 615,
+   "t_ms": 25651,
+   "pts": 25651
+  },
+  {
+   "frame": 644,
+   "t_ms": 26860,
+   "pts": 26860
+  },
+  {
+   "frame": 670,
+   "t_ms": 27945,
+   "pts": 27945
+  },
+  {
+   "frame": 729,
+   "t_ms": 30406,
+   "pts": 30406
+  },
+  {
+   "frame": 800,
+   "t_ms": 33367,
+   "pts": 33367
+  },
+  {
+   "frame": 827,
+   "t_ms": 34493,
+   "pts": 34493
+  },
+  {
+   "frame": 902,
+   "t_ms": 37621,
+   "pts": 37621
+  },
+  {
+   "frame": 1027,
+   "t_ms": 42835,
+   "pts": 42835
+  },
+  {
+   "frame": 1182,
+   "t_ms": 49299,
+   "pts": 49299
+  },
+  {
+   "frame": 1234,
+   "t_ms": 51468,
+   "pts": 51468
+  },
+  {
+   "frame": 1299,
+   "t_ms": 54179,
+   "pts": 54179
+  },
+  {
+   "frame": 1408,
+   "t_ms": 58726,
+   "pts": 58726,
+   "note": "new shot starts on a dark frame, hand enters from 1409"
+  },
+  {
+   "frame": 1427,
+   "t_ms": 59518,
+   "pts": 59518
+  },
+  {
+   "frame": 1709,
+   "t_ms": 71280,
+   "pts": 71280
+  },
+  {
+   "frame": 1754,
+   "t_ms": 73157,
+   "pts": 73157,
+   "note": "starts on sky; continuous tilt down to Goku's face (1754-1781)"
+  },
+  {
+   "frame": 1782,
+   "t_ms": 74324,
+   "pts": 74324
+  },
+  {
+   "frame": 1829,
+   "t_ms": 76285,
+   "pts": 76285
+  },
+  {
+   "frame": 1885,
+   "t_ms": 78620,
+   "pts": 78620
+  },
+  {
+   "frame": 1932,
+   "t_ms": 80581,
+   "pts": 80581
+  },
+  {
+   "frame": 1970,
+   "t_ms": 82166,
+   "pts": 82166
+  },
+  {
+   "frame": 2031,
+   "t_ms": 84710,
+   "pts": 84710
+  },
+  {
+   "frame": 2078,
+   "t_ms": 86670,
+   "pts": 86670,
+   "note": "mouth extreme close-up after the white-flash transition 2071-2077 (could be read as the end of the zoom-in that starts at 2075)"
+  },
+  {
+   "frame": 2084,
+   "t_ms": 86920,
+   "pts": 86920,
+   "note": "first step of a stepped zoom-out (see ambiguous 2086/2088)"
+  },
+  {
+   "frame": 2090,
+   "t_ms": 87171,
+   "pts": 87171,
+   "note": "full-body framing with a new pose (end of the stepped zoom-out)"
+  },
+  {
+   "frame": 2110,
+   "t_ms": 88005,
+   "pts": 88005
+  },
+  {
+   "frame": 2148,
+   "t_ms": 89590,
+   "pts": 89590
+  },
+  {
+   "frame": 2192,
+   "t_ms": 91425,
+   "pts": 91425,
+   "note": "single-frame insert shot (2192 only)"
+  },
+  {
+   "frame": 2193,
+   "t_ms": 91467,
+   "pts": 91467,
+   "note": "end of the 1-frame insert; the white flash 2199-2200 inside this shot is NOT a cut (2201 continues the same framing)"
+  },
+  {
+   "frame": 2245,
+   "t_ms": 93635,
+   "pts": 93635
+  },
+  {
+   "frame": 2277,
+   "t_ms": 94970,
+   "pts": 94970
+  },
+  {
+   "frame": 2285,
+   "t_ms": 95304,
+   "pts": 95304,
+   "note": "cut back to the same hair close-up framing as 2245"
+  },
+  {
+   "frame": 2314,
+   "t_ms": 96513,
+   "pts": 96513
+  },
+  {
+   "frame": 2328,
+   "t_ms": 97097,
+   "pts": 97097,
+   "note": "cut back to the hair/face framing"
+  },
+  {
+   "frame": 2360,
+   "t_ms": 98432,
+   "pts": 98432
+  },
+  {
+   "frame": 2412,
+   "t_ms": 100601,
+   "pts": 100601,
+   "note": "insert of the kanji symbol; 2420, 2440, 2448 alternate back and forth"
+  },
+  {
+   "frame": 2420,
+   "t_ms": 100934,
+   "pts": 100934
+  },
+  {
+   "frame": 2440,
+   "t_ms": 101769,
+   "pts": 101769
+  },
+  {
+   "frame": 2448,
+   "t_ms": 102102,
+   "pts": 102102
+  },
+  {
+   "frame": 2462,
+   "t_ms": 102686,
+   "pts": 102686
+  },
+  {
+   "frame": 2470,
+   "t_ms": 103020,
+   "pts": 103020
+  },
+  {
+   "frame": 2550,
+   "t_ms": 106356,
+   "pts": 106356
+  },
+  {
+   "frame": 2614,
+   "t_ms": 109026,
+   "pts": 109026
+  },
+  {
+   "frame": 2679,
+   "t_ms": 111737,
+   "pts": 111737
+  },
+  {
+   "frame": 2747,
+   "t_ms": 114573,
+   "pts": 114573
+  },
+  {
+   "frame": 2809,
+   "t_ms": 117159,
+   "pts": 117159,
+   "note": "back view to profile close-up; start of an orbiting-camera shot"
+  },
+  {
+   "frame": 2865,
+   "t_ms": 119495,
+   "pts": 119495,
+   "note": "axial cut-in from the face to a neck close-up"
+  },
+  {
+   "frame": 2893,
+   "t_ms": 120662,
+   "pts": 120662,
+   "note": "reverse angle: the fist toward camera, then Frieza's face being hit"
+  },
+  {
+   "frame": 3032,
+   "t_ms": 126460,
+   "pts": 126460
+  },
+  {
+   "frame": 3046,
+   "t_ms": 127044,
+   "pts": 127044
+  },
+  {
+   "frame": 3084,
+   "t_ms": 128629,
+   "pts": 128629
+  },
+  {
+   "frame": 3130,
+   "t_ms": 130547,
+   "pts": 130547
+  },
+  {
+   "frame": 3150,
+   "t_ms": 131381,
+   "pts": 131381
+  },
+  {
+   "frame": 3190,
+   "t_ms": 133050,
+   "pts": 133050
+  },
+  {
+   "frame": 3204,
+   "t_ms": 133634,
+   "pts": 133634
+  },
+  {
+   "frame": 3238,
+   "t_ms": 135052,
+   "pts": 135052
+  },
+  {
+   "frame": 3273,
+   "t_ms": 136512,
+   "pts": 136512
+  },
+  {
+   "frame": 3315,
+   "t_ms": 138263,
+   "pts": 138263
+  },
+  {
+   "frame": 3370,
+   "t_ms": 140557,
+   "pts": 140557
+  },
+  {
+   "frame": 3404,
+   "t_ms": 141975,
+   "pts": 141975,
+   "note": "new shot starts on a black frame; auras come in from the sides at 3405"
+  },
+  {
+   "frame": 3491,
+   "t_ms": 145604,
+   "pts": 145604,
+   "note": "start of the Goku dodge close-up shot (to 3553)"
+  },
+  {
+   "frame": 3554,
+   "t_ms": 148232,
+   "pts": 148232
+  },
+  {
+   "frame": 3584,
+   "t_ms": 149483,
+   "pts": 149483
+  }
+ ],
+ "dissolves": [
+  {
+   "start": 2071,
+   "end": 2077,
+   "note": "Flash transition through white. The eyes shot whitens at 2071 and is full white at 2072-2074. The new SSJ face emerges from the white at 2075-2077 while zooming in. New content is first visible at 2075. Followed by the hard cut at 2078."
+  }
+ ],
+ "ambiguous": [
+  {
+   "frame": 1077,
+   "why": "Goten flies into and past the camera. 1077-1078 are dark frames where his hair covers the lens, and 1079 is a view from behind him looking down at the ground. This is a pass-through/occlusion wipe: the camera position changes, but there is no hard discontinuity. If counted, the new shot starts at 1077 (first occluded frame); 1079 is the first frame of the new view. Not counted as a hard cut."
+  },
+  {
+   "frame": 2086,
+   "why": "Stepped zoom-out (2084-2089, 2-frame holds) with consistent geometry. It could be an axial cut or a single zooming shot. Not counted."
+  },
+  {
+   "frame": 2088,
+   "why": "Same stepped zoom-out as 2086. Not counted."
+  },
+  {
+   "frame": 2821,
+   "why": "Inside the orbiting-camera shot 2809-2864, the angle jumps from profile to 3/4 front in one frame, and the pink aura vanishes for one frame. It could be a cut or a fast orbit/head-turn. Not counted."
+  },
+  {
+   "frame": 3310,
+   "why": "The camera-in-aura texture shot (3273-3309) is revealed into a close-up of the Cell/Goku clash. 3310 is a mixed frame (green blur over aura). It could be a cut hidden by the aura overlay. Not counted."
+  },
+  {
+   "frame": 3549,
+   "why": "Stepped push-in: Goku bust (3547-3548), then face (3549, 1 frame), then extreme close-up of the eyes (3550-3553). These could be axial cut-ins or one fast push. Not counted."
+  },
+  {
+   "frame": 3550,
+   "why": "Same stepped push-in as 3549. Not counted."
+  },
+  {
+   "frame": 3405,
+   "end": 3490,
+   "why": "REGION: a rapid Goku-vs-Cell exchange (sakuga) on a black/aura background. Every 2-4 frames there is a new pose and composition with camera shake. It is treated as ONE shot. A detector may fire on pose jumps, e.g. 3424, 3426, 3430, 3449, 3460, 3464, 3468, 3471, 3484, 3488."
+  },
+  {
+   "frame": 3584,
+   "end": 3641,
+   "why": "REGION: the same kind of rapid-exchange sakuga as 3405-3490, running to the end of the clip. It is treated as ONE shot."
+  }
+ ],
+ "method": "Decoded all 3642 frames (ffmpeg -fps_mode passthrough, scale 320x180 area, rgb24, nice 10). Computed per-pair scores at 160x90: mean abs RGB diff, HSV 16x4x8 histogram L1/2, edge change ratio, 10x10 block-change fraction, and motion-compensated block residual (80x40, +/-6 px). A generous candidate set of 1064 frames was built: mad>12 | hist>0.25 | ECR>0.55 | block>0.35 | mad >3x median of +/-12 frames (and >3) | hist >3x local median (and >0.08) | ECR >2.5x local median (and >0.25). On top of the candidates, EVERY frame was inspected visually on 100-frame filmstrips (160x90) with metric hits highlighted. The only exceptions are the static stretches 100-499 and 1300-1699, viewed at every 2nd frame; metrics there show no spikes besides 224, 400, 1408 and 1427. All action passages (2017-2110, 2190-2210, 2498-2615, 2718-3013, 3128-3160, 3200-3318, 3346-3373, 3398-3641) were re-inspected frame by frame at 240-320 px. Each hard cut was verified on n-1 | n | n+1 sheets at 320 px (/tmp/gt/sheets/dbs_cuts_01..05.png), and the doubtful cases on /tmp/gt/sheets/dbs_doubts_01.png. Long shots (>6 s) were all viewed at every frame or every 2nd frame. Note: the second half is a stylised flashback fight with fluid camera work; there, only clear changes of camera setup were counted as cuts.",
+ "pts_note": "pts are regular: deltas are 41/42 ms only (time_base 1/1000; ms rounding of 1001/24). start_time is 0. Decoded frames = 3642 = ffprobe frames. t_ms = pts - pts[0] = pts.",
+ "notable_non_cuts": "Within-shot events that are NOT cuts: 520-614 (tractor passes a low camera), 853-866 (stump swing), 1065-1076 (Goten flies at camera), 1182-1233, 2017-2030 (arms swing apart and reveal the face), 2060-2064 (yellow flash; same framing after), 2098-2109 (white flash and debris; same framing), 2199-2200 (white flash), 2201-2212 (aura burst), 2503-2512 (zoom-out), 2550-2583 (push-in past Goku to reveal Frieza), 2722-2730 (aura flare), 2747-2808 and 2809-2892 (orbiting camera with Frieza attacks), 2899-3031 (Frieza knocked back; camera follows the disc to Goku), 3136-3149 (power-up flash with zoom), 3155-3157 and 3207-3215 (aura growth and lightning), 3352-3369 (auras cross and leave the frame), 3387-3403 (Goku crashes into the sky shot; explosion)."
+}
