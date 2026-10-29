@@ -19,7 +19,11 @@ let sidecarStopping: Promise<void> | null = null;
 let sidecarStopped = false;
 // Per-launch secret: the sidecar refuses requests without it (backend/security.py),
 // so other local web pages cannot drive it. Renderer gets it via the preload.
-const apiToken = randomBytes(32).toString('hex');
+// AMV_TOKEN is a test-only override: the Windows smoke workflow launches the
+// installed app with a known token so it can drive the sidecar from PowerShell.
+// A short/guessable value is ignored so a stray env var can't weaken it.
+const forcedToken = process.env.AMV_TOKEN ?? '';
+const apiToken = forcedToken.length >= 32 ? forcedToken : randomBytes(32).toString('hex');
 
 type BootstrapStream = 'stdout' | 'stderr';
 type BootstrapEvent =
@@ -56,6 +60,12 @@ function flushBootstrap() {
 }
 
 function findFreePort(): Promise<number> {
+  // Test-only override so a headless smoke run knows where to find /health
+  // (the real app always asks the OS for a free port).
+  const forced = Number(process.env.AMV_SIDECAR_PORT || 0);
+  if (Number.isInteger(forced) && forced > 0 && forced < 65536) {
+    return Promise.resolve(forced);
+  }
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
@@ -148,6 +158,10 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
     env: {
       ...process.env,
       PYTHONUNBUFFERED: '1',
+      // Windows pipes default to the ANSI code page (cp1252): accented
+      // paths and '—' in the sidecar's log lines reached the bootstrap
+      // screen as '�'. Electron decodes the pipe as UTF-8.
+      PYTHONIOENCODING: 'utf-8',
       // macOS: PyTorch's MPS backend is missing some ops; without this flag an
       // unsupported op raises instead of falling back to CPU. No-op elsewhere.
       PYTORCH_ENABLE_MPS_FALLBACK: '1',
@@ -333,6 +347,53 @@ async function performCleanReinstall(): Promise<void> {
   app.exit(0);
 }
 
+// ── headless smoke-test hooks (CI only, inert for real users) ──────────────
+// The Windows smoke workflow (.github/scripts/windows-smoke.ps1) drives the
+// installed app through its sidecar. With AMV_SMOKE_CONTROL_DIR set, the app
+// polls that folder for command files: `shot-<tag>` (save a capture of the
+// window into AMV_SMOKE_SCREENSHOT_DIR), `reload` (reload the renderer, e.g.
+// after the backend was installed through the API) and `quit` (quit through
+// the normal path, sidecar shutdown included).
+const smokeShotDir = process.env.AMV_SMOKE_SCREENSHOT_DIR;
+const smokeControlDir = process.env.AMV_SMOKE_CONTROL_DIR;
+
+function captureSmokeShot(tag: string, delayMs = 1500) {
+  if (!smokeShotDir) return;
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.capturePage()
+      .then((image) => {
+        fs.mkdirSync(smokeShotDir, { recursive: true });
+        fs.writeFileSync(path.join(smokeShotDir, `${tag.replace(/[^\w-]/g, '_')}.png`), image.toPNG());
+        console.log(`[smoke] screenshot ${tag} written`);
+      })
+      .catch((err) => console.error('[smoke] screenshot failed', err));
+  }, delayMs);
+}
+
+function watchSmokeControlDir() {
+  if (!smokeControlDir) return;
+  const timer = setInterval(() => {
+    let names: string[] = [];
+    try { names = fs.readdirSync(smokeControlDir); } catch { return; }
+    for (const name of names) {
+      // Only our own command files are consumed (and deleted): a mistyped
+      // env var pointing at a real folder must never lose anyone's files.
+      if (name !== 'quit' && name !== 'reload' && !/^shot-[\w-]{1,40}$/.test(name)) continue;
+      try { fs.rmSync(path.join(smokeControlDir, name), { force: true }); } catch {}
+      console.log(`[smoke] control: ${name}`);
+      if (name === 'quit') {
+        clearInterval(timer);
+        app.quit();
+        return;
+      }
+      if (name === 'reload') mainWindow?.webContents.reload();
+      else if (name.startsWith('shot-')) captureSmokeShot(name.slice(5), 0);
+    }
+  }, 1000);
+  timer.unref();
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -351,6 +412,7 @@ async function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     rendererReady = true;
     flushBootstrap();
+    captureSmokeShot('startup');
   });
 
   if (useVite) {
@@ -365,8 +427,12 @@ app.whenReady().then(async () => {
   // resolves wheels. The sidecar boots concurrently and streams its stdout
   // / stderr into the renderer via amv:bootstrap events.
   await createWindow();
+  watchSmokeControlDir();
   startSidecar()
-    .then((port) => emitBootstrap({ kind: 'ready', port }))
+    .then((port) => {
+      emitBootstrap({ kind: 'ready', port });
+      captureSmokeShot('ready');
+    })
     .catch((err) => {
       console.error('Failed to start sidecar', err);
       emitBootstrap({ kind: 'error', message: String(err?.message ?? err) });

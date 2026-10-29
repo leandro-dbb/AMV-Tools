@@ -277,7 +277,7 @@ export interface AppSettings {
 }
 
 export interface TimelineFormat {
-  id: 'fcp7xml' | 'fcpxml' | 'edl' | 'otio';
+  id: 'fcp7xml' | 'fcpxml' | 'edl' | 'otio' | 'vegas' | 'aftereffects';
   extension: string;
   label: string;
   label_fr: string;

@@ -259,15 +259,20 @@ Where the button lives:
 - **Tags**: the selected scenes.
 - **Search**: the current result set.
 
-The dialog previews the clip count and total duration, then asks where to save
-the timeline. Formats:
+The dialog asks which editor you use (Premiere Pro, DaVinci Resolve, After
+Effects, Vegas Pro, Final Cut Pro, Other), shows how to import there, previews
+the clip count and total duration, then asks where to save the timeline.
+Step-by-step import guide with a 5-minute checklist per editor (FR):
+[docs/import-timeline.md](docs/import-timeline.md). Formats:
 
 | Format | Best for | Notes |
 | --- | --- | --- |
-| **FCP 7 XML** (xmeml v5) | Premiere Pro, Resolve, Vegas, AE via Premiere/Dynamic Link | Exact integer-frame in/out, NTSC flag, labels, markers. |
+| **FCP 7 XML** (xmeml v5) | Premiere Pro (also Resolve) | Exact integer-frame in/out, NTSC flag, labels, markers; `pathurl` spelled like Premiere's own exports (`file://localhost/C%3a/...`). |
 | **FCPXML 1.9** | Final Cut Pro 10.4+, Resolve | Rational times (`1001/24000s`), mixed source rates. |
-| **EDL CMX3600** | Any NLE, as a universal cut list | 8-char reel names and `* FROM CLIP NAME:` comments; no media paths. |
+| **EDL CMX3600** | Any NLE, as a universal cut list | 8-char reel names; `* FROM CLIP NAME:` / `* FROM FILE:` comments on one line each (what NLEs relink from). |
 | **OpenTimelineIO** | Resolve, Kdenlive, OTIO tools | Native OTIO JSON (with markers), written by AMV Tools itself — no extra package needed. |
+| **Vegas EDL text** (`.txt`) | Vegas Pro | Vegas' own event list (semicolons, milliseconds) for `File → Import → EDL Text File`; full source paths. |
+| **After Effects script** (`.jsx`) | After Effects | ExtendScript that imports the sources, creates the comp and places every clip with exact in/out. |
 
 Options in the dialog:
 
@@ -290,7 +295,7 @@ Options in the dialog:
   | --- | --- |
   | FCPXML, OpenTimelineIO | Relative to the timeline file: `timeline_media/clip.mp4`. Moving the timeline and its `_media` folder together keeps the media linked. |
   | EDL | No media path in the format; the `* FROM FILE:` comment carries the same relative path. |
-  | FCP 7 XML | **Absolute** `file://` URL of the copy, e.g. `file:///C:/Edits/timeline_media/clip.mp4`. |
+  | FCP 7 XML | **Absolute** `file://` URL of the copy, e.g. `file://localhost/C%3a/Edits/timeline_media/clip.mp4`. |
 
   Why FCP 7 XML stays absolute: xmeml's `<pathurl>` is a `file://` URL and
   Premiere Pro, Final Cut Pro 7, Resolve and Vegas do not resolve relative
@@ -325,15 +330,16 @@ and project are created automatically. FCP 7 XML can also be imported by FCP
 10 through `File → Import → XML…` in most versions; FCPXML is the recommended
 path.
 
-**Vegas Pro** — `File → Import → Final Cut Pro 7 XML…` (or use the bundled
-script/extension if your Vegas version hides the menu entry), then select the
-exported `.xml`. Relink to the collected `_media` folder if the originals
-moved.
+**Vegas Pro** — `File → Import → EDL Text File (*.txt)`, select the exported
+`.txt` (choose *Vegas Pro* in the dialog). Video lands on track 1, audio on
+track 2. Vegas 14+ can also try the FCP 7 XML through
+`File → Import → Final Cut Pro 7 / DaVinci Resolve Timeline (*.xml)`.
 
-**After Effects** — easiest path is Premiere + Dynamic Link as above. A
-standalone AE import can read the FCP 7 XML: `File → Import → File…`, choose
-the `.xml`, and select the sequence. Audio-only EDL workflows should use the
-EDL in the target NLE instead.
+**After Effects** — choose *After Effects* in the dialog, then in AE
+`File → Scripts → Run Script File…` and pick the `.jsx`: it imports each
+source once, creates a composition at the timeline's rate and size and places
+every clip as a layer with its exact in/out (one undo step). Missing files
+are listed in an alert; files next to the script are found too.
 
 **EDL in any NLE** — import the `.edl` as a pre-conformed/CMX3600 EDL. The
 `* FROM CLIP NAME:` and `* FROM FILE:` comment lines identify the source;

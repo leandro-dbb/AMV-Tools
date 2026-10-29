@@ -71,16 +71,25 @@ def _marker_dict(marker, clip, timeline: Timeline) -> dict:
 
 def _clip_dict(clip, timeline: Timeline) -> dict:
     src_rate = otio_rate(clip.source.fps)
+    seq_rate = otio_rate(timeline.sequence_fps)
     url = media_url(clip.source.path, base_dir=timeline.base_dir,
                     relative=timeline.path_mode == "relative")
     duration = clip.source.duration_frames or clip.out_frame
-    # Clip source_range is in the source timebase; OTIO places it on the
-    # track using that source_range, so gaps are explicit Gap items.
+    # start_time stays on the SOURCE rate (the exact source frame: rewriting
+    # it on the sequence rate landed a 23.976 clip one frame off in a 25 fps
+    # sequence once rendered by MLT). The duration is the PLACED duration on
+    # the sequence rate, so the track (sum of durations) lines up exactly
+    # with the record positions. OTIO RationalTimes carry their own rate;
+    # TimeRange arithmetic rescales.
     return {
         "OTIO_SCHEMA": "Clip.2",
         "metadata": _metadata(clip, timeline),
         "name": clip.name,
-        "source_range": _time_range(clip.in_frame, clip.out_frame - clip.in_frame, src_rate),
+        "source_range": {
+            "OTIO_SCHEMA": "TimeRange.1",
+            "duration": _rational(clip.record_duration, seq_rate),
+            "start_time": _rational(clip.in_frame, src_rate),
+        },
         "effects": [],
         "markers": [
             _marker_dict(m, clip, timeline)
@@ -127,6 +136,11 @@ def _track_dict(timeline: Timeline, kind: str) -> dict:
             children.append(_gap_dict(clip.record_start - cursor, seq_rate))
         children.append(_clip_dict(clip, timeline))
         cursor = clip.record_end
+    if kind == "Audio" and cursor < timeline.duration_frames:
+        # Audio is optional per source.  Without a trailing gap the audio
+        # track is shorter than the video track, which some readers (OTIO's
+        # own otiostat, Resolve) flag as an inconsistent timeline.
+        children.append(_gap_dict(timeline.duration_frames - cursor, seq_rate))
     return {
         "OTIO_SCHEMA": "Track.1",
         "metadata": {"amv": {"kind": kind}},
