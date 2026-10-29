@@ -28,7 +28,10 @@ class BatchExportRequest(BaseModel):
 
 
 def _sanitize(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "scene"
+    # \w is Unicode-aware: "Clip été 01" used to become "Clip_t_01", and
+    # "Pokémon" / Japanese titles lost their letters. Path separators and
+    # the characters Windows forbids are still replaced.
+    return re.sub(r"[^\w.-]+", "_", name).strip("_") or "scene"
 
 
 def _suffix_for_codec(codec: str) -> str:

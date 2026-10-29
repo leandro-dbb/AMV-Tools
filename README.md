@@ -567,6 +567,18 @@ so a CPU-only machine is enough. `uv sync --extra cpu` installs the test group
 automatically. Tests marked `slow` run the real finishing models on CPU and are
 skipped unless their weights are present (`AMV_TEST_DOWNLOAD=1` fetches them).
 
+End-to-end UI journey (the built Electron app + the real sidecar and models on
+CPU, driven by Playwright under its own Xvfb, throwaway profile):
+
+```bash
+cd app
+npm run build
+npm run e2e                                   # synthetic clips, ~5 min
+AMV_E2E_MEDIA="/path/to/Séries test" AMV_E2E_CAPTURES=/tmp/caps npm run e2e
+```
+
+The first run needs the SigLIP 2 and wd-tagger weights (~2 GB, Hugging Face cache).
+
 Create a local unsigned Windows installer:
 
 ```bash

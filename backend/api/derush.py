@@ -70,7 +70,8 @@ class ExportBody(BaseModel):
 
 
 def _sanitize(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip("_ ") or "scene"
+    # Keeps accented / Japanese letters (\w is Unicode-aware), see export.py.
+    return re.sub(r"[^\w. -]+", "_", name).strip("_ ") or "scene"
 
 
 # ── listing ─────────────────────────────────────────────────────────────────
@@ -280,6 +281,7 @@ def _export_worker(items: list[dict], export_settings: dict) -> None:
         state.publish({
             "type": "derush_export", "current": total, "total": total, "percent": 100,
             "message": f"{done} exported" + (f", {failed} failed" if failed else ""),
+            "exported_count": done, "failed_count": failed,
             "done": True, "ok": failed == 0,
             "output": str(base_dir / "derush"),
         })

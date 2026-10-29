@@ -13,6 +13,9 @@ import CharactersTab from './components/CharactersTab';
 import { SEARCHPLUS_EVENT } from './searchplus';
 import type { SearchPlusRequest } from './searchplus';
 import FinishQueue from './components/FinishQueue';
+import IndexingStatus from './components/IndexingStatus';
+import { fallbackLabel, nextFailures } from './indexProgress';
+import type { IndexFailure } from './indexProgress';
 import { api } from './api/client';
 import { useT } from './i18n';
 import type { TFunc } from './i18n';
@@ -31,6 +34,8 @@ export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
+  const [indexFailures, setIndexFailures] = useState<IndexFailure[]>([]);
+  const lastIndexType = useRef<string | null>(null);
   const [indexedCount, setIndexedCount] = useState<number>(0);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -123,6 +128,10 @@ export default function App() {
           try {
             const evt = JSON.parse(msg.data) as ProgressEvent;
             if (evt.type !== 'install') setProgress(evt);
+            if (evt.type === 'indexing' || evt.type === 'idle') {
+              setIndexFailures((prev) => nextFailures(prev, evt, lastIndexType.current));
+              lastIndexType.current = evt.type;
+            }
           } catch {}
         };
         ws.onclose = () => {
@@ -164,8 +173,20 @@ export default function App() {
       <div className="w-screen h-screen bg-[#0F0F11] flex items-center justify-center text-[#FAFAFA]">
         <div className="max-w-md text-center">
           <div className="text-2xl font-semibold mb-3">{t('app.unreachable.title')}</div>
-          <div className="text-[#A1A1AA] text-sm">{t('app.unreachable.body')}</div>
-          <pre className="mt-4 bg-[#18181B] border border-[#27272A] p-3 rounded-lg text-xs text-left text-[#A1A1AA]">uv run --extra cu130 backend/server.py --port 8731</pre>
+          {window.amvBridge ? (
+            // Inside the app the sidecar was started for the user: a shell
+            // command means nothing to an editor. Status keeps polling, so
+            // the app recovers by itself if the sidecar comes back.
+            <>
+              <div className="text-[#A1A1AA] text-sm">{t('journey.unreachable.app')}</div>
+              <div className="mt-3 text-xs text-[#71717A] break-all">{statusError}</div>
+            </>
+          ) : (
+            <>
+              <div className="text-[#A1A1AA] text-sm">{t('app.unreachable.body')}</div>
+              <pre className="mt-4 bg-[#18181B] border border-[#27272A] p-3 rounded-lg text-xs text-left text-[#A1A1AA]">uv run --extra cu130 backend/server.py --port 8731</pre>
+            </>
+          )}
         </div>
       </div>
     );
@@ -227,7 +248,7 @@ export default function App() {
             {t('app.fallback.banner', {
               requested: status.requested_device ?? status.device,
               active: status.device,
-              reason: status.device_fallback,
+              reason: fallbackLabel(status.device_fallback, t),
             })}
           </span>
           <button
@@ -240,7 +261,7 @@ export default function App() {
       )}
 
       <div className="flex-1 overflow-hidden relative">
-        {activeTab === 'library' && <LibraryTab />}
+        {activeTab === 'library' && <LibraryTab progress={progress} failures={indexFailures} />}
         {activeTab === 'search' && (
           <SearchTab hoverDelayMs={hoverDelay} request={searchRequest} onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />
         )}
@@ -310,22 +331,8 @@ function StatusBar({
     <div className="bg-gradient-to-r from-[#18181B] via-[#0F0F11] to-[#18181B] border-t-2 border-[#27272A] px-6 py-3 backdrop-blur-sm">
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-center gap-3 min-w-0">
-          {isIndexing ? (
-            <>
-              <div className="relative">
-                <div className="w-3 h-3 bg-[#8B5CF6] rounded-full animate-pulse shadow-lg shadow-[#8B5CF6]/50"></div>
-                <div className="absolute inset-0 w-3 h-3 bg-[#8B5CF6] rounded-full animate-ping opacity-75"></div>
-              </div>
-              <span className="text-[#A1A1AA]">{t('app.statusbar.indexing')}</span>
-              <span className="text-[#FAFAFA] font-semibold truncate max-w-[280px]">{progress?.video ?? '...'}</span>
-              <div className="w-32 h-1.5 bg-[#27272A] rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] rounded-full transition-all" style={{ width: `${percent}%` }}></div>
-              </div>
-              <span className="text-[#8B5CF6] font-mono font-bold text-xs">{percent}%</span>
-              <button onClick={() => api.stopIndexing()} title={t('app.statusbar.stopIndexing')} className="ml-2 p-1 rounded-md text-[#71717A] hover:text-red-400 hover:bg-[#27272A]">
-                <Square size={12} fill="currentColor" />
-              </button>
-            </>
+          {isIndexing && progress ? (
+            <IndexingStatus progress={progress} percent={percent} />
           ) : isAnalysis ? (
             <>
               <div className="w-3 h-3 bg-[#6366F1] rounded-full animate-pulse"></div>

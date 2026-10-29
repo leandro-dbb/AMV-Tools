@@ -78,7 +78,7 @@ export const onboardingStrings: Dict = {
     fr: 'L\'installation a échoué. Réessayez ce backend ou choisissez CPU pour ouvrir l\'application.',
   },
   'onboarding.tryAnother': { en: 'Try another backend', fr: 'Essayer un autre backend' },
-  'onboarding.version': { en: 'AMV Tools v0.3 alpha', fr: 'AMV Tools v0.3 alpha' },
+  'onboarding.version': { en: 'AMV Tools v0.4 alpha', fr: 'AMV Tools v0.4 alpha' },
 
   // Indexing preference question (speed vs quality)
   'onboarding.profile.title': { en: 'How should your episodes be indexed?', fr: 'Comment indexer tes épisodes ?' },
