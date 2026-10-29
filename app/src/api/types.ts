@@ -108,7 +108,7 @@ export interface VideoSummary {
   fps: number;
   resolution: string;
   scene_count: number;
-  status: 'pending' | 'indexing' | 'completed' | 'failed';
+  status: 'pending' | 'indexing' | 'completed' | 'tags_only' | 'embeddings_only' | 'cancelled' | 'failed';
   group_name: string | null;
   derushed: boolean;
 }

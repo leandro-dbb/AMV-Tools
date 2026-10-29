@@ -232,7 +232,7 @@ export const api = {
     }),
 
   listDatabases: () =>
-    req<{ databases: { path: string; scenes: number; videos: number; size_kb: number; primary: boolean }[] }>(
+    req<{ databases: { path: string; scenes: number; videos: number; incomplete?: number; size_kb: number; primary: boolean }[] }>(
       '/api/databases'
     ),
   setPrimaryDatabase: (path: string) =>
