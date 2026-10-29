@@ -184,6 +184,22 @@ class _Scaler:
         return ((res * 65535.0).to(torch.int32) >> 8).to(torch.uint8)
 
 
+def _bit_depth(path: str, reported: int) -> int:
+    """The decoder's demuxer reports 8 bits for 10-bit HEVC in Matroska (the
+    usual anime release): the frames then came as 16-bit samples read as
+    8-bit ones and the pass failed. Trust the stream's pixel format."""
+    try:
+        with cuts.av.open(path) as c:
+            pix = c.streams.video[0].codec_context.pix_fmt or ""
+    except Exception:
+        return reported
+    if "p10" in pix or pix.endswith("10le") or pix.endswith("10be"):
+        return 10
+    if "p12" in pix or pix.endswith("12le"):
+        return 12
+    return reported
+
+
 def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
                             cancelled: Optional[Callable[[], bool]] = None):
     """Same contract as :func:`onepass.detect_cuts_and_medians`, or None when
@@ -199,7 +215,7 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         return None
     try:
         dmx = nvc.CreateDemuxer(filename=path)
-        depth = dmx.BitDepth()
+        depth = _bit_depth(path, dmx.BitDepth())
         codec = str(dmx.GetNvCodecId()).split(".")[-1].lower()
         if (codec, depth) not in (("h264", 8), ("hevc", 8), ("hevc", 10)):
             return None
