@@ -44,6 +44,7 @@ def list_databases():
             "path": db,
             "scenes": stats["scenes"],
             "videos": stats["videos"],
+            "incomplete": stats["incomplete"],
             "size_kb": stats["size_kb"],
             "primary": db == state.primary_db,
         })

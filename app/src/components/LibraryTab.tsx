@@ -19,7 +19,7 @@ let leftoverChecked = false;
 
 export default function LibraryTab({ progress = null, failures = [] }: { progress?: ProgressEvent | null; failures?: IndexFailure[] } = {}) {
   const t = useT();
-  const [databases, setDatabases] = useState<{ path: string; scenes: number; videos: number; size_kb: number; primary: boolean }[]>([]);
+  const [databases, setDatabases] = useState<{ path: string; scenes: number; videos: number; incomplete?: number; size_kb: number; primary: boolean }[]>([]);
   const [queue, setQueue] = useState<IndexQueueItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -64,8 +64,8 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
   useEffect(() => { refresh().catch(() => {}); }, [indexing, finishedFile, progress?.file_index]);
 
   const totals = useMemo(() => databases.reduce(
-    (acc, db) => ({ videos: acc.videos + db.videos, scenes: acc.scenes + db.scenes }),
-    { videos: 0, scenes: 0 },
+    (acc, db) => ({ videos: acc.videos + db.videos, scenes: acc.scenes + db.scenes, incomplete: acc.incomplete + (db.incomplete ?? 0) }),
+    { videos: 0, scenes: 0, incomplete: 0 },
   ), [databases]);
 
   async function addFolder() {
@@ -123,7 +123,7 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
     refresh();
   };
 
-  const libraryEmpty = totals.videos === 0 && queue.length === 0;
+  const libraryEmpty = totals.videos === 0 && totals.incomplete === 0 && queue.length === 0;
 
   return (
     <div className="h-full overflow-auto relative">
@@ -221,6 +221,18 @@ export default function LibraryTab({ progress = null, failures = [] }: { progres
             </div>
           )}
         </div>
+
+        {totals.incomplete > 0 && !indexing && (
+          <div data-testid="library-incomplete" className="bg-[#F59E0B]/10 border-2 border-[#F59E0B]/40 rounded-xl p-4 flex items-center gap-3 flex-wrap">
+            <AlertTriangle size={15} className="text-[#FBBF24] shrink-0" />
+            <span className="text-sm text-[#FAFAFA] flex-1 min-w-[240px]">{t('fix.library.incomplete', { n: totals.incomplete })}</span>
+            {queue.length === 0 && (
+              <button disabled={busy} onClick={() => startIndex(['tag', 'embed'])} className="bg-[#F59E0B] text-[#0F0F11] px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 flex items-center gap-2">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} {t('fix.library.resume')}
+              </button>
+            )}
+          </div>
+        )}
 
         {failures.length > 0 && (
           <div role="alert" className="bg-red-500/10 border-2 border-red-500/40 rounded-xl p-4">
@@ -366,6 +378,9 @@ function EpisodeFoldersPanel({ refreshKey }: { refreshKey?: string }) {
     >
       <GripVertical size={10} className="text-[#3F3F46] shrink-0" />
       <span className="truncate max-w-[240px]">{v.display_name}</span>
+      {!['completed', 'tags_only', 'embeddings_only'].includes(v.status) && (
+        <span className="px-1 rounded bg-[#F59E0B]/20 text-[#FBBF24] text-[10px] shrink-0" title={t('fix.library.incompleteChip.title')}>{t('fix.library.incompleteChip')}</span>
+      )}
     </div>
   );
 

@@ -13,6 +13,7 @@ const STAGES: [RegExp, string][] = [
   [/^Tagged (\d+)\/(\d+)/, 'journey.stage.tag'],
   [/^Embedding (\d+) scenes/, 'journey.stage.embedStart'],
   [/^Embedded (\d+)\/(\d+)/, 'journey.stage.embed'],
+  [/^Resuming: (\d+) scenes tagged, (\d+) embedded/, 'fix.stage.resume'],
   [/^Already indexed/, 'journey.stage.skipped'],
   [/^Done/, 'journey.stage.done'],
 ];
