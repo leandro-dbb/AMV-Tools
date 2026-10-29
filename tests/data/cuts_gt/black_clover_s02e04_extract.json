@@ -1,0 +1,263 @@
+{
+ "video": "Black Clover S02E04 - extrait.mkv",
+ "fps": "24000/1001",
+ "n_frames": 3717,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 7,
+   "t_ms": 292,
+   "pts": 292
+  },
+  {
+   "frame": 35,
+   "t_ms": 1460,
+   "pts": 1460,
+   "note": "35-52 is one shaky push-in on the demon eye (framing jumps every 2 frames); see ambiguous 37"
+  },
+  {
+   "frame": 53,
+   "t_ms": 2211,
+   "pts": 2211
+  },
+  {
+   "frame": 137,
+   "t_ms": 5714,
+   "pts": 5714
+  },
+  {
+   "frame": 181,
+   "t_ms": 7549,
+   "pts": 7549
+  },
+  {
+   "frame": 243,
+   "t_ms": 10135,
+   "pts": 10135
+  },
+  {
+   "frame": 284,
+   "t_ms": 11845,
+   "pts": 11845,
+   "note": "old shot (hand) is smeared out by a full-screen white streak effect 269-283; new shot (dark claws) appears abruptly at 284 under residual streaks"
+  },
+  {
+   "frame": 317,
+   "t_ms": 13222,
+   "pts": 13222,
+   "note": "new shot starts on 2 dark frames (317-318), cloak whips past camera 319-320, figure visible from 321"
+  },
+  {
+   "frame": 371,
+   "t_ms": 15474,
+   "pts": 15474
+  },
+  {
+   "frame": 397,
+   "t_ms": 16558,
+   "pts": 16558
+  },
+  {
+   "frame": 427,
+   "t_ms": 17810,
+   "pts": 17810,
+   "note": "from blurred white spike-explosion (422-426) to dark wide view; part of a fast tracking fight sequence 397-492"
+  },
+  {
+   "frame": 493,
+   "t_ms": 20562,
+   "pts": 20562
+  },
+  {
+   "frame": 529,
+   "t_ms": 22064,
+   "pts": 22064
+  },
+  {
+   "frame": 595,
+   "t_ms": 24817,
+   "pts": 24817,
+   "note": "previous shot ends on full-white frames 589-594 (white blast from within the shot)"
+  },
+  {
+   "frame": 625,
+   "t_ms": 26068,
+   "pts": 26068
+  },
+  {
+   "frame": 683,
+   "t_ms": 28487,
+   "pts": 28487
+  },
+  {
+   "frame": 763,
+   "t_ms": 31824,
+   "pts": 31824
+  },
+  {
+   "frame": 871,
+   "t_ms": 36328,
+   "pts": 36328
+  },
+  {
+   "frame": 955,
+   "t_ms": 39832,
+   "pts": 39832,
+   "note": "hard cut to black (black 955-1015)"
+  },
+  {
+   "frame": 1213,
+   "t_ms": 50592,
+   "pts": 50592
+  },
+  {
+   "frame": 1317,
+   "t_ms": 54930,
+   "pts": 54930
+  },
+  {
+   "frame": 1455,
+   "t_ms": 60686,
+   "pts": 60686
+  },
+  {
+   "frame": 1587,
+   "t_ms": 66191,
+   "pts": 66191
+  },
+  {
+   "frame": 1695,
+   "t_ms": 70696,
+   "pts": 70696
+  },
+  {
+   "frame": 1749,
+   "t_ms": 72948,
+   "pts": 72948
+  },
+  {
+   "frame": 1815,
+   "t_ms": 75701,
+   "pts": 75701
+  },
+  {
+   "frame": 1935,
+   "t_ms": 80706,
+   "pts": 80706
+  },
+  {
+   "frame": 2057,
+   "t_ms": 85794,
+   "pts": 85794
+  },
+  {
+   "frame": 2087,
+   "t_ms": 87046,
+   "pts": 87046,
+   "note": "followed by a fast pan/blur 2087-2091 within the new shot"
+  },
+  {
+   "frame": 2147,
+   "t_ms": 89548,
+   "pts": 89548
+  },
+  {
+   "frame": 2213,
+   "t_ms": 92301,
+   "pts": 92301
+  },
+  {
+   "frame": 2357,
+   "t_ms": 98307,
+   "pts": 98307
+  },
+  {
+   "frame": 2429,
+   "t_ms": 101310,
+   "pts": 101310
+  },
+  {
+   "frame": 2699,
+   "t_ms": 112571,
+   "pts": 112571
+  },
+  {
+   "frame": 2865,
+   "t_ms": 119495,
+   "pts": 119495
+  },
+  {
+   "frame": 2976,
+   "t_ms": 124124,
+   "pts": 124124,
+   "note": "hard cut to black (black 2976-3000)"
+  },
+  {
+   "frame": 3129,
+   "t_ms": 130506,
+   "pts": 130506
+  },
+  {
+   "frame": 3225,
+   "t_ms": 134510,
+   "pts": 134510,
+   "note": "new shot starts dim and brightens within the shot (~3240-3262), not a dissolve"
+  },
+  {
+   "frame": 3309,
+   "t_ms": 138013,
+   "pts": 138013
+  },
+  {
+   "frame": 3393,
+   "t_ms": 141517,
+   "pts": 141517
+  },
+  {
+   "frame": 3644,
+   "t_ms": 151986,
+   "pts": 151986
+  },
+  {
+   "frame": 3689,
+   "t_ms": 153862,
+   "pts": 153862
+  }
+ ],
+ "dissolves": [
+  {
+   "start": 1016,
+   "end": 1039,
+   "note": "fade-in from black of letterboxed sky shot; 1016 = first non-black frame, 1039 = last frame still fading (1040 full level). Preceded by black 955-1015."
+  },
+  {
+   "start": 3001,
+   "end": 3024,
+   "note": "fade-in from black; 3001 = first non-black frame, 3024 = last fading frame (3025 full level). Preceded by black 2976-3000."
+  },
+  {
+   "start": 3544,
+   "end": 3567,
+   "note": "fade-out to black of the townsfolk shot (3393-); 3544 = first darkened frame, 3567 = last frame with visible content; black 3568-3570"
+  },
+  {
+   "start": 3571,
+   "end": 3588,
+   "note": "fade-in from black of a dark stone-wall/alley shot; 3571 = first non-black frame, 3588 = last fading frame (3589 full level). Together with the previous entry this is a fade-through-black transition 3544-3588."
+  }
+ ],
+ "ambiguous": [
+  {
+   "frame": 421,
+   "why": "single-frame insert (different dark framing with flash) between 420 and 422 which belong to the same spike-explosion shot; counted as an impact/flash frame, not a cut. A detector may fire at 421 and/or 422."
+  },
+  {
+   "frame": 37,
+   "why": "inside 35-52 (demon close-up), the framing jumps every 2 frames as a shaky push-in toward the eye; 37 (and to a lesser degree 39, 47, 49, 51) could be read as micro-cuts. Treated as one shot."
+  }
+ ],
+ "method": "All 3717 frames decoded with ffmpeg -fps_mode passthrough to 320x180 RGB. Per-pair scores: mean abs RGB diff, HSV (16x4x8) histogram L1/2 distance, edge change ratio, 10x10 block-change fraction, and a motion-compensated block residual (80x40, +-6 px search). Candidate set (mad>12 | hd>0.25 | ecr>0.55 | blk>0.35 | mad>3x and hd>3x local +-12 median | ecr>2.5x local median) = 526 frames. Because frames 0-1200 are a stylised high-motion fight (one-take tracking camera, smears, flashes), every frame 0-1199 was inspected on 10x10 filmstrips (160x90) plus 266/320-px detail strips for 29-58, 74-103, 255-323, 341-352, 398-499, 527-544, 572-589, 693-734, 2056-2096, 2863-2886. Frames 1200-3716 (calm dialogue scenes) were inspected on step-2 filmstrips and every metric spike there (mc local ratio>3, hd>0.15, mad>12, ecr>0.5; 80 frames) was explained. Each cut verified on n-1|n|n+1 320-px sheets (/tmp/gt/sheets/bc_cuts_0[1-5]*.png, doubts in bc_doubts_01.png). Fade boundaries from per-frame mean luminance.",
+ "pts_note": "time_base 1/1000, stream start_time 0, pts of frame 0 = 0; pts deltas are 41/42 ms (regular 24000/1001 CFR) except the last frame: 3715 -> 3716 jumps 167 ms (pts 154947 -> 155114) because packets are missing at the cut end of the extract. Decoded frame count 3717 equals packet count."
+}

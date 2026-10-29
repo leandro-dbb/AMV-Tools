@@ -33,6 +33,8 @@ import av
 import av.error
 import numpy as np
 
+from . import shotdetect
+
 # PyAV 15+ exposes FFmpegError; older releases called it AVError. Resolve once
 # so a CPU-only machine can still fall back cleanly when NVDEC init fails.
 _AV_ERROR = getattr(av, "AVError", av.error.FFmpegError)
@@ -407,11 +409,13 @@ def _detect_cuts_via_ffmpeg_hw(
     )
 
     cuts_ms: List[int] = [0]
-    prev_hist: Optional[np.ndarray] = None
     frame_idx = -1
     fps_safe = fps if fps > 0 else 30.0
-    recent: list = []   # planes since the previous sample, for the exact cut
-    last_detect_ms = 0
+    detector = shotdetect.ShotDetector(threshold)
+
+    def add(found: List[int]) -> None:
+        for c in found:
+            cuts_ms.append(max(cuts_ms[-1] + 1, int((c / fps_safe) * 1000)))
 
     try:
         assert proc.stdout is not None
@@ -425,26 +429,12 @@ def _detect_cuts_via_ffmpeg_hw(
                 # remainder so the reshape doesn't blow up.
                 buf = buf + bytes(frame_bytes - len(buf))
             frame_idx += 1
-            recent.append(buf)
-            if frame_idx % _FRAME_STRIDE != 0:
-                continue
-            between, recent = recent, [buf]
-            hist_norm = _hist_from_plane_bytes(buf, w, h)
-            if frame_sink is not None:
-                frame_sink(int((frame_idx / fps_safe) * 1000),
-                           np.frombuffer(buf, dtype=np.uint8).reshape(h, w))
-            if prev_hist is not None:
-                diff = float(np.abs(hist_norm - prev_hist).sum()) * 0.5
-                if diff > threshold:
-                    ts_ms = int((frame_idx / fps_safe) * 1000)
-                    # gap rule on the sampled instants: same decisions as
-                    # before, only the reported position is refined
-                    if ts_ms > last_detect_ms + _MIN_CUT_GAP_MS:
-                        last_detect_ms = ts_ms
-                        exact = _exact_cut_index(frame_idx, between,
-                                                 lambda b: _hist_from_plane_bytes(b, w, h))
-                        cuts_ms.append(max(cuts_ms[-1] + 1, int((exact / fps_safe) * 1000)))
-            prev_hist = hist_norm
+            plane = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
+            # every frame goes to the cut detector; motion analysis samples
+            add(detector.push(plane))
+            if frame_sink is not None and frame_idx % _FRAME_STRIDE == 0:
+                frame_sink(int((frame_idx / fps_safe) * 1000), plane)
+        add(detector.finish())
     finally:
         try:
             if proc.stdout:
@@ -496,57 +486,49 @@ def _detect_cuts_via_pyav(path: str, threshold: float,
                           frame_sink: Optional[Callable[[int, np.ndarray], None]] = None) -> List[int]:
     container, _used_nvdec = _open_for_decode(path)
     cuts_ms: List[int] = [0]
-    prev_hist: Optional[np.ndarray] = None
+    detector = shotdetect.ShotDetector(threshold)
+    times: dict[int, int] = {}      # recent frame index -> ms (a cut is confirmed a few frames late)
+
+    def add(found: List[int]) -> None:
+        for c in found:
+            cuts_ms.append(max(cuts_ms[-1] + 1, times.get(c, cuts_ms[-1] + 1)))
+
     try:
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
 
         frame_idx = -1
-        last_detect_ms = 0
-        recent: list = []   # frames since the previous sample, for the exact cut
         for frame in container.decode(stream):
             frame_idx += 1
-            recent.append(frame)
-            if frame_idx % _FRAME_STRIDE != 0:
-                continue
-            between, recent = recent, [frame]
             ts_ms = int(frame.time * 1000) if frame.time is not None else 0
             try:
                 small = _cpu_downscale(frame)
             except _AV_ERROR:
                 continue
-            hist_norm = _hist_from_av_plane(small)
-            if frame_sink is not None:
-                plane = small.planes[0]
-                stride = plane.line_size or _DIFF_W
-                frame_sink(ts_ms, np.frombuffer(plane, dtype=np.uint8)
-                           .reshape(_DIFF_H, stride)[:, :_DIFF_W].copy())
-            if prev_hist is not None:
-                diff = float(np.abs(hist_norm - prev_hist).sum()) * 0.5
-                if diff > threshold and ts_ms > last_detect_ms + _MIN_CUT_GAP_MS:
-                    last_detect_ms = ts_ms
-                    exact = _exact_cut_index(len(between) - 1, between,
-                                             lambda f: _hist_from_av_plane(_cpu_downscale(f)))
-                    first = between[exact] if 0 <= exact < len(between) else frame
-                    cut_ts = int(first.time * 1000) if first.time is not None else ts_ms
-                    cuts_ms.append(max(cuts_ms[-1] + 1, cut_ts))
-            prev_hist = hist_norm
+            plane = small.planes[0]
+            stride = plane.line_size or _DIFF_W
+            gray = np.frombuffer(plane, dtype=np.uint8).reshape(_DIFF_H, stride)[:, :_DIFF_W].copy()
+            times[frame_idx] = ts_ms
+            times.pop(frame_idx - 4 * shotdetect.LOOKAHEAD, None)
+            add(detector.push(gray))
+            if frame_sink is not None and frame_idx % _FRAME_STRIDE == 0:
+                frame_sink(ts_ms, gray)
+        add(detector.finish())
     finally:
         container.close()
     return cuts_ms
 
 
 # ── Public entry point ──────────────────────────────────────────────────────
-def detect_cuts(path: str, threshold: float = 0.30,
+def detect_cuts(path: str, threshold: float = 0.40,
                 frame_sink: Optional[Callable[[int, np.ndarray], None]] = None) -> List[Tuple[int, int]]:
     """Return list of (start_ms, end_ms) tuples for the detected scenes.
 
     ``frame_sink(ts_ms, gray_160x90)`` — optional callback receiving every
     sampled low-res frame, so motion analysis reuses this decode pass.
 
-    `threshold` is the L1 distance between consecutive normalized intensity
-    histograms; range is [0, 1]. Defaults to 0.30 — empirically close to the
-    legacy `select=gt(scene,0.30)` ffmpeg filter on anime content.
+    Every frame goes through :mod:`shotdetect`; `threshold` (Settings >
+    Indexing, default 0.40) scales the change it needs (lower = more cuts).
     """
     info = probe_video(path)
     duration_ms = info["duration_ms"]
