@@ -76,18 +76,50 @@ def test_equivalent_outputs():
     assert not choose.equivalent(ref, bad)
 
 
-def test_time_parallel_finds_the_engine_width():
-    """A decoder with two units: 2 jobs in flight halve the time per job, 4
-    don't add anything -> 2 is kept."""
-    units = threading.Semaphore(2)
+class _TwoUnitEngine:
+    """A decoder with two hardware units, on a virtual clock: n jobs in
+    flight run min(n, 2) at a time, each 40 ms. No sleep, no real timing —
+    the measure used to be wall-clock and failed on a loaded machine."""
 
-    def job():
-        with units:
-            time.sleep(0.04)
+    def __init__(self):
+        self.now = 0.0
+        self.width = 1
 
-    measures = bench.time_parallel(job, (1, 2, 4), lambda: False)
-    assert set(measures) <= {1, 2, 4} and 1 in measures and 2 in measures
-    assert measures[2] < measures[1] * 0.7
+    def perf_counter(self) -> float:
+        return self.now
+
+    def executor(self, max_workers: int, thread_name_prefix: str = ""):
+        engine = self
+        engine.width = max_workers
+
+        class _Pool:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def submit(self, fn):
+                from concurrent.futures import Future
+                fut: Future = Future()
+                try:
+                    fut.set_result(fn())
+                except Exception as e:  # pragma: no cover
+                    fut.set_exception(e)
+                engine.now += 0.04 / min(engine.width, 2)
+                return fut
+        return _Pool()
+
+
+def test_time_parallel_finds_the_engine_width(monkeypatch):
+    """2 jobs in flight halve the time per job, 4 don't add anything -> 2 is
+    kept."""
+    engine = _TwoUnitEngine()
+    monkeypatch.setattr(bench, "time", engine)
+    monkeypatch.setattr(bench, "ThreadPoolExecutor", engine.executor)
+
+    measures = bench.time_parallel(lambda: None, (1, 2, 4), lambda: False)
+    assert measures == {1: 0.04, 2: 0.02, 4: 0.02}
     assert choose.smallest_within(measures) == 2
 
 
@@ -256,7 +288,7 @@ def test_effective_batch_uses_the_tuning_within_the_tier(tuned):
 
 
 # ── background thread + API ─────────────────────────────────────────────────
-def _wait(pred, timeout=5.0):
+def _wait(pred, timeout=30.0):   # a poll, not a timing assertion: generous under load
     end = time.monotonic() + timeout
     while time.monotonic() < end and not pred():
         time.sleep(0.02)
