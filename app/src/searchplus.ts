@@ -49,3 +49,16 @@ export function countActiveFilters(f: SearchFilters): number {
   if (f.duration_min_ms != null || f.duration_max_ms != null) n++;
   return n;
 }
+
+type SearchSort = 'relevance' | 'duration' | 'video' | 'random';
+
+/** Search tab starting values from Settings > Search (threshold in %). */
+export function searchDefaults(s: { threshold?: number; max_results?: number; sort?: string } | undefined): { threshold: number; sort: SearchSort; maxResults: number } {
+  const sorts: SearchSort[] = ['relevance', 'duration', 'video', 'random'];
+  const th = typeof s?.threshold === 'number' && isFinite(s.threshold) ? Math.round(s.threshold * 100) : 10;
+  return {
+    threshold: Math.min(100, Math.max(0, th)),
+    sort: sorts.includes(s?.sort as SearchSort) ? (s!.sort as SearchSort) : 'relevance',
+    maxResults: typeof s?.max_results === 'number' && s.max_results > 0 ? s.max_results : 200,
+  };
+}

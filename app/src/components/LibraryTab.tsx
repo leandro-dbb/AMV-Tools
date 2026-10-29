@@ -3,17 +3,21 @@
 // screen a newcomer needs, so the import flow is front and centre; database
 // management is tucked behind an "advanced" disclosure.
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, GripVertical, HardDrive, Layers, Link, Loader2, Pencil, Plus, RefreshCw, Target, Trash2, Zap } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, GripVertical, HardDrive, Layers, Link, Loader2, Pencil, Plus, RefreshCw, Target, Trash2, X, Zap } from 'lucide-react';
 import { api } from '../api/client';
-import type { IndexQueueItem, VideoSummary } from '../api/types';
+import type { IndexQueueItem, ProgressEvent, VideoSummary } from '../api/types';
+import type { IndexFailure } from '../indexProgress';
 import { useT } from '../i18n';
+import { droppedPaths } from '../dropPaths';
 
 const VIDEO_FILE_FILTERS = [{
   name: 'Video',
   extensions: ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'webm', 'ts', 'm2ts', 'mts', 'mpg', 'mpeg', 'vob', 'm4v', 'f4v', '3gp', 'ogv', 'mxf'],
 }];
 
-export default function LibraryTab() {
+let leftoverChecked = false;
+
+export default function LibraryTab({ progress = null, failures = [] }: { progress?: ProgressEvent | null; failures?: IndexFailure[] } = {}) {
   const t = useT();
   const [databases, setDatabases] = useState<{ path: string; scenes: number; videos: number; size_kb: number; primary: boolean }[]>([]);
   const [queue, setQueue] = useState<IndexQueueItem[]>([]);
@@ -29,7 +33,35 @@ export default function LibraryTab() {
     setQueue(q.items);
   }
 
+  // Queue left from a previous session (app closed mid-indexing, or folders
+  // added but never started): nothing said so, and nothing resumes it.
+  // Checked once per app launch (first visit of the tab).
+  const [leftover, setLeftover] = useState(false);
+  useEffect(() => {
+    if (leftoverChecked) return;
+    leftoverChecked = true;
+    api.queue().then((q) => {
+      if (q.items.length > 0 && progress?.type !== 'indexing') setLeftover(true);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => { refresh().catch(() => {}); }, []);
+
+  // First run: SigLIP 2 + wd-tagger are fetched when the first indexing
+  // starts, with no progress of their own. Say it before the user waits.
+  const [missingModels, setMissingModels] = useState<string[]>([]);
+  useEffect(() => {
+    api.modelsStatus().then((r) => setMissingModels(
+      r.models.filter((m) => m.enabled && !m.present && (m.key === 'siglip' || m.key === 'wd_tagger')).map((m) => m.label),
+    )).catch(() => {});
+  }, []);
+
+  // Indexing runs in the sidecar: follow it so the episode list and the
+  // queue do not stay frozen on what they were when the tab opened.
+  const indexing = progress?.type === 'indexing';
+  const finishedFile = indexing && (progress?.percent ?? 0) >= 100 ? progress?.video : null;
+  useEffect(() => { refresh().catch(() => {}); }, [indexing, finishedFile, progress?.file_index]);
 
   const totals = useMemo(() => databases.reduce(
     (acc, db) => ({ videos: acc.videos + db.videos, scenes: acc.scenes + db.scenes }),
@@ -43,7 +75,14 @@ export default function LibraryTab() {
     refresh();
   }
 
+  async function removeQueued(id: number) {
+    await api.removeFromQueue(id).catch(() => {});
+    refresh();
+  }
+
   async function startIndex(phases: ('tag' | 'embed')[]) {
+    if (busy || indexing) return;
+    setLeftover(false);
     setBusy(true);
     try { await api.startIndexing(phases); }
     finally { setBusy(false); refresh(); }
@@ -78,8 +117,7 @@ export default function LibraryTab() {
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = Array.from(e.dataTransfer.files) as (File & { path?: string })[];
-    const paths = files.map((f) => f.path).filter(Boolean) as string[];
+    const paths = droppedPaths(Array.from(e.dataTransfer.files));
     if (paths.length === 0) return;
     await api.enqueue(paths.map((p) => ({ path: p, recursive: true, group: importGroup.trim() || null })));
     refresh();
@@ -130,7 +168,10 @@ export default function LibraryTab() {
 
           {queue.length > 0 && (
             <div className="mt-4 border-t-2 border-[#27272A] pt-4">
-              <div className="text-sm font-semibold text-[#FAFAFA] mb-2">{t('library.queue.title')}</div>
+              <div className="text-sm font-semibold text-[#FAFAFA] mb-2 flex items-center gap-2">
+                {indexing && <Loader2 size={14} className="animate-spin text-[#8B5CF6]" />}
+                {indexing ? t('journey.library.running') : t('library.queue.title')}
+              </div>
               <div className="space-y-1 max-h-44 overflow-auto mb-4">
                 {queue.map((q) => (
                   <div key={q.id} className="text-xs font-mono text-[#A1A1AA] flex items-center gap-2 py-1 px-2 hover:bg-[#27272A]/50 rounded">
@@ -139,32 +180,63 @@ export default function LibraryTab() {
                     {q.group_name && (
                       <span className="px-1.5 py-0.5 rounded bg-[#F59E0B]/20 text-[#FBBF24] text-[10px] shrink-0">→ {q.group_name}</span>
                     )}
+                    {!indexing && (
+                      <button onClick={() => removeQueued(q.id)} title={t('journey.library.removeQueued')} aria-label={t('journey.library.removeQueued')} className="p-0.5 text-[#71717A] hover:text-red-400 shrink-0">
+                        <X size={12} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
+              {leftover && !indexing && (
+                <div data-testid="queue-leftover" className="text-xs text-[#A1A1AA] bg-[#8B5CF6]/10 border border-[#8B5CF6]/30 rounded-lg px-3 py-2 mb-3">
+                  {t('journey.library.leftover')}
+                </div>
+              )}
+              {missingModels.length > 0 && !indexing && (
+                <div data-testid="models-download-note" className="text-xs text-[#FBBF24] bg-[#F59E0B]/10 border border-[#F59E0B]/30 rounded-lg px-3 py-2 mb-3">
+                  {t('journey.library.modelsDownload', { models: missingModels.join(' + ') })}
+                </div>
+              )}
               <div className="flex items-center gap-3 flex-wrap">
                 <button
-                  disabled={busy}
+                  disabled={busy || indexing}
                   onClick={() => startIndex(['tag', 'embed'])}
                   className="bg-gradient-to-r from-[#8B5CF6] to-[#EC4899] text-[#FAFAFA] px-6 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-30 flex items-center gap-2"
                 >
                   {busy ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} {t('library.index.start', { n: queue.length })}
                 </button>
-                <span className="text-xs text-[#71717A] flex-1 min-w-[200px]">{t('library.index.explain')}</span>
+                <span className="text-xs text-[#71717A] flex-1 min-w-[200px]">{indexing ? t('journey.library.runningHint') : t('library.index.explain')}</span>
               </div>
               <div className="text-xs text-[#71717A] mt-3">
                 {t('library.index.advanced')}
-                <button disabled={busy} onClick={() => startIndex(['tag'])} title={t('settings.db.tagsOnly.tooltip')} className="underline decoration-dotted hover:text-[#FAFAFA] disabled:opacity-40 mx-1 inline-flex items-center gap-1">
+                <button disabled={busy || indexing} onClick={() => startIndex(['tag'])} title={t('settings.db.tagsOnly.tooltip')} className="underline decoration-dotted hover:text-[#FAFAFA] disabled:opacity-40 mx-1 inline-flex items-center gap-1">
                   <Target size={11} /> {t('settings.db.tagsOnly')}
                 </button>
                 ·
-                <button disabled={busy} onClick={() => startIndex(['embed'])} title={t('settings.db.embedsOnly.tooltip')} className="underline decoration-dotted hover:text-[#FAFAFA] disabled:opacity-40 mx-1 inline-flex items-center gap-1">
+                <button disabled={busy || indexing} onClick={() => startIndex(['embed'])} title={t('settings.db.embedsOnly.tooltip')} className="underline decoration-dotted hover:text-[#FAFAFA] disabled:opacity-40 mx-1 inline-flex items-center gap-1">
                   <Layers size={11} /> {t('settings.db.embedsOnly')}
                 </button>
               </div>
             </div>
           )}
         </div>
+
+        {failures.length > 0 && (
+          <div role="alert" className="bg-red-500/10 border-2 border-red-500/40 rounded-xl p-4">
+            <div className="flex items-center gap-2 text-red-300 font-semibold text-sm mb-2">
+              <AlertTriangle size={15} /> {t('journey.library.failedTitle', { n: failures.length })}
+            </div>
+            <ul className="space-y-1 mb-2">
+              {failures.map((f) => (
+                <li key={f.path ?? f.video} className="text-xs text-[#FAFAFA] break-all">
+                  <span className="font-semibold">{f.video}</span> <span className="text-[#A1A1AA]">— {f.reason}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="text-xs text-[#A1A1AA]">{t('journey.library.failedHint')}</div>
+          </div>
+        )}
 
         {/* ── Episodes ────────────────────────────────────────────────── */}
         {libraryEmpty ? (
@@ -176,9 +248,9 @@ export default function LibraryTab() {
           <>
             <div className="flex items-center justify-between -mb-2">
               <div className="text-sm font-semibold text-[#FAFAFA]">{t('library.videos.title')}</div>
-              <div className="text-xs text-[#71717A]">{t('library.videos.count', { videos: totals.videos, scenes: totals.scenes })}</div>
+              <div className="text-xs text-[#71717A]">{totals.videos === 1 ? t('journey.library.countOne', { scenes: totals.scenes }) : t('library.videos.count', { videos: totals.videos, scenes: totals.scenes })}</div>
             </div>
-            <EpisodeFoldersPanel />
+            <EpisodeFoldersPanel refreshKey={`${totals.videos}:${totals.scenes}`} />
           </>
         )}
 
@@ -217,7 +289,7 @@ export default function LibraryTab() {
   );
 }
 
-function EpisodeFoldersPanel() {
+function EpisodeFoldersPanel({ refreshKey }: { refreshKey?: string }) {
   const t = useT();
   const [videos, setVideos] = useState<VideoSummary[]>([]);
   const [draftFolders, setDraftFolders] = useState<string[]>([]);
@@ -227,7 +299,7 @@ function EpisodeFoldersPanel() {
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);   // '' = Ungrouped box
 
   const refresh = () => api.listVideos().then((r) => setVideos(r.videos)).catch(() => {});
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [refreshKey]);
 
   // Folders are derived from the episodes themselves + local drafts for
   // freshly-created (still empty) ones. An empty folder only becomes

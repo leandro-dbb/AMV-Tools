@@ -6,6 +6,7 @@ import { useT } from '../i18n';
 import MaskMode from './MaskMode';
 import { SimilarButton } from './SceneBadges';
 import FinishMenu from './FinishMenu';
+import { parseApiError } from '../modelTiers';
 
 interface MiniEditorProps {
   scenes: SceneResult[];
@@ -128,6 +129,12 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement | null)?.tagName === 'INPUT' || (e.target as HTMLElement | null)?.tagName === 'TEXTAREA') return;
+      // Escape closes the editor, unless a dialog opened from it (finishing,
+      // timeline) is on top: that one closes first.
+      if (e.key === 'Escape') {
+        if (document.querySelectorAll('.fixed.inset-0').length <= 1) onClose();
+        return;
+      }
       const v = videoRef.current;
       if (!v) return;
       if (e.key === 'k' || e.key === 'K' || e.code === 'Space') {
@@ -272,7 +279,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
       setExportResult(r.output);
       api.revealOutput(r.output);
     } catch (err) {
-      setExportResult(`Error: ${(err as Error).message}`);
+      setExportResult(`Error: ${parseApiError(err).message}`);
     } finally {
       setExporting(false);
     }
@@ -281,8 +288,9 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
   return (
     <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-8" onClick={onClose}>
       <div className="w-full h-full bg-gradient-to-br from-[#18181B] via-[#0F0F11] to-[#18181B] rounded-2xl border-2 border-[#27272A] flex flex-col overflow-hidden shadow-2xl shadow-[#8B5CF6]/20" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b-2 border-[#27272A] bg-[#18181B]/50 backdrop-blur-sm">
+        {/* Header. relative z-20: backdrop-blur makes it a stacking context, so
+            the Finishing menu opened under the player (only "Upscale" showed). */}
+        <div className="relative z-20 flex items-center justify-between p-5 border-b-2 border-[#27272A] bg-[#18181B]/50 backdrop-blur-sm">
           <div className="flex items-center gap-3 min-w-0">
             {queryLabel && (
               <>
@@ -365,18 +373,20 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
               {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
               {exporting ? t('editor.exporting') : t('editor.exportBtn', { seconds: ((trimEnd - trimStart) / 1000).toFixed(1) })}
             </button>
-            <button onClick={onClose} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group ml-2">
+            <button onClick={onClose} title={t('common.close')} aria-label={t('common.close')} className="p-2.5 hover:bg-[#27272A] rounded-lg transition-all group ml-2">
               <X size={20} className="text-[#A1A1AA] group-hover:text-[#EC4899]" />
             </button>
           </div>
         </div>
 
         {/* Video player */}
-        <div className="flex-1 flex items-center justify-center p-8 relative">
+        {/* min-h-0 + a height-bound player: a width-bound 16:9 box pushed the
+            transport bar (play, timecode) out of the window below ~1000 px. */}
+        <div className="flex-1 min-h-0 flex items-center justify-center p-6 relative">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#8B5CF6]/10 rounded-full blur-[150px] pointer-events-none"></div>
-          <div className="relative w-full max-w-6xl">
+          <div className="relative w-full max-w-6xl h-full flex items-center justify-center">
             <div className="absolute -inset-4 bg-gradient-to-r from-[#8B5CF6]/20 via-[#EC4899]/20 to-[#8B5CF6]/20 rounded-2xl blur-xl"></div>
-            <div className="relative aspect-video bg-black rounded-xl overflow-hidden border-2 border-[#8B5CF6]/30 shadow-2xl shadow-[#8B5CF6]/30">
+            <div className="relative aspect-video h-full max-h-full max-w-full bg-black rounded-xl overflow-hidden border-2 border-[#8B5CF6]/30 shadow-2xl shadow-[#8B5CF6]/30">
               <video
                 ref={videoRef}
                 src={scene.proxy_path ? api.proxyUrl(scene.id) : api.sourceUrl(scene.id)}

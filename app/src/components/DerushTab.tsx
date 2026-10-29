@@ -11,6 +11,7 @@ import { useT } from '../i18n';
 import TimelineExportDialog from './TimelineExportDialog';
 import { SimilarButton } from './SceneBadges';
 import FinishMenu from './FinishMenu';
+import { exportDoneLabel } from '../derushExport';
 
 /*
  * Derush mode — the AMV-maker dailies workflow.
@@ -148,6 +149,7 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
   const [playError, setPlayError] = useState<'decode' | 'missing' | null>(null);
   const [transcoding, setTranscoding] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
+  const pendingSeekMs = useRef<number | null>(null);
   const [durationMs, setDurationMs] = useState(0);
   const [muted, setMuted] = useState(false);
   const [autoNext, setAutoNext] = useState(true);
@@ -183,6 +185,10 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
     setSrc(null);
     setPlayError(null);
     setCurrentMs(0);
+    pendingSeekMs.current = null;
+    // Drop the previous episode's scenes at once: until the new ones arrive,
+    // "Keep" (and ←/→) used to act on a scene of the episode just left.
+    setScenes([]);
     setDurationMs(v.duration_ms || 0);
     setVel(0);
     setSelected(new Set());
@@ -369,7 +375,17 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
 
   const seekTo = useCallback((ms: number) => {
     const el = videoRef.current;
-    if (el) el.currentTime = Math.max(0, ms / 1000);
+    // While the episode is still being prepared / loading (no metadata yet),
+    // the browser ignores currentTime and the first timeupdate snapped the
+    // playhead back to 0: ←/→ did nothing, so a second "Keep" un-kept the
+    // first scene. Move the playhead state now, apply the seek once loaded.
+    if (el && el.readyState >= 1) {
+      el.currentTime = Math.max(0, ms / 1000);
+      pendingSeekMs.current = null;
+    } else {
+      pendingSeekMs.current = Math.max(0, ms);
+    }
+    setCurrentMs(Math.max(0, ms));
     followOnce.current = true;   // bring the playhead back into view when zoomed
   }, []);
 
@@ -522,8 +538,11 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      // No early return without a video: while the episode is being prepared
+      // (MKV remux, transcode) keep / level / scene keys must still work —
+      // they only need the scene list. Shuttle and frame steps need the video
+      // (applyShuttle checks it itself).
       const el = videoRef.current;
-      if (!el) return;
       const pressed = e.key.toLowerCase();
       if (pressed === 'escape') { e.preventDefault(); setSelected(new Set()); return; }
       // Remappable bindings (Settings > Derush) — key → action lookup.
@@ -550,10 +569,12 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
           if (currentSceneIdx >= 0 && currentSceneIdx < scenes.length - 1) seekTo(scenes[currentSceneIdx + 1].start_ms + 1);
           break;
         case 'frame_back':
+          if (!el) break;
           applyShuttle(0);
           el.currentTime = Math.max(0, el.currentTime - 1 / (video?.fps || 24));
           break;
         case 'frame_forward':
+          if (!el) break;
           applyShuttle(0);
           el.currentTime = el.currentTime + 1 / (video?.fps || 24);
           break;
@@ -667,7 +688,11 @@ function PlayerView({ folders, keptIds, favIds, keptByVideo, keys, lastEvent, on
               className="max-h-full max-w-full"
               muted={muted}
               preload="auto"
-              onTimeUpdate={(e) => { if (!scrubbingRef.current) setCurrentMs(e.currentTarget.currentTime * 1000); }}
+              onLoadedMetadata={(e) => {
+                if (pendingSeekMs.current != null) e.currentTarget.currentTime = pendingSeekMs.current / 1000;
+                pendingSeekMs.current = null;
+              }}
+              onTimeUpdate={(e) => { if (!scrubbingRef.current && pendingSeekMs.current == null) setCurrentMs(e.currentTarget.currentTime * 1000); }}
               onDurationChange={(e) => setDurationMs(e.currentTarget.duration * 1000)}
               onEnded={() => { if (autoNext) gotoEpisode(1); }}
               onError={() => setPlayError('decode')}
@@ -1087,7 +1112,7 @@ function LibraryView({ folders, items, lastEvent, onChanged, onOpenScene }: {
       {exportDone?.done && (
         <div className={`flex items-center gap-2 px-4 py-2 text-xs border-b border-[#27272A] ${exportDone.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
           {exportDone.ok ? <Check size={14} /> : <X size={14} />}
-          {exportDone.message ?? t('derush.library.exportFinished')}
+          {exportDoneLabel(exportDone, t)}
           {exportDone.output && (
             <button onClick={() => api.revealOutput(exportDone.output!)} className="underline text-[#A1A1AA] hover:text-[#FAFAFA] flex items-center gap-1">
               {t('derush.library.openFolder')} <ChevronRight size={12} />

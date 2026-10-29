@@ -105,8 +105,10 @@ def _batched_tagger_embeddings(
     tagger: WDTaggerModel,
     batch_size: int,
     cancelled: Callable[[], bool],
+    on_batch: Optional[Callable[[int], None]] = None,
 ) -> list[tuple[int, object]]:
-    """Run wd-tagger over (deduped, sorted) timestamps with proper batching."""
+    """Run wd-tagger over (deduped, sorted) timestamps with proper batching.
+    ``on_batch(done)``: called after each batch (progress for slow CPUs)."""
     embeddings: list[tuple[int, object]] = []
     batch_ts: list[int] = []
     batch_imgs: list = []
@@ -119,6 +121,8 @@ def _batched_tagger_embeddings(
         embeddings.extend((ts, emb) for ts, emb in zip(batch_ts, batch_embs))
         batch_ts = []
         batch_imgs = []
+        if on_batch is not None:
+            on_batch(len(embeddings))
 
     for ts, img in frames.extract_frames_at(video_path, timestamps_ms):
         if cancelled():
@@ -608,9 +612,13 @@ def index_video(
             all_sample_ts.update(samples)
 
         if all_sample_ts:
-            report(5, f"Sub-segmenting (decoding {len(all_sample_ts)} samples in one pass)")
+            n_samples = len(all_sample_ts)
+            report(5, f"Sub-segmenting (decoding {n_samples} samples in one pass)")
+            # On CPU this pass alone takes minutes: keep the bar moving (5 → 15).
             global_embs_list = _batched_tagger_embeddings(
-                video_path, sorted(all_sample_ts), tagger, batch_size, cancelled
+                video_path, sorted(all_sample_ts), tagger, batch_size, cancelled,
+                on_batch=lambda done: report(5 + int(done / n_samples * 10),
+                                             f"Sub-segmenting (decoding {n_samples} samples in one pass)"),
             )
             if cancelled():
                 return
@@ -636,7 +644,7 @@ def index_video(
                 final_segments.append((s_ms, e_ms, -this_seq))  # negative = "I am parent #this_seq"
                 for sub_s, sub_e in subs:
                     final_segments.append((sub_s, sub_e, this_seq))  # positive = child of parent #this_seq
-            pct = 5 + int(((i + 1) / len(hard_cuts)) * 15)
+            pct = 15 + int(((i + 1) / len(hard_cuts)) * 5)
             report(pct, f"Sub-segmenting {i + 1}/{len(hard_cuts)}")
 
         # If embed is requested, free the tagger before SigLIP loads. If tag
@@ -847,6 +855,13 @@ def index_queue(
             lambda: bool(cancel_event and cancel_event.is_set()),
             lambda path: not (skip and _is_video_current_for_phases(db_path, path, key, phases)),
             depth=depth)
+
+    def file_progress(i: int):
+        # Tags every event with the file's rank so the UI can say "file 1/2".
+        if not progress_cb:
+            return None
+        return lambda evt: progress_cb({**evt, "file_index": i + 1, "file_count": len(all_files)})
+
     try:
         for i, (fp, group) in enumerate(all_files):
             if cancel_event and cancel_event.is_set():
@@ -856,7 +871,7 @@ def index_queue(
                 pending, nxt = scheduler.get(fp), None
             try:
                 pending = index_video(db_path, fp, siglip, tagger, cancel_event=cancel_event,
-                                      progress_cb=progress_cb, group_name=group,
+                                      progress_cb=file_progress(i), group_name=group,
                                       next_video=nxt, prefetched=pending, **kwargs)
                 if video_done_cb is not None and not (cancel_event and cancel_event.is_set()):
                     try:
@@ -868,7 +883,8 @@ def index_queue(
                 log.error("indexing failed for %s: %s", fp, e, exc_info=True)
                 if progress_cb:
                     progress_cb({"type": "indexing", "video": Path(fp).name, "percent": 0,
-                                 "message": f"Failed: {e}"})
+                                 "message": f"Failed: {e}", "failed": True, "path": fp,
+                                 "file_index": i + 1, "file_count": len(all_files)})
     finally:
         # The tagger may have stayed resident across videos (Apple Silicon).
         tagger.offload()

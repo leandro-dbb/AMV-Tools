@@ -438,7 +438,8 @@ export default function TimelineExportDialog({
 
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#27272A] bg-[#0F0F11]/40">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-[#A1A1AA] hover:text-[#FAFAFA] hover:bg-[#27272A]">
-            {t('timeline.dialog.cancel')}
+            {/* After a successful export there is nothing left to cancel. */}
+            {result ? t('common.close') : t('timeline.dialog.cancel')}
           </button>
           <button
             onClick={doExport}

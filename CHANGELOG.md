@@ -39,6 +39,51 @@ All notable changes to AMV Tools are documented here.
 - **Validation**: FCPXML against Apple's 1.9 DTD (pinned); every format read
   back by third-party readers and rendered frame by frame with MLT.
 
+### UI journey — the app used end to end like an editor (v06 B)
+
+The built Electron app, real sidecar and real models (CPU) were driven by
+Playwright on real anime extracts
+([report](docs/reports/v06-B-parcours-ui.md)).
+
+- **E2E suite**: `npm run e2e` (app/e2e/, Playwright `_electron`, own Xvfb,
+  throwaway profile, synthetic clips or `AMV_E2E_MEDIA`) covers first launch →
+  library + indexing → search → derush basket, clip and timeline exports;
+  optional manual CI job `.github/workflows/e2e-linux.yml`.
+  `AMV_E2E_SKIP_SYNC=1` runs the first-run install without its `uv sync`.
+- **Indexing progress** in the status bar: current stage in plain words (FR/EN),
+  file *n/N*, time left, labelled *Stop* button; the sub-segmentation tagger
+  pass reports per batch (the bar used to sit at 5 % for 10+ minutes on CPU).
+- **Failures are visible**: a file that cannot be indexed (corrupted, still
+  copying…) is listed by name with its reason in the Library.
+- **Library** follows the running indexing (no more "Ready to index" + active
+  start button during a run, list refreshed as episodes finish), queued items
+  can be removed, and a first-run note says the analysis models (~2 GB) are
+  downloaded when the first indexing starts.
+- **Drag and drop of episode folders works again** (Electron 32+ removed
+  `File.path`; the preload now exposes `webUtils.getPathForFile`).
+- **Hover previews** play from the source file when no proxy exists (the
+  default), in Search and Tags; thumbnail fallback when the codec cannot play.
+- **Settings > Search** (threshold, max results, sort) is now used by the Search tab.
+- **Export folder**: a non-writable folder is refused with a clear message
+  instead of failing every later export; settings errors no longer show raw
+  `API 400: {json}`.
+- First-run screen: no more clipped title at 1280×720, *Fast* profile
+  pre-selected and explained for CPU-only installs, right version shown.
+- GPU fallback banner: no false "torch is not installed", reasons translated.
+- **Scene editor**: the Finishing menu no longer opens under the player (only
+  Upscale was reachable), the transport bar stays on screen below ~1000 px.
+- **Search**: the threshold slider and sort re-run the search; a hint (and a
+  one-click 5 % threshold) when few shots match (French queries find fewer);
+  visible wait for the first search (model load); an indexed library no
+  longer greeted with "index a folder first"; recent searches updated.
+- **Export names keep accented and Japanese letters** ("Clip été 01" used to
+  become `Clip_t_01`).
+- Derush export summary translated; timeline dialog says *Close* once done;
+  the backend-unreachable screen no longer shows a developer command.
+- Escape closes the scene editor; a queue left from the previous session is
+  explained in the Library at launch.
+- Small copy fixes (Derush empty state pointed to Settings instead of Library).
+
 ### Models — non-commercial candidates re-evaluated (chantier 4b)
 
 AMV Tools is non-commercial, so models rejected in chantier 4 only for a
