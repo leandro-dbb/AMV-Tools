@@ -240,13 +240,22 @@ def _software_profile() -> dict:
 def _decode_profile(path: str) -> Optional[dict]:
     """ffmpeg decode profile for ``path``: the hardware profile, except on
     macOS where the software decoder is used unless VideoToolbox measured
-    faster for this codec/size (HEVC above 1440p). ``AMV_DECODE=hw|sw``
-    forces either side (benchmarks)."""
+    faster for this codec/size (HEVC above 1440p), and the software ffmpeg
+    decoder when there is no hardware path at all. ``AMV_DECODE=hw|sw``
+    forces either side (benchmarks); ``AMV_DECODE=pyav`` the in-process
+    PyAV fallback."""
     forced = os.environ.get("AMV_DECODE", "").lower()
     if forced == "sw":
         return _software_profile()
+    if forced == "pyav":
+        return None
     profile = _ffmpeg_hw_profile()
-    if forced == "hw" or profile is None or profile["name"] != "videotoolbox":
+    if profile is None:
+        # No hardware decode (CPU-only PC, AMD/Intel on Windows/Linux): the
+        # ffmpeg subprocess still beats in-process PyAV — frame-threaded,
+        # outside the GIL (the API stays responsive) and killable.
+        return _software_profile()
+    if forced == "hw" or profile["name"] != "videotoolbox":
         return profile
     if path in _DECODE_CHOICE:
         return _DECODE_CHOICE[path]
