@@ -162,6 +162,7 @@ def _any_clip():
 
 def _hevc_clip(tmp_path, bits: int):
     import subprocess
+    from backend.indexing import cuts
     out = tmp_path / f"hevc{bits}.mkv"
     pix = "yuv420p10le" if bits == 10 else "yuv420p"
     colors = ("red", "blue", "green", "white")
