@@ -16,6 +16,11 @@ if (window.amvBridge?.getApiPort) {
   }).catch(() => {});
 }
 
+// Drops outside a drop zone do nothing (instead of opening the file in the
+// window); the zones handle their own events first.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>

@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 
 const isDev = !app.isPackaged;
@@ -130,7 +131,14 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
   }
 
   const useUv = fs.existsSync(uvExe);
-  const cmd = useUv ? uvExe : (process.platform === 'win32' ? 'python' : 'python3');
+  // No uv next to the app (dev checkout without .uv/): the project's venv
+  // python, not the system one (which has none of the backend's modules).
+  const venvPython = process.platform === 'win32'
+    ? path.join(venvPath(), 'Scripts', 'python.exe')
+    : path.join(venvPath(), 'bin', 'python');
+  const cmd = useUv ? uvExe
+    : fs.existsSync(venvPython) ? venvPython
+    : (process.platform === 'win32' ? 'python' : 'python3');
   // `uv run` re-syncs the environment to the project's *default* deps on every
   // launch. The GPU torch wheels live in optional extras (cu130, cu126, …), so
   // a plain re-sync silently uninstalls the CUDA build and reinstalls +cpu —
@@ -408,6 +416,16 @@ async function createWindow() {
       sandbox: true,
     },
   });
+
+  // A file dropped outside a drop zone made Chromium navigate the window
+  // to it (the video replaced the whole app). The app is a single page:
+  // only its own reloads may navigate.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    const bare = url.split(/[?#]/)[0];
+    const own = useVite ? bare.startsWith('http://localhost:5173') : bare === pathToFileURL(distIndex).href;
+    if (!own) e.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   mainWindow.webContents.once('did-finish-load', () => {
     rendererReady = true;

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, Music2, Upload } from 'lucide-react';
 import type { MusicTrackSummary } from '../api/music';
 import { useT } from '../i18n';
+import { droppedPaths } from '../dropPaths';
 import { formatTime } from './musicUtils';
 
 export const AUDIO_EXTENSIONS = ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac', 'opus', 'mp4', 'mkv', 'mov', 'webm'];
@@ -46,9 +47,9 @@ export default function MusicImport({ analyzing, error, tracks, currentHash, onA
     e.preventDefault();
     setDragOver(false);
     if (analyzing) return;
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    const p = (file as any).path as string | undefined;
+    // Electron 32+ has no File.path: the preload resolves it (droppedPaths)
+    const p = droppedPaths(Array.from(e.dataTransfer.files ?? []))[0];
+    if (!e.dataTransfer.files?.length) return;
     if (p) onAnalyze(p); else onError(t('music.import.dropNoPath'));
   }
 
