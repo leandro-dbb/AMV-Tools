@@ -10,6 +10,7 @@ import OnboardingScreen from './components/OnboardingScreen';
 import BootstrapScreen from './components/BootstrapScreen';
 import TutorialOverlay from './components/TutorialOverlay';
 import CharactersTab from './components/CharactersTab';
+import MusicTab from './components/MusicTab';
 import { SEARCHPLUS_EVENT } from './searchplus';
 import type { SearchPlusRequest } from './searchplus';
 import FinishQueue from './components/FinishQueue';
@@ -21,7 +22,7 @@ import { useT } from './i18n';
 import type { TFunc } from './i18n';
 import type { AppSettings, ProgressEvent, SceneResult, SystemStatus } from './api/types';
 
-type Tab = 'library' | 'search' | 'tags' | 'derush' | 'characters' | 'settings';
+type Tab = 'library' | 'search' | 'tags' | 'derush' | 'music' | 'characters' | 'settings';
 
 interface BootstrapLine { line: string; stream: 'stdout' | 'stderr' }
 
@@ -226,6 +227,7 @@ export default function App() {
           { id: 'search', label: t('app.tab.search'), color: 'from-[#8B5CF6] to-[#EC4899]' },
           { id: 'tags', label: t('app.tab.tags'), color: 'from-[#EC4899] to-[#8B5CF6]' },
           { id: 'derush', label: t('app.tab.derush'), color: 'from-[#EC4899] to-[#F59E0B]' },
+          { id: 'music', label: t('music.tab'), color: 'from-[#F43F5E] to-[#8B5CF6]' },
           { id: 'characters', label: t('sp.tab.characters'), color: 'from-[#EC4899] to-[#6366F1]' },
           { id: 'settings', label: t('app.tab.settings'), color: 'from-[#8B5CF6] to-[#6366F1]' },
         ] as { id: Tab; label: string; color: string }[]).map((tab) => (
@@ -270,6 +272,9 @@ export default function App() {
         )}
         {activeTab === 'derush' && (
           <DerushTab onOpenScene={(list, idx) => setEditor({ scenes: list, index: idx })} />
+        )}
+        {activeTab === 'music' && (
+          <MusicTab onOpenScene={(list, idx) => setEditor({ scenes: list, index: idx })} onOpenLibrary={() => setActiveTab('library')} />
         )}
         {activeTab === 'characters' && (
           <CharactersTab onOpenScene={(_s, list, idx) => setEditor({ scenes: list, index: idx })} />

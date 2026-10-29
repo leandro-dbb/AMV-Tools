@@ -84,6 +84,34 @@ Playwright on real anime extracts
   explained in the Library at launch.
 - Small copy fixes (Derush empty state pointed to Settings instead of Library).
 
+### Music sync (v06 C)
+
+New **Music** tab ([report](docs/reports/v06-C-synchro-musique.md)):
+
+- **Song analysis** (librosa, CPU, cached by content hash): tempo (also
+  variable tempo), beats, bars, strong hits, smoothed energy curve, sections
+  (intro / verse / build-up / drop / chorus / calm part / outro) and drops.
+  On synthetic tracks with exact ground truth: beat F1 0.91-1.0 at 70 ms
+  (mean error 5-11 ms), bars 0.90-1.0, 2/2 drops at 6 ms; on two real songs
+  annotated by eye 2/4 drops found, no false drop. 1.5-4 s for a 2-4 min
+  song on a slow CPU; the analyser warms up when the tab opens.
+- **Edit proposal** from the indexed shots: beat-aligned cuts (1-8 beats per
+  shot depending on the passage and the chosen rhythm, accelerating through
+  build-ups, on strong hits at drops), shots picked by intensity / motion /
+  text and character wishes, series filter, no reuse; alternatives, locks,
+  regenerate one passage.
+- **Exports**: timeline (FCP 7 XML, FCPXML, EDL, OTIO, via the regular
+  timeline writers, unchanged) with the song on its own audio track and
+  beat / passage markers; markers-only (FCP 7 XML, FCPXML, Resolve marker
+  EDL, OTIO, CSV); low-resolution MP4 preview with the music. Real check
+  (2 indexed episode extracts + a CC-BY song): cuts 10 ms from the beat on
+  average, 21 ms max (frame rounding at 23.976) in the timeline and in the
+  rendered MP4.
+- **Hidden cuts**: the preview detects shots that contain a cut of the
+  episode (missed by the indexer's shot detection), flags them and splits
+  them in later proposals (35 -> 7 off-beat cuts on the real check).
+- New dependency: `librosa` (ISC).
+
 ### Models — non-commercial candidates re-evaluated (chantier 4b)
 
 AMV Tools is non-commercial, so models rejected in chantier 4 only for a
