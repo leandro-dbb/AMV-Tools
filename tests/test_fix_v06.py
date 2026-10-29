@@ -148,12 +148,20 @@ def test_pyav_log_callback_is_not_installed():
     import av
     import backend.indexing  # noqa: F401  (imports every indexing module)
     import backend.server  # noqa: F401
-    assert av.logging.get_level() is None
+    # torchvision.io sets ERROR on import (it is imported with the models)
+    av.logging.set_level(av.logging.ERROR)
+    with av.open(str(_any_clip())):
+        assert av.logging.get_level() is None
+
+
+def _any_clip():
+    import tempfile
+    from pathlib import Path
+    return make_solid_clip(Path(tempfile.mkdtemp()) / "c.mp4", ("red", "blue"))
 
 
 def _hevc_clip(tmp_path, bits: int):
     import subprocess
-    from backend.indexing import cuts
     out = tmp_path / f"hevc{bits}.mkv"
     pix = "yuv420p10le" if bits == 10 else "yuv420p"
     colors = ("red", "blue", "green", "white")
