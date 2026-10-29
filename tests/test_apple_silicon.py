@@ -66,7 +66,11 @@ def test_other_hardware_profiles_are_untouched(monkeypatch, clip):
     monkeypatch.delenv("AMV_DECODE", raising=False)
     monkeypatch.setattr(cuts, "_ffmpeg_hw_profile", lambda: cuda)
     assert cuts._decode_profile(str(clip)) is cuda
+    # no hardware path: the software ffmpeg decoder (subprocess, outside
+    # the GIL), PyAV only on request
     monkeypatch.setattr(cuts, "_ffmpeg_hw_profile", lambda: None)
+    assert cuts._decode_profile(str(clip))["name"] == "software"
+    monkeypatch.setenv("AMV_DECODE", "pyav")
     assert cuts._decode_profile(str(clip)) is None
 
 
@@ -78,9 +82,10 @@ def test_software_decode_path_finds_the_same_cuts(vt_mac, clip):
 def test_cuts_land_on_the_first_frame_of_the_new_shot(clip, monkeypatch):
     """CPU (PyAV) path too: the boundary is the exact frame, not the next
     sampled one (which left up to 3 frames of the next shot in the clip)."""
-    monkeypatch.delenv("AMV_DECODE", raising=False)
     monkeypatch.setattr(cuts, "_ffmpeg_hw_profile", lambda: None)
-    assert [s for s, _ in cuts.detect_cuts(str(clip), threshold=0.30)] == [0, 1000, 2000]
+    for decode in ("sw", "pyav"):
+        monkeypatch.setenv("AMV_DECODE", decode)
+        assert [s for s, _ in cuts.detect_cuts(str(clip), threshold=0.30)] == [0, 1000, 2000]
 
 
 # ── wd-tagger on Core ML ────────────────────────────────────────────────────
