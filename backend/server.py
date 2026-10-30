@@ -77,7 +77,7 @@ async def _lifespan(app: FastAPI):
 
 
 def make_app() -> FastAPI:
-    app = FastAPI(title="AMV Tools sidecar", version="0.5.0b1", lifespan=_lifespan)
+    app = FastAPI(title="AMV Tools sidecar", version="0.5.0b2", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

@@ -473,7 +473,7 @@ def _export_alpha_raw(src_path: str, start_ms: int, end_ms: int, masks: np.ndarr
 
     written = 0
     try:
-        workers = max(1, min(4, (os.cpu_count() or 2) - 1))
+        workers = max(1, min(6, (os.cpu_count() or 2) - 1))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="alpha-export") as pool:
             pending = []
             for i, rgb in enumerate(frames()):
@@ -578,6 +578,7 @@ def _encode_scene_with_alpha(
     bg_aware_cleanup: bool = True,
     raw_pipes: bool = False,
     check_cancel=None,
+    edge_mode: str = "fg",
 ) -> str:
     """Encode the clip with the roto masks as the alpha channel.
 
@@ -611,6 +612,29 @@ def _encode_scene_with_alpha(
 
     def finish_frame(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
         alpha = np.clip(mask.astype(np.float32), 0.0, 1.0)
+        if edge_mode == "soft":
+            # v5 (Stable): the soft matte is scaled up onto the full-res art
+            # with a guided filter (smooth, no staircase), then the outer ink
+            # line is added and the edge colours decontaminated
+            from ..models.edge_refine import finish_edges
+            if alpha.shape != rgb.shape[:2]:
+                alpha = upsample_alpha_guided(alpha, rgb)
+            rgb, alpha = finish_edges(rgb, alpha, "soft")
+            return np.dstack([rgb, (alpha * 255.0).round().astype(np.uint8)])
+        if edge_mode in ("fg", "max"):
+            # 0.6 (chantier roto 2): the guided-filter upscale painted a ring
+            # of the old background around hair (x4 background along the
+            # outline on the benchmark) and ate the ink line; the matte is
+            # now upscaled as is and only the COLOUR of the semi-transparent
+            # pixels is fixed (foreground estimation): no pixel keeps the old
+            # background's colour.
+            # "max": the alpha of the outline band is first re-solved from
+            # the local colours (ink line protected).
+            from ..models.edge_refine import finish_edges
+            if alpha.shape != rgb.shape[:2]:
+                alpha = _resize_alpha(alpha, (rgb.shape[1], rgb.shape[0]))
+            rgb, alpha = finish_edges(rgb, alpha, edge_mode)
+            return np.dstack([rgb, (alpha * 255.0).round().astype(np.uint8)])
         if alpha.shape != rgb.shape[:2]:
             if edge_refine:
                 alpha = upsample_alpha_guided(alpha, rgb)

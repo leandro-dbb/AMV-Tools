@@ -23,8 +23,8 @@ Release. A human still reviews the draft and publishes it.
 3. Commit, then tag and push:
 
    ```bash
-   git tag v0.5.0-beta.1
-   git push origin v0.5.0-beta.1
+   git tag v0.5.0-beta.2
+   git push origin v0.5.0-beta.2
    ```
 
 Pushing the tag runs `.github/workflows/build.yml`. Everyday push/PR validation

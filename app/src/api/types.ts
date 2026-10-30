@@ -186,6 +186,7 @@ export interface SegmentPromptBody {
   start_ms?: number;
   end_ms?: number;
   engine?: 'birefnet' | 'sam2';
+  auto_target?: 'main' | 'all';
 }
 
 export interface SegmentTrackBody extends SegmentPromptBody {
@@ -227,8 +228,9 @@ export interface AppSettings {
     siglip_max_num_patches: number;
     enable_mask: boolean;
     mask_engine: 'birefnet' | 'sam2';
-    birefnet_variant: 'general' | 'hr' | 'portrait' | 'anime';
-    sam2_variant: 'tiny' | 'small' | 'base_plus' | 'large';
+    birefnet_variant: 'auto' | 'toonout' | 'general' | 'hr' | 'portrait' | 'anime';
+    sam2_variant: 'auto' | 'tiny' | 'small' | 'base_plus' | 'large';
+    mask_auto_target?: 'main' | 'all';
     mask_max_dim: number;
     mask_shrink_px: number;
     mask_bg_suppress_enabled: boolean;
@@ -242,6 +244,10 @@ export interface AppSettings {
     mask_rgb_decontaminate_enabled: boolean;
     mask_edge_refine_enabled: boolean;
     mask_bg_aware_cleanup_enabled: boolean;
+    mask_edge_mode?: 'auto' | 'fg' | 'max' | 'soft' | 'legacy';
+    mask_quality?: 'auto' | 'stable' | 'max' | 'standard';
+    mask_selector_enabled?: boolean;
+    mask_keep_held?: 'auto' | boolean;
     mask_temporal_smooth_enabled: boolean;
     mask_temporal_smooth_strength: number;
     hf_token: string;
@@ -437,7 +443,7 @@ export interface ModelDownloadResult {
 // Model tiers (Settings > Models): models picked for the detected GPU memory,
 // plus the embeddings-only re-index of the primary database.
 export type ModelTierPlatform = 'nvidia' | 'mac' | 'cpu';
-export type ModelTierRole = 'embedding' | 'tagger' | 'upscale' | 'interpolate' | 'depth';
+export type ModelTierRole = 'embedding' | 'tagger' | 'upscale' | 'interpolate' | 'depth' | 'mask_selector' | 'mask_detector' | 'mask_tracker';
 
 export interface ModelTierModel {
   id: string;

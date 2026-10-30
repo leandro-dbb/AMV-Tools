@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -576,6 +577,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
     import cv2
     from PIL import Image
 
+    from ..api.segment import _edge_mode
     from ..export.ffmpeg import alpha_partial_path, export_scene_with_alpha
     from ..state import get_state
     from .matte import postprocess_stack
@@ -591,26 +593,92 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
                        lambda: st.get_birefnet())
 
     frames: list[np.ndarray] = []
+    stable_clean = None   # stable mode: {"shots", "held"} for the speck cleanup after stabilisation
     masks: list[np.ndarray] = []
     total = clip.n_frames
-    with _reader_for(ctx, clip) as reader:
-        for i, frame in enumerate(_frames(reader)):
+    # 0.5: the Auto engine's tracker (auto_roto) when the tier has one — the
+    # frames are also written as JPEGs for SAM 2.
+    from ..models.auto_roto import mask_models
+    tracker = mask_models(st).get("tracker") if models_cfg.get("mask_auto_track", True) else None
+    if tracker:
+        import importlib.util
+        tracker = tracker if importlib.util.find_spec("sam2") is not None else None
+    jpg_dir = Path(tempfile.mkdtemp(prefix="amv_cutout_")) if tracker else None
+    jpgs: list[Path] = []
+    try:
+        span = 0.4 if tracker else 0.8
+        with _reader_for(ctx, clip) as reader:
+            for i, frame in enumerate(_frames(reader)):
+                ctx.check_cancel()
+                h, w = frame.shape[:2]
+                s = min(1.0, max_dim / float(max(h, w)))
+                small = cv2.resize(frame, (int(round(w * s)) // 2 * 2, int(round(h * s)) // 2 * 2),
+                                   interpolation=cv2.INTER_AREA) if s < 1.0 else frame.copy()
+                frames.append(small)
+                a = model.mask_image(Image.fromarray(small))
+                masks.append(np.clip(np.rint(a * 255.0), 0, 255).astype(np.uint8) if tracker else a)
+                if jpg_dir is not None:
+                    jpgs.append(jpg_dir / f"{i:05d}.jpg")
+                    Image.fromarray(small).save(jpgs[-1], quality=95)
+                ctx.progress(min(span, span * (i + 1) / total), f"matting {i + 1}/{total}")
+        if not frames:
+            raise RuntimeError("no frames decoded")
+        from ..api.segment import _keep_held, _select_characters
+        sel_masks = np.stack(masks)
+        if sel_masks.dtype != np.uint8:
+            sel_masks = np.clip(np.rint(sel_masks * 255.0), 0, 255).astype(np.uint8)
+        selector_masks: list = []
+        held = [] if _keep_held(models_cfg) else None
+        from ..api.segment import _quality
+        raw = sel_masks.copy() if _quality(models_cfg) == "stable" else None
+        gated = _select_characters(sel_masks, frames, models_cfg, keep=selector_masks, held=held)
+        if gated is not sel_masks:
+            masks = list(gated) if tracker else [m.astype(np.float32) / 255.0 for m in gated]
+        del sel_masks, gated
+        if tracker:
+            from ..models.auto_roto import auto_track
             ctx.check_cancel()
-            h, w = frame.shape[:2]
-            s = min(1.0, max_dim / float(max(h, w)))
-            small = cv2.resize(frame, (int(round(w * s)) // 2 * 2, int(round(h * s)) // 2 * 2),
-                               interpolation=cv2.INTER_AREA) if s < 1.0 else frame.copy()
-            frames.append(small)
-            masks.append(model.mask_image(Image.fromarray(small)))
-            ctx.progress(min(0.8, 0.8 * (i + 1) / total), f"matting {i + 1}/{total}")
-    if not frames:
-        raise RuntimeError("no frames decoded")
+            sam2 = st.get_sam2(variant=tracker)
+            hh, ww = frames[0].shape[:2]
+            det = np.stack(masks)
+            masks = list(auto_track(
+                jpgs, det, sam2, frames_dir=jpg_dir, frame_size=(ww, hh),
+                mode=p.get("target") or models_cfg.get("mask_auto_target", "all"),
+                frames_small=[cv2.resize(f, (256, max(2, round(256 * hh / ww))), interpolation=cv2.INTER_AREA)
+                              for f in frames],
+                progress_cb=lambda seen, n: ctx.progress(0.4 + 0.4 * seen / max(1, n), f"tracking {seen}/{n}"),
+            ))
+            del det
+        if selector_masks and raw is not None:
+            # "stable": BiRefNet's pieces that touch a character kept whole,
+            # collapsed frames refilled from their neighbours
+            from ..models.auto_roto import split_shots, stable_masks
+            hh, ww = frames[0].shape[:2]
+            track = np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
+                              for m in masks]) if tracker else None
+            small = [cv2.resize(f, (256, max(2, round(256 * hh / ww))), interpolation=cv2.INTER_AREA) for f in frames]
+            stable_clean = {"shots": split_shots(small, len(frames)), "held": held}
+            masks = list(stable_masks(raw, selector_masks, track, held, frames=frames,
+                                      shots=stable_clean["shots"],
+                                      only_tracked=(p.get("target") or models_cfg.get("mask_auto_target", "all")) == "main"))
+        elif selector_masks:
+            from ..models.auto_roto import tighten
+            masks = list(tighten(np.stack([np.asarray(m, np.float32) / (255.0 if np.asarray(m).dtype == np.uint8 else 1.0)
+                                           for m in masks]), selector_masks, quality=_quality(models_cfg),
+                                 held=held))
+        del selector_masks, raw
+    finally:
+        if jpg_dir is not None:
+            shutil.rmtree(jpg_dir, ignore_errors=True)
     stack = postprocess_stack(
         np.stack(masks), frames,
         stabilize=bool(p.get("stabilize", models_cfg.get("mask_temporal_smooth_enabled", True))),
         strength=float(p.get("strength", models_cfg.get("mask_temporal_smooth_strength", 0.5))),
         check_cancel=ctx.check_cancel,
     )
+    if stable_clean is not None:   # stable mode: specks cleaned after the stabilisation
+        from ..models.auto_roto import clean_masks
+        stack = clean_masks(stack, stable_clean["shots"], stable_clean["held"], frames=frames)
     ctx.progress(0.85, "encoding alpha", force=True)
     target = unique_path(out_dir, f"{stem}_cutout", ".mov" if codec == "prores_4444_alpha" else ".webm")
     ctx.on_cancel_cleanup(lambda: (Path(target).unlink(missing_ok=True),
@@ -620,6 +688,7 @@ def _run_matte(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
         decontaminate_rgb=bool(models_cfg.get("mask_rgb_decontaminate_enabled", False)),
         edge_refine=bool(models_cfg.get("mask_edge_refine_enabled", True)),
         bg_aware_cleanup=bool(models_cfg.get("mask_bg_aware_cleanup_enabled", True)),
+        edge_mode=_edge_mode(models_cfg),
         raw_pipes=_i420_in_writer(),   # CUDA path, unchanged elsewhere
         check_cancel=ctx.check_cancel,
     )

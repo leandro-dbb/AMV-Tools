@@ -6,6 +6,7 @@ from . import reembed
 from . import autotune
 from . import shutdown
 from . import music
+from . import roto
 
 ROUTERS = [
     status.router,
@@ -30,4 +31,5 @@ ROUTERS = [
     autotune.router,
     shutdown.router,
     music.router,
+    roto.router,
 ]

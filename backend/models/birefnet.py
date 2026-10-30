@@ -44,6 +44,8 @@ VARIANTS: dict[str, str] = {
     # Higher-resolution variant — handles 2K+ inputs more cleanly at the cost
     # of ~2× VRAM. Worth it if the user's library is 4K or has fine hair/fur.
     "hr":       "ZhengPeng7/BiRefNet_HR",
+    # HR, trained for soft alpha (matting) rather than a silhouette.
+    "hr_matting": "ZhengPeng7/BiRefNet_HR-matting",
     # Portrait-tuned — better hair/face edges, mediocre on full-body.
     "portrait": "ZhengPeng7/BiRefNet-portrait",
     # NOT a BiRefNet checkpoint: SkyTNT's ISNet trained specifically on anime
@@ -51,7 +53,14 @@ VARIANTS: dict[str, str] = {
     # wd-tagger), ~170 MB. Usually beats the photo-trained checkpoints on
     # cel-shading, flat colors, and low-contrast painted backgrounds.
     "anime":    "skytnt/anime-seg",
+    # ToonOut (MIT weights, CC-BY-4.0 dataset): BiRefNet fine-tuned on anime
+    # characters. Same architecture as "general" — the code comes from the
+    # pinned BiRefNet repo, only the 885 MB state dict is downloaded here.
+    # Best per-frame outline on real episodes (docs/reports/chantier-roto.md).
+    "toonout":  "joelseytre/toonout",
 }
+TOONOUT_FILE = "birefnet_finetuned_toonout.pth"
+TOONOUT_REVISION = "cbf720eca394edcde66b861a8a8c20fbabe9c748"
 DEFAULT_VARIANT = "general"
 # Hub commit each BiRefNet checkpoint is loaded at. ``trust_remote_code``
 # runs the repo's Python in the sidecar: pinning keeps whatever is pushed to
@@ -60,7 +69,10 @@ DEFAULT_VARIANT = "general"
 REVISIONS: dict[str, str] = {
     "general":  "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
     "hr":       "a7a562f6fd16021180f2f4348f4de003a2d3d1e1",
+    "hr_matting": "5d6b6f8adcb5b417c871b1d84ceaae9871355b7f",
     "portrait": "b6561965a70070d9143fd9e558f6ca3c481510db",
+    # weights-only repo; its code is the pinned "general" revision
+    "toonout":  TOONOUT_REVISION,
 }
 
 
@@ -74,6 +86,8 @@ def revision_for_repo(repo_id: str) -> Optional[str]:
 # but the official recipes (and the HF model card examples) use 1024×1024 —
 # bigger costs quadratic VRAM and adds little quality on typical anime frames.
 INPUT_SIZE = 1024
+# The HR checkpoints are trained at 2048² (finer hair, ~4x the compute).
+INPUT_SIZES: dict[str, int] = {"hr": 2048, "hr_matting": 2048}
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD  = (0.229, 0.224, 0.225)
 
@@ -95,6 +109,7 @@ class BiRefNetModel:
             variant = DEFAULT_VARIANT
         self.variant = variant
         self.repo_id = VARIANTS[variant]
+        self.input_size = INPUT_SIZES.get(variant, INPUT_SIZE)
         self.idle_offload_seconds = idle_offload_seconds
         self.hf_token = hf_token
         self._model = None
@@ -121,10 +136,13 @@ class BiRefNetModel:
             from transformers import AutoModelForImageSegmentation
 
             log.info("loading BiRefNet (%s)", self.repo_id)
-            model = AutoModelForImageSegmentation.from_pretrained(
-                self.repo_id, trust_remote_code=True, token=self.hf_token,
-                revision=REVISIONS[self.variant], code_revision=REVISIONS[self.variant],
-            )
+            if self.variant == "toonout":
+                model = self._build_toonout()
+            else:
+                model = AutoModelForImageSegmentation.from_pretrained(
+                    self.repo_id, trust_remote_code=True, token=self.hf_token,
+                    revision=REVISIONS[self.variant], code_revision=REVISIONS[self.variant],
+                )
             # The HF checkpoint config sets torch_dtype=fp16, so from_pretrained
             # returns the model in half precision on CUDA-capable cards. We let
             # it stay that way (saves ~440 MB VRAM and matches the upstream
@@ -134,11 +152,30 @@ class BiRefNetModel:
             self._model = model
             self._model_dtype = next(model.parameters()).dtype
             self._transform = transforms.Compose([
-                transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
+                transforms.Resize((self.input_size, self.input_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(_IMAGENET_MEAN, _IMAGENET_STD),
             ])
             self._start_offload_watcher()
+
+    def _build_toonout(self):
+        """BiRefNet architecture from the pinned code (config only, no 445 MB
+        general weights) + the ToonOut fine-tuned state dict."""
+        import torch
+        from transformers import AutoConfig, AutoModelForImageSegmentation
+
+        from ..model_download import download_model_files
+
+        rev = REVISIONS["general"]
+        config = AutoConfig.from_pretrained(VARIANTS["general"], trust_remote_code=True, token=self.hf_token,
+                                            revision=rev, code_revision=rev)
+        model = AutoModelForImageSegmentation.from_config(config, trust_remote_code=True, code_revision=rev)
+        (weights,) = download_model_files(VARIANTS["toonout"], (TOONOUT_FILE,), token=self.hf_token)
+        sd = torch.load(weights, map_location="cpu", weights_only=True)
+        sd = {k.removeprefix("module.").removeprefix("_orig_mod."): v for k, v in sd.items()}
+        model.load_state_dict(sd, strict=True)
+        # half precision on CUDA like the HF "general" checkpoint; fp32 elsewhere
+        return model.half() if self.device.backend == "cuda" else model.float()
 
     def _ensure_loaded_anime(self):
         """Load SkyTNT's ISNet anime-seg checkpoint through onnxruntime.
@@ -237,7 +274,7 @@ class BiRefNetModel:
                 # 1024² was most of the per-frame time on an RTX 3090.
                 x = torch.from_numpy(np.asarray(rgb)).to(self.device.torch_device)
                 x = x.permute(2, 0, 1)[None].float() / 255.0
-                x = F.interpolate(x, size=(INPUT_SIZE, INPUT_SIZE), mode="bilinear",
+                x = F.interpolate(x, size=(self.input_size, self.input_size), mode="bilinear",
                                   align_corners=False, antialias=True)
                 mean = torch.tensor(_IMAGENET_MEAN, device=x.device).view(1, 3, 1, 1)
                 std = torch.tensor(_IMAGENET_STD, device=x.device).view(1, 3, 1, 1)
@@ -288,6 +325,34 @@ class BiRefNetModel:
         crop = np.ascontiguousarray(pred[py:py + nh, px:px + nw])
         out = Image.fromarray(crop, mode="F").resize((w, h), Image.BILINEAR)
         return np.clip(np.asarray(out, dtype=np.float32), 0.0, 1.0)
+
+    def alpha_batch(self, frames: list[np.ndarray], batch: int = 4) -> list[np.ndarray]:
+        """Float alpha of several same-size RGB frames, ``batch`` at a time on
+        CUDA (same resize / normalisation as :meth:`mask_image`, one forward
+        pass per batch); one frame at a time elsewhere."""
+        if self.variant == "anime" or self.device.backend != "cuda":
+            return [self.mask_image(Image.fromarray(f)) for f in frames]
+        import torch
+        import torch.nn.functional as F
+        self._ensure_loaded()
+        self._touch()
+        out: list[np.ndarray] = []
+        mean = torch.tensor(_IMAGENET_MEAN, device=self.device.torch_device).view(1, 3, 1, 1)
+        std = torch.tensor(_IMAGENET_STD, device=self.device.torch_device).view(1, 3, 1, 1)
+        for i in range(0, len(frames), batch):
+            chunk = frames[i:i + batch]
+            h, w = chunk[0].shape[:2]
+            with torch.inference_mode():
+                x = torch.from_numpy(np.stack(chunk)).to(self.device.torch_device)
+                x = x.permute(0, 3, 1, 2).float() / 255.0
+                x = F.interpolate(x, size=(self.input_size, self.input_size), mode="bilinear",
+                                  align_corners=False, antialias=True)
+                tensor = ((x - mean) / std).to(self._model_dtype)
+                preds = self._model(tensor)[-1].sigmoid()
+                pred = F.interpolate(preds.float(), size=(h, w), mode="bilinear",
+                                     align_corners=False).clamp(0.0, 1.0)[:, 0].cpu().numpy()
+            out.extend(p.astype(np.float32, copy=False) for p in pred)
+        return out
 
     def mask_images(self, images: list[Image.Image], threshold: float = 0.5) -> np.ndarray:
         """Run BiRefNet on a list of frames sequentially. Returns ``(T, H, W)``
