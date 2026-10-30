@@ -17,7 +17,7 @@ import MusicExportPanel from './MusicExportPanel';
 import {
   DEFAULT_CONSTRAINTS, MAX_ZOOM, MIN_ZOOM, MUSIC_STATE_KEY, SECTION_COLORS, SECTION_TYPES,
   applyAlternative, buildConstraints, clampZoom, clipToScene, clipsKey, countLocked, formatTime,
-  parseStoredState, progressPercent, randomSeed, replaceClip, sectionLabelKey, serializeState, toggleLock, warningKey,
+  forLibrary, parseStoredState, progressPercent, randomSeed, replaceClip, sectionLabelKey, serializeState, toggleLock, warningKey,
 } from './musicUtils';
 import type { StoredConstraints } from './musicUtils';
 
@@ -81,11 +81,26 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
   const previewReady = job?.status === 'done';
 
   // ── persistence ─────────────────────────────────────────────────────────
+  // the library the saved edit belongs to (scene ids are per library)
+  const [library, setLibrary] = useState<string | null>(null);
   useEffect(() => {
+    api.listDatabases().then((r) => {
+      const primary = r.databases.find((d) => d.primary)?.path ?? null;
+      const checked = forLibrary({ hash, proposal, constraints, library: initial?.library ?? null }, primary);
+      if (checked.proposal !== proposal) setProposal(checked.proposal);
+      if (checked.constraints && checked.constraints !== constraints && initial?.library && initial.library !== primary) {
+        setConstraints(checked.constraints);
+      }
+      setLibrary(primary);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (library == null) return;   // not known yet: do not overwrite the saved owner
     try {
-      localStorage.setItem(MUSIC_STATE_KEY, serializeState({ hash, proposal, constraints }));
+      localStorage.setItem(MUSIC_STATE_KEY, serializeState({ hash, proposal, constraints, library }));
     } catch {}
-  }, [hash, proposal, constraints]);
+  }, [hash, proposal, constraints, library]);
 
   // ── initial loads ───────────────────────────────────────────────────────
   const refreshTracks = useCallback(() => {
@@ -249,7 +264,8 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
         hash,
         constraints: buildConstraints(constraints),
         seed: randomSeed(),
-        ...(mode !== 'fresh' && clips ? { clips } : {}),
+        // locked shots are kept by every proposal, the main button included
+        ...(clips && (mode !== 'fresh' || countLocked(clips) > 0) ? { clips } : {}),
         ...(mode === 'section' && sectionIndex != null ? { regenerate_sections: [sectionIndex] } : {}),
       };
       const p = await musicApi.propose(body);
@@ -288,9 +304,11 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
   }, []);
 
   // ── preview ─────────────────────────────────────────────────────────────
+  const [startingPreview, setStartingPreview] = useState(false);
   async function startPreview() {
-    if (!hash || !clips || clips.length === 0) return;
+    if (!hash || !clips || clips.length === 0 || startingPreview) return;
     setPreviewError(null);
+    setStartingPreview(true);
     switchSource('audio');
     try {
       const j = await musicApi.startPreview({ hash, clips });
@@ -300,6 +318,8 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
       if (j.status === 'failed') setPreviewError(j.error || j.message || '?');
     } catch (e) {
       setPreviewError((e as Error).message);
+    } finally {
+      setStartingPreview(false);
     }
   }
 
@@ -313,7 +333,8 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
           setJob(j);
           if (j.status === 'failed') setPreviewError(j.error || j.message || '?');
         })
-        .catch((e) => { setPreviewError((e as Error).message); setJob(null); });
+        // one failed poll (sidecar busy) must not lose a render still running
+        .catch(() => {});
     }, 1000);
     return () => window.clearInterval(id);
   }, [job?.id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -607,7 +628,7 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
                     {!previewReady && (
                       <div className="text-xs text-[#71717A]">{clips && clips.length > 0 ? t('music.preview.none') : t('music.preview.needEdit')}</div>
                     )}
-                    <button type="button" onClick={startPreview} disabled={!clips || clips.length === 0}
+                    <button type="button" onClick={startPreview} disabled={!clips || clips.length === 0 || startingPreview || job?.status === 'queued' || job?.status === 'running'}
                             className="self-start flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[#27272A] hover:bg-[#3F3F46] text-[#FAFAFA] disabled:opacity-40 disabled:cursor-not-allowed">
                       <Sparkles size={14} className="text-[#EC4899]" />
                       {previewReady ? t('music.preview.redo') : t('music.preview.start')}

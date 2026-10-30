@@ -114,7 +114,10 @@ def make_app() -> FastAPI:
             status_code=503,
             content={
                 "error": "runtime_incomplete",
-                "detail": str(exc),
+                # the hint in "detail" too: most panels only show that field
+                "detail": f"{exc} — the app's Python environment is missing a module: "
+                          "restart AMV Tools (it installs new dependencies after an update) "
+                          "or reinstall the backend from Settings → Models.",
                 "hint": (
                     "A model runtime dependency is missing from the sidecar venv. "
                     "Reinstall the GPU backend from Settings → Models, or run "

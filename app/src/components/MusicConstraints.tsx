@@ -50,7 +50,7 @@ export default function MusicConstraints({ value, onChange, facets, sections, se
             <Pill active={value.groups.length === 0} onClick={() => set({ groups: [] })}>{t('music.constraints.seriesAll')}</Pill>
             {groups.map((g) => (
               <Pill key={g.name} active={value.groups.includes(g.name)} onClick={() => set({ groups: toggle(value.groups, g.name) })}>
-                {g.label || g.name}
+                {g.label ?? t('sp.filters.noGroup')}
                 <span className="opacity-50 ml-1 text-[10px]">{g.videos}</span>
               </Pill>
             ))}
