@@ -81,9 +81,77 @@ fond (l'interface reste utilisable, la progression et le bouton Annuler restent 
 voir §4.
 
 
-<!-- SIMULATION -->
+## 3. Est-ce que ça fait « 90 % du boulot » ? Le monteur simulé
 
-<!-- RESTE -->
+### Méthode (`tests/eval/roto_editor_sim.py`)
+
+Un « monteur » automatique utilise **les outils de l'éditeur** (le code de `backend/roto`, pas un
+raccourci), guidé par la vérité terrain du banc roto (références vérifiées à l'œil, 6 à 13 images par
+plan) :
+
+1. **Premier choix**, comme un monteur : *tous les personnages*, sauf si la passe IA « tous » prend
+   des personnages hors référence (plus d'un tiers de l'aire de la référence loin d'elle : la foule
+   derrière Beerus sur s18) → *cliquer sur le personnage* (un clic au cœur de chaque personnage de la
+   référence, vraie passe IA de l'appli). Passe IA « tous » : celle du banc (`runs/app_stable`, la même
+   chaîne Stable v5).
+2. **Boucle** : il prend la plus grosse erreur de la pire image — une image perdue d'abord (clic sur
+   le personnage là où la voisine l'a ; une image perdue à côté d'une référence presque vide, fumée ou
+   sortie de champ, est juste et laissée), sinon le plus gros morceau faux sur une image de référence
+   (morceau manquant ou en trop, au-delà des 2 px de précision de la référence), un trou que la
+   référence n'a pas, ou un bout de trait noir perdu — et le corrige d'**un geste** :
+   - un **clic** (positif / négatif) si le morceau est gros et épais (≥ 600 px, ≥ 7 px d'épaisseur) ;
+     s'il corrige moins d'un quart du morceau, il l'**annule** (un geste de plus) et peint ;
+   - sinon un **coup de pinceau** le long du morceau (son axe), rayon = sa demi-épaisseur médiane,
+     comme un monteur qui zoome ;
+   - quand il ne reste que des erreurs de bord (moins de 120 px), il essaie une fois les curseurs
+     *Élargir* (+0,5, +1, −0,5 px) et *Durcir / Adoucir* (−0,4, +0,3) — chaque position essayée compte
+     pour un geste ;
+   puis il **propage dans les deux sens** depuis l'image corrigée, et recommence.
+3. Il s'arrête quand le plan est **« propre »** ou après **30 gestes**.
+
+« Propre » (la demande) : encre de contour ≥ 97 %, 0 image perdue, 0 trou, rugosité ≤ l'ancien mode
+sur ce plan, fond le long du contour ≤ 3 %, et pour b1 la cigarette présente sur ses 84 images —
+mesurés comme au banc, sur l'alpha que l'export écrit (bords Stable v5, trait noir) à la taille de
+travail, sur les images de référence ; les images perdues sur toutes les images. Les trous ne sont
+comptés que sur les images de référence, quand la référence dit « personnage » à cet endroit : un
+creux de fond entre le bras et le corps est aussi un « petit trou » et il est juste (sur les autres
+images on ne peut pas les distinguer ; leur nombre est donné à part dans `chiffres.txt`).
+
+Ce que la simulation ne sait pas faire : regarder. Elle ne voit l'erreur que sur les 6 à 13 images de
+référence de chaque plan (un vrai monteur la voit partout, mais ne sait pas la mesurer) ; un geste
+réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps total.
+
+<!-- SIMULATION-RESULTATS -->
+
+## 5. Ce qui reste pénible
+
+- **Les critères « propre » au pixel près ne sont pas atteints en 30 gestes** (voir §3) : ce qui reste
+  après les gros morceaux est réparti le long de tout le contour (fond de 2 à 8 px autour du trait,
+  trait noir à moitié transparent), par petits bouts de 1 à 2 px sur chaque image. Un pinceau n'est pas
+  le bon outil pour ça ; les curseurs de bord (globaux) aident un peu (b1 : *Durcir* −0,4 fait passer
+  l'encre de 94,4 à 96,4 %), pas assez. Il manque un outil de **bord local** (« affiner le bord ici »,
+  comme le Refine Edge d'After Effects) qui recalcule le bord dans une zone peinte à partir des
+  couleurs : c'est le prochain chantier si l'éditeur plaît.
+- **Une propagation recalcule les images entre deux images verrouillées** à partir de la passe IA et de
+  l'objet suivi : une correction propagée plus tôt sur ces images peut être en partie perdue si on
+  propage ensuite depuis une autre image. Parade dans l'interface : valider (`V`) les images qui sont
+  bonnes, ou propager dans un seul sens. À améliorer : propager la *correction* elle-même (ce qui a été
+  ajouté / retiré) plutôt que de repartir de la passe IA.
+- **Plans à effets (aura SSJ3)** : la passe IA garde des morceaux d'aura et de sol ; trois clics droits
+  enlèvent l'aura d'une image et la propagation les reporte, mais la lueur sombre autour des mèches
+  (déjà signalée parties 6-7 du rapport roto) reste : aucun geste du monteur simulé ne l'a enlevée, et
+  presque toutes les images y sont « à vérifier » (70 à 77 sur 79), ce qui rend la liste inutile sur ce
+  type de plan.
+- **Clic négatif sur une aura translucide** : SAM y voit parfois l'aura *et* le personnage ; l'éditeur
+  prend la plus petite région sûre et seulement le morceau sous le curseur (corrigé pendant le
+  chantier : avant, un clic droit sur l'aura emportait Goku), mais il arrive encore qu'un clic n'enlève
+  qu'un bout : on recommence ou on peint.
+- **Sur CPU** la passe IA est lente (ISNet anime sans suivi, voir §4) et rien n'a été mesuré sur Mac
+  ni sous Windows.
+- Annuler / rétablir ne survit pas à une fermeture de l'appli (les détourages, si : ils sont sauvés).
+- Pas de renommage des personnages (calques) ; « Refaire la passe IA » (ajouté en fin de chantier)
+  garde les images corrigées mais remplace la passe IA de toutes les autres.
+
 
 ## 6. Ce que Léandro doit tester
 
