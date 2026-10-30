@@ -317,9 +317,19 @@ def warm_click_model(state) -> None:
     try:
         variant = editor_tracker(state)
         if variant is not None and getattr(state.device, "backend", "cpu") != "cpu":
+            import torch
+            from ..models.sam2 import _autocast
             sam2 = state.get_sam2(variant=variant)
             sam2._ensure_image_loaded()
             sam2._touch()
+            # one dummy inference: the first real one otherwise pays the GPU
+            # kernels' warm-up (seconds) on the user's first click
+            pred = sam2._image_predictor
+            with _pred_lock, torch.inference_mode(), _autocast(state.device):
+                pred.set_image(np.zeros((576, 1024, 3), np.uint8))
+                pred.predict(point_coords=np.array([[512.0, 288.0]], np.float32),
+                             point_labels=np.array([1], np.int32), multimask_output=True)
+                _pred_key["key"] = None
     except Exception:
         log.exception("roto: could not preload the click model")
 
