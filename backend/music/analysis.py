@@ -40,6 +40,8 @@ SECTION_TYPES = ("intro", "verse", "build", "drop", "chorus", "bridge", "outro")
 # Drop = energy jump into a loud section, with the bass coming in too.
 _DROP_JUMP = 0.17
 _DROP_BASS_JUMP = 0.12
+# Accent margin above which the bar phase is taken as obvious (see _accent_margin).
+_CLEAR_ACCENT = 0.8
 # Minimum section length in bars (shorter novelty peaks are merged).
 _MIN_SECTION_BARS = 4
 
@@ -212,6 +214,23 @@ def _downbeat_phase(beat_frames: np.ndarray, feats: dict) -> int:
     strength = z(change) + 0.7 * z(attack) + 0.5 * z(bass) + 0.7 * z(loud)
     scores = [float(np.mean(strength[p::METER])) for p in range(METER)]
     return int(np.argmax(scores))
+
+
+def _accent_margin(beat_frames: np.ndarray, feats: dict) -> float:
+    """How clearly one beat phase is accented: best minus second phase score
+    of ``_downbeat_phase`` (in z units). Large on a metronome-like accent,
+    small on real mixes where the heuristic often misses."""
+    nb = len(beat_frames)
+    if nb < METER * 2:
+        return 0.0
+    n = feats["n"]
+    bounds = np.clip(beat_frames, 0, n - 1)
+    loud = np.asarray([float(np.max(feats["loud_db"][f:f + 4])) for f in bounds])
+    attack = feats["onset_env"][bounds]
+    z = lambda v: (v - np.mean(v)) / (np.std(v) + 1e-9)  # noqa: E731
+    strength = 0.7 * z(attack) + 0.7 * z(loud)
+    scores = sorted((float(np.mean(strength[p::METER])) for p in range(METER)), reverse=True)
+    return scores[0] - scores[1]
 
 
 # ── sections ────────────────────────────────────────────────────────────────
@@ -556,6 +575,28 @@ def _apply_beat_drops(sections: list[dict], drops: list[float], bar_s: float) ->
     return out
 
 
+def _beat_this_phase(y: np.ndarray, sr: int, beats: np.ndarray) -> Optional[int]:
+    """Bar phase of ``beats`` agreeing best with Beat This!'s first beats, or
+    None (model not downloaded / unusable, or too little agreement)."""
+    if len(beats) < 2 * METER:
+        return None
+    from . import beatthis
+    res = beatthis.beats_and_downbeats(y, sr)
+    if res is None or len(res[1]) < 4:
+        return None
+    db = res[1]
+    hits = []
+    for p in range(METER):
+        grid = beats[p::METER]
+        d = np.min(np.abs(grid[:, None] - db[None, :]), axis=1)
+        hits.append(int(np.sum(d <= 0.07)))
+    best = int(np.argmax(hits))
+    # its bars must mostly sit on our beats (same tempo octave, same grid)
+    if hits[best] < 0.5 * min(len(db), len(beats[best::METER])):
+        return None
+    return best
+
+
 def _segments(y: np.ndarray, sr: int) -> dict:
     import librosa
 
@@ -581,7 +622,18 @@ def _segments(y: np.ndarray, sr: int) -> dict:
             votes[int(np.argmin(np.abs(beats - t))) % METER] += strength
         if drop_times:
             phase = int(np.argmax(votes))
+    bars_engine = "drops" if drop_times else "accents"
     downbeats = beats[phase::METER]
+    # Beat This! (optional model): its first beats choose the phase of our
+    # beat grid for the bar markers shown and exported (our beats stay:
+    # steadier on synthetic and slow songs). The sections keep the grid
+    # above: re-cut on these bars, they lost drops (measured).
+    marker_downbeats = downbeats
+    # A metronome-clear accent (margin ~1.5; real mixes measured 0.08-0.35)
+    # is kept: Beat This! missed every bar of a 120 BPM click track.
+    bt_phase = _beat_this_phase(y, sr, beats) if _accent_margin(beat_frames, feats) <= _CLEAR_ACCENT else None
+    if bt_phase is not None:
+        marker_downbeats, bars_engine = beats[bt_phase::METER], "beat_this"
 
     onset_frames = librosa.onset.onset_detect(onset_envelope=feats["onset_env"], sr=sr,
                                               hop_length=HOP, units="frames")
@@ -673,7 +725,8 @@ def _segments(y: np.ndarray, sr: int) -> dict:
         "variable_tempo": bool(variable),
         "meter": METER,
         "beats_ms": [_ms(t) for t in beats],
-        "downbeats_ms": [_ms(t) for t in downbeats],
+        "downbeats_ms": [_ms(t) for t in marker_downbeats],
+        "bars_engine": bars_engine,
         "onsets_ms": [_ms(t) for t in onsets],
         "strong_onsets_ms": [_ms(t) for t in strong],
         "drops_ms": [_ms(t) for t in drops],
