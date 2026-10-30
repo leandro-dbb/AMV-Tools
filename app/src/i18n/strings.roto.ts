@@ -266,4 +266,9 @@ export const rotoStrings: Dict = {
   'roto.keys.fullscreen': { en: 'Full screen', fr: 'Plein écran' },
   'roto.keys.help': { en: 'This help', fr: 'Cette aide' },
   'roto.keys.close': { en: 'Close the help / the editor', fr: 'Fermer l\'aide / l\'éditeur' },
+  // server job messages (backend/api/roto.py), shown under the progress bar
+  'roto.msg.cutting': { en: 'Cutting out the characters', fr: 'Détourage des personnages' },
+  'roto.msg.suspects': { en: 'Looking for frames to check', fr: 'Recherche des images à vérifier' },
+  'roto.msg.following': { en: 'Following the corrections along the shot', fr: 'Suivi des corrections le long du plan' },
+  'roto.msg.writing': { en: 'Writing the files', fr: 'Écriture des fichiers' },
 };

@@ -25,6 +25,14 @@ interface RotoEditorProps {
 }
 
 type Target = 'all' | 'main' | 'click';
+
+// The sidecar's job messages (English), shown translated.
+const JOB_MESSAGES: Record<string, string> = {
+  'Cutting out the characters': 'roto.msg.cutting',
+  'Looking for frames to check': 'roto.msg.suspects',
+  'Following the corrections along the shot': 'roto.msg.following',
+  'Writing the files': 'roto.msg.writing',
+};
 interface PickPoint { x: number; y: number; positive: boolean }
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -717,7 +725,7 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
                   <div className="flex items-center gap-3 text-xs">
                     <Loader2 size={14} className="animate-spin text-[#C084FC]" />
                     <span className="font-semibold">{jobTitle}</span>
-                    <span className="text-[#A1A1AA] truncate flex-1">{job.message}</span>
+                    <span className="text-[#A1A1AA] truncate flex-1">{JOB_MESSAGES[job.message] ? t(JOB_MESSAGES[job.message]) : job.message}</span>
                     <span className="font-mono">{Math.round(job.percent)}%</span>
                     <button className="px-3 py-1 rounded-lg bg-[#27272A] hover:bg-[#3F3F46] text-[#FAFAFA]" onClick={cancelJob} data-testid="roto-cancel">
                       {t('roto.job.cancel')}
