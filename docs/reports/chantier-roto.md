@@ -47,7 +47,7 @@ au bord) ; plan 03 SSJ3 pire que l'ancien (escalier, franges grises, trous aux p
 Essayé et retiré : estomper par l'alpha les grosses excroissances lumineuses (flammes d'aura) collées au
 personnage — sans effet sur le SSJ3, où SAM 3 colle lui-même l'aura au personnage.
 
-## 2. Exemples v5 (`/srv/data/amv-tools/reports/roto/exemples-v5/`, mêmes 3 plans)
+## 2. Exemples v5 (hors dépôt, dossier `reports/roto/exemples-v5/`, mêmes 3 plans)
 
 Mesuré sur les ProRes 1080p de l'appli (ancien 0.4 → v4 → v5) :
 
@@ -262,7 +262,7 @@ Diagnostic des deux pannes visibles :
 
 ## 2. Le banc refondu
 
-Racine `/srv/data/amv-tools/roto-stable/bench` (27 plans notés : les 22 du banc + les 5 plans à objets
+Racine du banc hors dépôt (`roto-stable/bench`) (27 plans notés : les 22 du banc + les 5 plans à objets
 de la branche « objets tenus » ; s08 reste exclu). Ce qui change (`tests/eval/roto_eval.py`) :
 
 - **Stabilité sur toutes les images** (2 058 images), sans référence :
