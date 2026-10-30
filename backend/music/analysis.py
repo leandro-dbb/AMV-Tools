@@ -516,8 +516,8 @@ def _beat_drops(beat_frames: np.ndarray, feats: dict, intensity: np.ndarray) -> 
     for i in np.argsort(-score):
         if score[i] <= 0:
             break
-        # the windows peak around the drop: it is the beat, near the peak,
-        # where the bass comes back the most sharply
+        # the 2-bar windows peak around the drop: it is the beat, near the
+        # peak, where the bass comes back the most sharply
         near = range(max(1, int(i) - 2), min(nb, int(i) + 3))
         k = max(near, key=lambda j: float(bass[j] - bass[j - 1]))
         if all(abs(k - j) >= _BD_MIN_GAP for j, _ in found):
@@ -568,6 +568,19 @@ def _segments(y: np.ndarray, sr: int) -> dict:
     tempo, beats, variable = _track_beats(feats["onset_env"], sr, duration)
     beat_frames = np.clip(librosa.time_to_frames(beats, sr=sr, hop_length=HOP), 0, n - 1)
     phase = _downbeat_phase(beat_frames, feats)
+    # Drops land on the first beat of a bar: when the song has some, they
+    # set the bar phase (found from the beats alone, so no circularity).
+    # The accent heuristic above was 1-2 beats off on 3 of 6 real songs.
+    drop_times: list[float] = []
+    if len(beats) >= 2 * METER:
+        bar_guess = METER * float(np.median(np.diff(beats)))
+        votes = np.zeros(METER)
+        for k, strength in _beat_drops(beat_frames, feats, intensity):
+            t = _refine_drop(float(beats[k]), bar_guess, intensity, times, beats, np.zeros(0))
+            drop_times.append(t)
+            votes[int(np.argmin(np.abs(beats - t))) % METER] += strength
+        if drop_times:
+            phase = int(np.argmax(votes))
     downbeats = beats[phase::METER]
 
     onset_frames = librosa.onset.onset_detect(onset_envelope=feats["onset_env"], sr=sr,
@@ -636,8 +649,7 @@ def _segments(y: np.ndarray, sr: int) -> dict:
 
     if sections and len(beats) and len(bar_times) >= 3:
         bar_s = float(np.median(np.diff(bar_times)))
-        found = [_refine_drop(float(beats[i]), bar_s, intensity, times, beats, strong)
-                 for i, _score in _beat_drops(beat_frames, feats, intensity)]
+        found = [_snap(t, strong, 0.07) for t in drop_times]
         sections = _apply_beat_drops(sections, sorted(found), bar_s)
 
     drops = [s["start"] for s in sections if s["type"] == "drop"]

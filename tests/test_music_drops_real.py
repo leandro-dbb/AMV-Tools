@@ -14,10 +14,10 @@ from backend.music.analysis import analyze_audio
 
 GT = json.loads((Path(__file__).parent / "data" / "music_drops_gt.json").read_text())
 MEDIA = Path(os.environ.get("AMV_MUSIC_MEDIA", Path.home() / "dev/amv-testdata/music"))
-# measured at the fix: 8 of 14 annotated drops (2 before), 1 drop not in the
-# annotations (Voltaic 160 s, entry of the last chorus after a build: already
-# found before the fix)
-MIN_FOUND, MAX_EXTRA = 8, 1
+# measured at the fix: 8 of 14 annotated drops (2 before), no drop outside
+# the annotations (before: Voltaic 160 s; the bar phase now follows the
+# drops, which moved that section boundary)
+MIN_FOUND, MAX_EXTRA = 8, 0
 
 
 def test_real_songs_drops():
