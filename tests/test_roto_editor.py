@@ -348,3 +348,14 @@ def test_brush_edge_snaps_to_the_drawn_line():
     assert plain[30, 81] > 0.9                     # the round brush spills 2 px past the edge
     assert snapped[30, 81] < plain[30, 81] - 0.3   # snapped: it stops on the edge
     assert snapped[30, 70] > 0.99 and snapped[5, 5] == 0
+
+
+def test_propagated_matte_has_no_faint_veil():
+    from backend.roto.engine import merge_track
+    track = _disc(0) * 0.95
+    track[:, 120:] = 0.2            # SAM 2 unsure over a wide area (an aura): sigmoid 0.2
+    m = merge_track(_disc(0), track)
+    assert m[:, 125:].max() == 0.0
+    assert m[48, 50] > 0.99
+    m2 = merge_track(None, track)
+    assert m2[:, 125:].max() == 0.0 and m2[48, 50] > 0.99

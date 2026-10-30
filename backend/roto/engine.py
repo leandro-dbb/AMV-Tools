@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 
 NEAR_PX = 5            # the AI matte is kept within this distance of the tracked object (px)
 TRACK_ERODE_PX = 1     # the tracked object fills where the AI matte has nothing, shrunk by this
+TRACK_LO, TRACK_HI = 0.35, 0.65   # SAM 2 probabilities ramped to 0..1 between these (no faint veil)
 CLICK_MAX_FRAC = 0.45  # a click region bigger than this share of the frame is refused
 WINDOW = 48            # SAM 2 propagation window (bounded memory on long shots)
 
@@ -341,13 +342,22 @@ def _disk(r: int) -> np.ndarray:
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
 
 
+def crisp_track(track: np.ndarray) -> np.ndarray:
+    """SAM 2's mask probabilities, sharpened to a ramp of ~1 px around 0.5:
+    its low-confidence areas (sigmoid of slightly negative logits, 0.05 to
+    0.4 over a whole aura) otherwise became a faint veil of alpha over large
+    parts of the frame."""
+    t = np.asarray(track, np.float32)
+    return np.clip((t - TRACK_LO) / (TRACK_HI - TRACK_LO), 0.0, 1.0).astype(np.float32)
+
+
 def merge_track(ai: Optional[np.ndarray], track: np.ndarray, near_px: int = NEAR_PX) -> np.ndarray:
     """Propagated matte of a frame: the AI pass's soft edge where it agrees
     with the tracked object (kept within ``near_px`` of it: what the user
     removed on the corrected frame stays removed), the tracked object where
     the AI pass has nothing (what the user added, a character the AI lost)."""
     import cv2
-    tr = np.clip(np.asarray(track, np.float32), 0.0, 1.0)
+    tr = crisp_track(track)
     trm = (tr > 0.5).astype(np.uint8)
     if ai is None or float(ai.max()) < 0.3 or not trm.any():
         return tr if trm.any() else np.zeros_like(tr)

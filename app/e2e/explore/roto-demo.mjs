@@ -16,11 +16,16 @@ const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
 fs.mkdirSync(out, { recursive: true });
 const exe = process.env.AMV_CHROME || (process.env.HOME + '/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome');
 const W = 1600; const H = 900;
-const browser = await chromium.launch({ headless: false, executablePath: exe, args: ['--window-size=1600,900'] });
-const context = await browser.newContext({ viewport: { width: W, height: H }, recordVideo: { dir: out, size: { width: W, height: H } } });
+const browser = await chromium.launch({ headless: false, executablePath: exe, args: ['--window-position=0,0', `--window-size=${W},${H + (Number(process.env.DEMO_CHROME_PX) || 0)}`,
+  '--disable-features=Translate,TranslateUI', '--lang=en-US', '--no-first-run', '--disable-infobars'] });
+// DEMO_PW_VIDEO=1: Playwright's own recording; otherwise the Xvfb screen is
+// recorded from outside (ffmpeg x11grab) and t0 is written as epoch time.
+const pwVideo = process.env.DEMO_PW_VIDEO === '1';
+const context = await browser.newContext({ viewport: { width: W, height: H },
+  ...(pwVideo ? { recordVideo: { dir: out, size: { width: W, height: H } } } : {}) });
 const page = await context.newPage();
 const t0 = Date.now();
-const events = [];
+const events = [{ t: 0, kind: 'start', label: String(t0 / 1000) }];
 const mark = (kind, label) => events.push({ t: (Date.now() - t0) / 1000, kind, label });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.addInitScript(() => {
@@ -92,9 +97,10 @@ await q.type(plan.query, { delay: 45 });
 await q.press('Enter');
 const cards = page.locator('div.group.cursor-pointer');
 await cards.first().waitFor({ timeout: 180_000 });
+await glide(W - 40, 300);   // off the cards: a hovered card swaps its picture for a video
 await pause(1200);
 const card = plan.sceneId
-  ? cards.filter({ has: page.locator(`img[src*="/api/scene/${plan.sceneId}/thumbnail"]`) }).first()
+  ? cards.filter({ has: page.locator(`[src*="/api/scene/${plan.sceneId}/"]`) }).first()
   : cards.nth(plan.card || 0);
 await card.scrollIntoViewIfNeeded();
 await clickEl(card);
