@@ -48,6 +48,7 @@ CLICK_MIN_R = 7.0        # ... and this thick (px) are clicked; smaller ones pai
 CLICK_MIN_GAIN = 0.25    # a click that fixes less than this share of the piece is undone, then painted
 MIN_PIECE = 15           # error pieces under this many pixels are not worth a gesture
 INK_MIN_PX = 30          # stretches of ink line shorter than this are not worth a stroke
+LOST_FRAC_REF = 0.6      # a lost frame next to a reference this much smaller than usual is justified
 TUNE_BELOW_PX = 120     # the edge sliders are tried once the pieces left are this small
 HUMAN_S_PER_GESTURE = 5  # rough time a user spends per gesture (look, aim, check), for the total
 
@@ -126,6 +127,17 @@ def shot_metrics(project, gts: dict, cuts, held: dict, all_frames: bool = True) 
         js.append(float(((a > 0.5) & gt).sum() / u) if u else 1.0)
     masks = project.masks["main"]
     lost = lost_frames(masks.astype(np.float32) / 255.0, cuts)
+    # a frame "lost" where the reference itself has (almost) nothing — smoke
+    # hiding the character (s16), an exit — is right, not an error: the
+    # nearest reference within 8 frames tells
+    areas = {u: float(g.sum()) for u, g in gts.items()}
+    med = float(np.median(list(areas.values()))) if areas else 0.0
+    lost_ok = []
+    for t in lost:
+        near = sorted((abs(u - t), u) for u in areas if abs(u - t) <= 8)
+        if near and areas[near[0][1]] < LOST_FRAC_REF * med:
+            lost_ok.append(t)
+    lost = [t for t in lost if t not in lost_ok]
     # holes: only where the reference can tell a missing piece of the
     # character from a real pocket of background (between an arm and the
     # body); every small enclosed hole of the other frames is counted apart
@@ -148,7 +160,7 @@ def shot_metrics(project, gts: dict, cuts, held: dict, all_frames: bool = True) 
     nm = lambda k: float(np.nanmean([v[k] for v in per.values()])) if per else float("nan")   # noqa: E731
     return {"ink": nm("ink"), "ink_min": float(np.nanmin([v["ink"] for v in per.values()])) if per else float("nan"),
             "bg": nm("bg"), "eaten": nm("eaten"), "jag": nm("jag"), "holes_all": holes_all, "holes": holes,
-            "hole_frames": hole_frames, "lost": len(lost), "lost_ids": lost, "held_lost": held_lost,
+            "hole_frames": hole_frames, "lost": len(lost), "lost_ids": lost, "lost_ok": lost_ok, "held_lost": held_lost,
             "held_min": held_min, "err": err, "J": float(np.mean(js)) if js else float("nan"), "per": per}
 
 
@@ -197,7 +209,7 @@ def pick_target(p, gts: dict, m: dict, c: dict, stuck: set):
     from backend.models.edge_refine import outline_ink
     import cv2
     for t in m["lost_ids"]:
-        if (t, "lost") in stuck:
+        if (t, "lost") in stuck or t in m.get("lost_ok", ()):
             continue
         stuck.add((t, "lost"))
         nb = p.matte("main", t - 1 if t > 0 else t + 1) > 0.5
