@@ -1,9 +1,10 @@
-import { ChevronLeft, ChevronRight, ChevronDown, Play, Pause, Download, Plus, X, Loader2, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Play, Pause, Download, Plus, X, Loader2, Sparkles, Scissors } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { AppSettings, SceneResult, TagSummary, VideoSummary } from '../api/types';
 import { useT } from '../i18n';
 import MaskMode from './MaskMode';
+import RotoEditor from './RotoEditor';
 import { SimilarButton } from './SceneBadges';
 import FinishMenu from './FinishMenu';
 import { parseApiError } from '../modelTiers';
@@ -36,6 +37,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
   const [switching, setSwitching] = useState(false);
   const [maskOpen, setMaskOpen] = useState(false);
   const [maskEnabled, setMaskEnabled] = useState(false);
+  const [rotoOpen, setRotoOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
@@ -354,6 +356,16 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                 {t('editor.mask')}
               </button>
             )}
+            {/* Roto editor (v0.6): the AI cuts out, the user fixes. */}
+            <button
+              onClick={() => { videoRef.current?.pause(); setRotoOpen(true); }}
+              className="ml-3 px-5 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] hover:text-[#FAFAFA] border-2 border-[#EC4899]/40 hover:border-[#EC4899] whitespace-nowrap"
+              title={t('roto.openTitle')}
+              data-testid="roto-open"
+            >
+              <Scissors size={16} />
+              {t('roto.open')}
+            </button>
             <SimilarButton sceneId={scene.id} label
                            className="ml-3 px-4 py-2.5 rounded-xl text-sm font-semibold bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] hover:text-[#FAFAFA] border-2 border-[#8B5CF6]/40 hover:border-[#8B5CF6] whitespace-nowrap" />
             {/* Finishing passes (upscale / slow-mo / depth / cutout) on the
@@ -430,6 +442,14 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
                   onClose={() => setMaskOpen(false)}
                   onExportError={(msg) => setExportResult(`Error: ${msg}`)}
                   onExportSuccess={(out) => { setExportResult(out); api.revealOutput(out); }}
+                />
+              )}
+              {rotoOpen && (
+                <RotoEditor
+                  sceneId={scene.id}
+                  startMs={trimStart}
+                  endMs={trimEnd}
+                  onClose={() => setRotoOpen(false)}
                 />
               )}
             </div>
