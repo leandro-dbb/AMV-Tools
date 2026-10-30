@@ -213,6 +213,8 @@ def open_project(body: OpenBody):
         if int(meta.get("start_ms", -1)) == start and int(meta.get("end_ms", -1)) == end:
             p = get_project(meta["id"])
             if p is not None:
+                if p.has_ai_pass():
+                    engine.warm_in_background(get_state())
                 return project_dict(p)
     try:
         fps = float(probe_video(scene["filepath"]).get("fps") or 24.0)
@@ -327,6 +329,7 @@ def detect(pid: str, body: DetectBody):
             p.meta["shots"] = None
         job.message = "Looking for frames to check"
         p.suspects()   # computed here, not on the next GET (the UI reloads right away)
+        engine.warm_in_background(state)
         job.message = "Done"
     return _start_job(p, "detect", run)
 
