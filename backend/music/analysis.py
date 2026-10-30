@@ -27,7 +27,7 @@ import numpy as np
 
 from .audio import DEFAULT_SR, decode_audio, fingerprint_file
 
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4   # 4: beat-level drops (v06 fix)
 HOP = 512
 N_FFT = 2048
 METER = 4
@@ -463,6 +463,99 @@ def _refine_drop(start: float, bar_s: float, intensity: np.ndarray, times: np.nd
     return snapped
 
 
+# Beat-level drops: the full beat and the bass come back after a break or a
+# build. Section boundaries alone missed drops that sit inside a section
+# (the same loop, much louder) or a bar off its boundary. A pause after
+# which the same groove resumes at the same level is not a drop: the music
+# after must be louder than the passage before the break, or come back on
+# a hit (kick / crash: more attack than before).
+_BD_WINDOW = 8          # beats compared on each side (2 bars)
+_BD_JUMP = 0.15         # intensity after - before
+_BD_BASS_JUMP = 0.15    # bass after - before
+_BD_BREAK = 0.20        # bass after - quietest bass of the beat before
+_BD_CONTEXT = 0.10      # intensity after - the 6 bars before the break
+_BD_HIT = 0.08          # or: attack after - before (normalised)
+_BD_HIGH_PCT = 62       # the passage after is among the loud ones
+_BD_MIN_GAP = 32        # beats between two drops (8 bars)
+# A drop into a passage less loud than the song's peak sections: only with a
+# big bass return above a clearly quieter stretch, landing on a hit.
+_BD_SOFT_PCT = 25
+_BD_SOFT_CONTEXT = 0.20
+_BD_SOFT_BASS = 0.30
+
+
+def _beat_drops(beat_frames: np.ndarray, feats: dict, intensity: np.ndarray) -> list[tuple[int, float]]:
+    """(beat index, strength) of the drops, strongest first."""
+    n = feats["n"]
+    nb = len(beat_frames)
+    W = _BD_WINDOW
+    if nb < 3 * W:
+        return []
+    bounds = np.append(np.clip(beat_frames, 0, n - 1), n)
+    inten = _span_mean(intensity, bounds)[0]
+    bass = _span_mean(feats["bass"], bounds)[0]
+    attack = _span_mean(feats["onset_env"], bounds)[0]
+    attack = attack / (float(np.percentile(attack, 90)) + 1e-9)
+    floor = float(np.percentile(inten, _BD_HIGH_PCT))
+    soft_floor = float(np.percentile(inten, _BD_SOFT_PCT))
+    score = np.zeros(nb)
+    for i in range(W, nb - W):
+        after, before = float(inten[i:i + W].mean()), float(inten[i - W:i].mean())
+        b_after, b_before = float(bass[i:i + W].mean()), float(bass[i - W:i].mean())
+        if after < soft_floor or after - before < _BD_JUMP or b_after - b_before < _BD_BASS_JUMP:
+            continue
+        if b_after - float(bass[i - 4:i].min()) < _BD_BREAK:
+            continue
+        context = after - float(inten[max(0, i - 4 * W):i - W].mean()) if i > W else after - before
+        hit = float(attack[i:i + W].mean() - attack[i - W:i].mean())
+        loud = after >= floor and (context >= _BD_CONTEXT or hit >= _BD_HIT)
+        soft = context >= _BD_SOFT_CONTEXT and b_after - b_before >= _BD_SOFT_BASS and hit >= 0.05
+        if loud or soft:
+            score[i] = (after - before) + (b_after - b_before)
+    found: list[tuple[int, float]] = []
+    for i in np.argsort(-score):
+        if score[i] <= 0:
+            break
+        # the windows peak around the drop: it is the beat, near the peak,
+        # where the bass comes back the most sharply
+        near = range(max(1, int(i) - 2), min(nb, int(i) + 3))
+        k = max(near, key=lambda j: float(bass[j] - bass[j - 1]))
+        if all(abs(k - j) >= _BD_MIN_GAP for j, _ in found):
+            found.append((k, float(score[i])))
+    return found
+
+
+def _apply_beat_drops(sections: list[dict], drops: list[float], bar_s: float) -> list[dict]:
+    """Make every beat-level drop a "drop" section: the section starting
+    within a bar of it becomes the drop (starting on it), otherwise the
+    section holding it is split there."""
+    out = [dict(s) for s in sections]
+    for t in drops:
+        # the section-level drop already marks this one (it is refined on
+        # the sharpest rise; the beat-level window can sit up to 2 bars off)
+        if any(s["type"] == "drop" and abs(s["start"] - t) <= 2 * bar_s for s in out):
+            continue
+        # a drop a few bars ahead: this is the build-up leading to it
+        if any(s["type"] == "drop" and 0 < s["start"] - t <= 4 * bar_s for s in out):
+            continue
+        near = [s for s in out if abs(s["start"] - t) <= bar_s and s["start"] > 0]
+        if near:
+            s = min(near, key=lambda x: abs(x["start"] - t))
+            k = out.index(s)
+            s["type"] = "drop"
+            s["start"] = t
+            if k > 0:
+                out[k - 1]["end"] = t
+            continue
+        for k, s in enumerate(out):
+            if s["start"] < t < s["end"] and t - s["start"] >= bar_s and s["end"] - t >= bar_s:
+                tail = dict(s, type="drop", start=t)
+                s["end"] = t
+                out.insert(k + 1, tail)
+                break
+    return out
+
+
 def _segments(y: np.ndarray, sr: int) -> dict:
     import librosa
 
@@ -540,6 +633,12 @@ def _segments(y: np.ndarray, sr: int) -> dict:
     else:
         sections.append({"type": "verse", "start": 0.0, "end": duration,
                          "energy": float(np.mean(intensity)) if n else 0.0})
+
+    if sections and len(beats) and len(bar_times) >= 3:
+        bar_s = float(np.median(np.diff(bar_times)))
+        found = [_refine_drop(float(beats[i]), bar_s, intensity, times, beats, strong)
+                 for i, _score in _beat_drops(beat_frames, feats, intensity)]
+        sections = _apply_beat_drops(sections, sorted(found), bar_s)
 
     drops = [s["start"] for s in sections if s["type"] == "drop"]
 

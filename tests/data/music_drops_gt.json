@@ -1,0 +1,193 @@
+{
+ "tolerance_s": 0.25,
+ "method": "Annotated without listening: ffmpeg mono 22.05 kHz -> log-mel spectrogram, RMS, <150 Hz band, >4 kHz band, onset strength; full-track plots then +-8 s and +-2 s zooms (hop 64/32 samples). t = first strong kick/bass onset of the impact. Medium = genuine doubt that it is a drop (or about which of two close hits is the instant). Scripts in /tmp/drops/{analyze,zoom,precise}.py.",
+ "tracks": {
+  "Take_the_Lead.mp3": {
+   "drops": [
+    {
+     "t": 54.9,
+     "confidence": "high",
+     "why": "After half-time bass stabs (41.9-52.5) and a ~2 s drum build (52.6-54.8), continuous 4-on-the-floor + sustained bass + new chord layer start; low band -9 -> -6.7 dB, hi +4 dB. Previous 54.9 confirmed (onset peak 54.91, librosa beat 54.92)."
+    },
+    {
+     "t": 109.75,
+     "confidence": "medium",
+     "why": "Main theme returns after a drum-heavy, slightly lower section (80-109.6): sustained bass + chords start at 109.70, first kick 109.76; total +2.6 dB, low +3.4 dB. Kick/bass were never removed and there is no real riser, so it is a strong section change rather than a textbook drop. Previous 109.7 kept (within tolerance)."
+    },
+    {
+     "t": 178.32,
+     "confidence": "high",
+     "why": "After a quiet drumless breakdown (~138-176.5, pads + sustained bass) and a 1-bar drum fill (176.6-177.9) with a ~0.35 s near-silent gap in the highs, the crash + full beat land at 178.32 (hi band -30 -> -13 dB, largest onset in the window, librosa beat 178.35, on the bar grid from 54.9). MOVED from 177.7: 177.7 is the last hit of the pickup fill, 0.63 s early."
+    }
+   ],
+   "not_drops": [
+    {
+     "t": 41.9,
+     "why": "Intro -> half-time chord/bass stabs every 2 beats; this is the start of the build that pays off at 54.9, not a full beat."
+    },
+    {
+     "t": 139.0,
+     "why": "Energy goes DOWN here (start of breakdown, -6 dB)."
+    },
+    {
+     "t": 164.7,
+     "why": "Sustained bass layer enters inside the breakdown; gentle change (+3 dB low), no kick."
+    },
+    {
+     "t": 177.7,
+     "why": "Previous annotation; it is the last hit of the drum fill before the real drop at 178.32."
+    }
+   ],
+   "notes": "Heavily compressed mix, small dB contrasts; drops judged mostly from texture changes. librosa tempo 136. plots: /tmp/drops/Take_the_Lead_full.png, /tmp/drops/Take_the_Lead_z41.8.png, /tmp/drops/Take_the_Lead_z54.9.png, /tmp/drops/Take_the_Lead_z109.7.png, /tmp/drops/Take_the_Lead_z160.5.png, /tmp/drops/Take_the_Lead_z177.7.png, /tmp/drops/Take_the_Lead_z178.00_w2.png, /tmp/drops/Take_the_Lead_z109.70_w2.png, /tmp/drops/Take_the_Lead_z100.00_w20.png"
+  },
+  "Double_Drift.mp3": {
+   "drops": [
+    {
+     "t": 10.67,
+     "confidence": "medium",
+     "why": "First entry of bass+kick after a 10 s pad intro, preceded by a ~0.6 s gap where the low band falls to -50 dB; total +9 dB. Doubt: what follows is the sparse half-time stab section, not the full beat (that arrives at 32.03)."
+    },
+    {
+     "t": 32.03,
+     "confidence": "high",
+     "why": "End of stab section; the bar before decays to -45 dB in the low band, then continuous full beat with bass: low +17 dB, total +8 dB (4 s means)."
+    },
+    {
+     "t": 106.68,
+     "confidence": "high",
+     "why": "After 86-96 pad breakdown and 96-106.6 stab build (low decaying to -45 dB in the last bar), full beat + bass return: low +7 dB, total +6.6 dB, hi +8 dB. Previous 106.65 confirmed."
+    },
+    {
+     "t": 181.36,
+     "confidence": "high",
+     "why": "After a 20 s break (160-181, highs removed, only decaying bass stabs), full band returns: low +20 dB, total +9.5 dB, hi +12 dB. Strongest drop of the track."
+    }
+   ],
+   "not_drops": [
+    {
+     "t": 90.7,
+     "why": "Single bass hit inside the pad breakdown; no full beat follows."
+    },
+    {
+     "t": 96.04,
+     "why": "Stab section restarts after the pad breakdown, but bass was sustained through the breakdown (low only +3 dB), no pre-gap; it is the build toward 106.68."
+    },
+    {
+     "t": 160.5,
+     "why": "Energy drops (start of the break)."
+    }
+   ],
+   "notes": "librosa tempo 89. Recurring pattern: half-time decaying stab sections act as builds; drops are where the continuous beat resumes. plots: /tmp/drops/Double_Drift_full.png, /tmp/drops/Double_Drift_z10.9.png, /tmp/drops/Double_Drift_z32.4.png, /tmp/drops/Double_Drift_z91.0.png, /tmp/drops/Double_Drift_z96.00_w8.png, /tmp/drops/Double_Drift_z106.7.png, /tmp/drops/Double_Drift_z160.50_w8.png, /tmp/drops/Double_Drift_z181.7.png"
+  },
+  "Voltaic.mp3": {
+   "drops": [
+    {
+     "t": 16.04,
+     "confidence": "medium",
+     "why": "Intro (kick+bass only, highs empty) -> full arrangement; hi band +25 dB, total +4 dB, onset peak 16.035 = librosa beat. Doubt: kick/bass were present through the intro, so this is 'everything else joins' rather than bass returning."
+    },
+    {
+     "t": 63.82,
+     "confidence": "high",
+     "why": "End of a 16 s break (48-63.5, highs/leads removed). Noise crash at 63.52, bass drops out 63.55-63.78, then kick+bass return at 63.80-63.85 with the full arrangement (hi +29 dB, total +3.6 dB). If the evaluator prefers the crash, it is 0.3 s earlier (63.52)."
+    },
+    {
+     "t": 144.02,
+     "confidence": "high",
+     "why": "Classic drop: bass removed for 16 s (128-143.9, low ~-37 dB) with a pitch-sweep riser at 142-143.5, then kick+bass return at ~144.0 (low +18 dB). Note librosa beats here sit ~0.2 s off (143.82/144.34)."
+    }
+   ],
+   "not_drops": [
+    {
+     "t": 56.0,
+     "why": "1-beat silence inside the 48-63 break; the same break texture resumes at the same level (no energy jump)."
+    },
+    {
+     "t": 96.04,
+     "why": "Riser (94-96) and 1 s bass dip, but what follows is a darker section: total -1.3 dB, hi -10 dB."
+    }
+   ],
+   "notes": "librosa tempo 123. plots: /tmp/drops/Voltaic_full.png, /tmp/drops/Voltaic_z16.3.png, /tmp/drops/Voltaic_z16.30_w2.png, /tmp/drops/Voltaic_z55.8.png, /tmp/drops/Voltaic_z63.9.png, /tmp/drops/Voltaic_z63.85_w2.png, /tmp/drops/Voltaic_z96.5.png, /tmp/drops/Voltaic_z144.5.png, /tmp/drops/Voltaic_z144.00_w2.png"
+  },
+  "Rocket_Power.mp3": {
+   "drops": [
+    {
+     "t": 74.17,
+     "confidence": "medium",
+     "why": "Bass dropout of about 1 bar (73.3-74.1, low -30 dB) with chords sustained, then bass+kick slam back with a noise crash (onset peak 74.20). Fake-drop type: big local jump, but the following section is darker (hi -7 dB) and overall loudness is flat."
+    },
+    {
+     "t": 129.55,
+     "confidence": "medium",
+     "why": "Same 1-bar bass dropout (128.3-129.5) before the final chorus; bass returns at 129.55 (low -30 -> -8 dB) with a noise sweep, brighter section after (hi +7 dB). Doubt: the return is soft (small onset), full-level kicks only from ~130.5."
+    }
+   ],
+   "not_drops": [
+    {
+     "t": 38.1,
+     "why": "Noise riser 37-38, but bass never drops and the next section (verse) is darker; no energy jump."
+    },
+    {
+     "t": 93.5,
+     "why": "Riser into a chord section; low and total level unchanged."
+    },
+    {
+     "t": 0.6,
+     "why": "Track starts at full energy straight from silence: no build, nothing returns."
+    }
+   ],
+   "notes": "Very flat, heavily compressed loudness (RMS within ~3 dB the whole track); the only real contrasts are the two 1-bar bass dropouts. librosa tempo 103. plots: /tmp/drops/Rocket_Power_full.png, /tmp/drops/Rocket_Power_z38.0.png, /tmp/drops/Rocket_Power_z74.6.png, /tmp/drops/Rocket_Power_z95.0.png, /tmp/drops/Rocket_Power_z129.6.png, /tmp/drops/Rocket_Power_z129.50_w2.png"
+  },
+  "Electro_Cabello.mp3": {
+   "drops": [
+    {
+     "t": 90.8,
+     "confidence": "medium",
+     "why": "Textbook build at 65-90: sustained bass, then an accelerating kick roll plus white-noise riser (88.8-90.35, peak total energy), then 0.45 s without bass while a lead enters at 90.4, then the beat resumes at 90.80 (librosa beat 90.84). Doubt: post-drop energy is not above the pre-build level (flat mix), and an editor might cut at the end of the roll (90.40)."
+    },
+    {
+     "t": 155.93,
+     "confidence": "medium",
+     "why": "About 1 bar with the kick thinned/removed (154.9-155.9), then a broadband hit (strongest local onset) and the full final section (hi +11 dB, total +4 dB). Fake-drop type; post level is similar to the section before the gap."
+    }
+   ],
+   "not_drops": [
+    {
+     "t": 47.85,
+     "why": "0.3 s gap then a new synth pattern at the same energy (total +0.4 dB)."
+    },
+    {
+     "t": 65.0,
+     "why": "Start of the build (kick pattern changes to sustained bass); energy slightly lower."
+    },
+    {
+     "t": 109.4,
+     "why": "Gentle section change, energy down 1 dB."
+    }
+   ],
+   "notes": "Constant loudness; drops inferred from build structure. librosa tempo 117. plots: /tmp/drops/Electro_Cabello_full.png, /tmp/drops/Electro_Cabello_z47.8.png, /tmp/drops/Electro_Cabello_z65.0.png, /tmp/drops/Electro_Cabello_z78.00_w20.png, /tmp/drops/Electro_Cabello_z90.2.png, /tmp/drops/Electro_Cabello_z90.40_w2.png, /tmp/drops/Electro_Cabello_z109.4.png, /tmp/drops/Electro_Cabello_z156.0.png, /tmp/drops/Electro_Cabello_z156.00_w2.png"
+  },
+  "Monkeys_Spinning_Monkeys.mp3": {
+   "drops": [],
+   "not_drops": [
+    {
+     "t": 25.65,
+     "why": "Stop-time break: tuba/bass out about 1.5 s under a rising run, then the same groove resumes at the same level as before the break (low pre/post about -14.5 dB). No kick, no crash, no section change."
+    },
+    {
+     "t": 52.45,
+     "why": "Same stop-time break pattern as 25.65."
+    },
+    {
+     "t": 109.82,
+     "why": "Same stop-time break pattern; level after = level before."
+    },
+    {
+     "t": 70.0,
+     "why": "Gradual re-entry of bass over ~5 s after a sparse bridge (65-70); no single impact instant."
+    }
+   ],
+   "notes": "Whimsical ukulele/tuba piece with no EDM-style drops. The three stop-time breaks are the deepest low-band dips in the whole set (about -55 dB), so a naive low-band-return detector WILL fire there; listed as not_drops because energy after = energy before and there is no kick or crash. Reasonable to treat them as 'don't care' if the product wants comedic stop-time hits. plots: /tmp/drops/Monkeys_Spinning_Monkeys_full.png, /tmp/drops/Monkeys_Spinning_Monkeys_z25.6.png, /tmp/drops/Monkeys_Spinning_Monkeys_z52.4.png, /tmp/drops/Monkeys_Spinning_Monkeys_z66.0.png, /tmp/drops/Monkeys_Spinning_Monkeys_z70.0.png, /tmp/drops/Monkeys_Spinning_Monkeys_z110.4.png"
+  }
+ }
+}
