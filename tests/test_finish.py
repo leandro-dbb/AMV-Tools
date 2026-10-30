@@ -823,7 +823,10 @@ def test_cancelled_cutout_stops_encoding_and_leaves_no_file(finish_clip, tmp_pat
             return np.full((img.height, img.width), 0.5, np.float32)
 
     class FakeState:
-        settings = {"models": {"mask_bg_aware_cleanup_enabled": True, "mask_edge_refine_enabled": False}}
+        # No SAM 2 tracking here (it would run whenever the sam2 package is
+        # installed, as on CI): this test is about cancelling the encoding.
+        settings = {"models": {"mask_bg_aware_cleanup_enabled": True, "mask_edge_refine_enabled": False,
+                               "mask_auto_track": False}}
 
         def get_birefnet(self):
             return FakeMatte()
