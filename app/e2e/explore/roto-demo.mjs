@@ -16,8 +16,9 @@ const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
 fs.mkdirSync(out, { recursive: true });
 const exe = process.env.AMV_CHROME || (process.env.HOME + '/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome');
 const W = 1600; const H = 900;
-const browser = await chromium.launch({ headless: false, executablePath: exe, args: ['--window-position=0,0', `--window-size=${W},${H + (Number(process.env.DEMO_CHROME_PX) || 0)}`,
-  '--disable-features=Translate,TranslateUI', '--lang=en-US', '--no-first-run', '--disable-infobars'] });
+const browser = await chromium.launch({ headless: false, executablePath: exe,
+  env: { ...process.env, LANG: 'fr_FR.UTF-8', LANGUAGE: 'fr' }, args: ['--window-position=0,0', `--window-size=${W},${H + (Number(process.env.DEMO_CHROME_PX) || 0)}`,
+  '--disable-features=Translate,TranslateUI', '--lang=fr', '--no-first-run', '--disable-infobars'] });
 // DEMO_PW_VIDEO=1: Playwright's own recording; otherwise the Xvfb screen is
 // recorded from outside (ffmpeg x11grab) and t0 is written as epoch time.
 const pwVideo = process.env.DEMO_PW_VIDEO === '1';
@@ -30,6 +31,10 @@ const mark = (kind, label) => events.push({ t: (Date.now() - t0) / 1000, kind, l
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.addInitScript(() => {
   localStorage.setItem('amv-tutorial-shown', '1');
+  // the page is French: no "translate from English?" bubble over the editor
+  const setLang = () => { if (document.documentElement) document.documentElement.lang = 'fr'; };
+  setLang();
+  document.addEventListener('readystatechange', setLang);
   localStorage.setItem('amv-lang', 'fr');
   // a visible cursor (Playwright's mouse is invisible in recordings)
   window.addEventListener('DOMContentLoaded', () => {

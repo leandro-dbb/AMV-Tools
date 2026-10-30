@@ -69,11 +69,13 @@ plan b1 (cigarette), une seule mesure à la fois sur la carte, médiane de 5 ges
 | aperçu de l'image avec les réglages de bord (trait noir compris) | **73 ms** | |
 | propagation SAM 2.1 large | **180 ms par image** (48 images en 8,7 s) | |
 
-Dans l'appli, l'éditeur affiche le temps total (serveur + transfert + affichage) ; mesuré pendant le
-chantier avec trois simulations qui tournaient en même temps sur la carte : clics 98 à 149 ms,
-pinceau 170 ms. Le **premier** clic chargeait le modèle (20 à 55 s sous charge) : le modèle de clic
-est maintenant préchargé en arrière-plan à l'ouverture d'un plan déjà détouré et à la fin de la
-passe IA. Mémoire vidéo de l'éditeur seul (clics + propagation) : 2,4 Go.
+Dans l'appli, l'éditeur affiche le temps **total** (serveur + transfert + affichage de la nouvelle
+image), mesuré dans la démo (§4), carte au calme : clics sur une image déjà calculée **120 à 180 ms**,
+coup de pinceau **139 ms**, premier clic après la passe IA 407 ms, premier clic sur une autre image
+juste après une propagation 1,2 s (toutes les images ont changé, l'aperçu est recalculé). Le premier
+clic chargeait le modèle et préparait la carte (16 à 55 s mesurés en cours de chantier) : le modèle
+de clic est maintenant préchargé, avec un calcul à blanc, à la fin de la passe IA et à l'ouverture
+d'un plan déjà détouré. Mémoire vidéo de l'éditeur seul (clics + propagation) : 2,4 Go.
 
 Sur CPU (machine sans GPU, test de bout en bout) : la passe IA utilise ISNet anime sans suivi, les
 clics la pièce détectée sous le curseur, la propagation le flot optique ; tout tourne en tâche de
@@ -153,7 +155,27 @@ réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps
   garde les images corrigées mais remplace la passe IA de toutes les autres.
 
 
-## 6. Ce que Léandro doit tester
+## 6. Livrables
+
+Sur la machine de mesure, `/srv/data/amv-tools/reports/roto/editeur/` :
+
+- `demo/demo-editeur.mp4` : l'éditeur utilisé (enregistrement de l'écran Xvfb, ~2 min ; passe IA,
+  propagations et export accélérés, avec leur durée réelle à l'écran) sur le plan SSJ3 : passe IA,
+  deux clics droits sur les rochers, propagation, trois clics droits sur l'aura et un coup de pinceau
+  rouge, zoom, propagation, image suivante à vérifier, vues sur noir / sur blanc, lecture, export ;
+  `demo/captures/` : 4 captures.
+- Pour chacun des 3 plans des exemples (`01-calme-cigarette-black-clover`,
+  `02-quatre-personnages-plan-large`, `03-aura-ssj3-camera-qui-tremble`) : `comparaison.mp4`
+  (Original / IA seule / après corrections sur noir / après corrections sur rouge, puis zoom ×3
+  ralenti), `detourage-alpha.mov` (ProRes 4444 1080p du plan corrigé, l'export de l'éditeur),
+  `contour-sur-blanc.png` et `contour-sur-rouge.png` (3 images, zoom ×3 : original / IA seule / après
+  corrections), `chiffres.txt` (gestes, temps, mesures avant / après).
+
+Dans le dépôt : le code (§1), `docs/roto-editor-api.md`, les tests, `tests/eval/roto_editor_sim.py`
+(simulation, mesure de latence, tableau), `tests/eval/roto_editor_examples.py` (les 3 exemples),
+`app/e2e/roto.e2e.mjs` (test de bout en bout), `app/e2e/explore/roto-demo*.{mjs,sh,py}` (la démo).
+
+## 7. Ce que Léandro doit tester
 
 1. **Le parcours de base**, sur un plan que tu connais : Recherche → ouvrir un plan → « Détourer ce
    plan » → *Tous les personnages* → Détourer. Pendant la passe IA, l'interface doit rester
