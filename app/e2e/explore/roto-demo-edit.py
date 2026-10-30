@@ -1,7 +1,9 @@
 """Edit the roto editor demo recording (roto-demo.mjs) into an MP4: the
 waits for the AI pass, the propagations and the export are sped up so each
 lasts a few seconds, with a "×N" label; everything else plays in real time.
-usage: python roto-demo-edit.py <demo.webm> <demo-events.json> <out.mp4>"""
+usage: python roto-demo-edit.py <recording> <demo-events.json> <out.mp4> [recording start, epoch s]
+(the recording start lines the script's clock up with an external x11grab
+recording; without it the recording starts with the script)"""
 import json
 import subprocess
 import sys
@@ -11,6 +13,11 @@ MAX_WAIT_S = 4.0
 
 src, ev_path, out = sys.argv[1:4]
 events = json.load(open(ev_path))
+if len(sys.argv) > 4:
+    t0 = float(next(e["label"] for e in events if e["kind"] == "start"))
+    shift = t0 - float(sys.argv[4])
+    for e in events:
+        e["t"] += shift
 dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", src],
                            capture_output=True, text=True).stdout.strip() or 0)
 waits, start = [], None
