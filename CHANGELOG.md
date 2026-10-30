@@ -73,6 +73,8 @@ Linux, still unsigned. [Release report](docs/reports/release-0.5.0-beta.2.md).
   to a local library; the roto evaluation scripts take the benchmark root
   and source videos as arguments instead of hard-coded paths; no personal
   paths in the roto reports.
+- Test fix: the cancelled-cutout test no longer depends on whether the
+  `sam2` package is installed (it failed on CI, where it is).
 
 ### Roto editor: the AI cuts out, you finish (v06 roto editor)
 
