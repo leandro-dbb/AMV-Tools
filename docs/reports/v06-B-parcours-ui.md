@@ -46,8 +46,9 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
 
 Deux façons de rejouer :
 
-- **Exploration réelle** (`app/e2e/explore/*.mjs`) : les scripts qui ont servi
-  cette nuit sur les vrais extraits, avec une capture par étape.
+- **Exploration réelle** : des scripts jetables qui ont servi cette nuit sur
+  les vrais extraits, avec une capture par étape (retirés du dépôt à la
+  relecture de la 0.5.0-beta.1 : ils dépendaient de médias locaux).
 - **Suite rejouable** (`npm run e2e`) : le parcours 1 → 4 + paramètres + cas
   d'erreur + relancement de l'appli, sur deux petits clips synthétiques générés par ffmpeg dans un
   dossier piège `Séries test/Épisode spécial/` (+ un faux épisode corrompu),
@@ -193,8 +194,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
   11 min 45 sur les deux vrais extraits** (`AMV_E2E_MEDIA="…/Séries test"`,
   indexation réelle comprise ; le test qui supprime un fichier source est
   sauté sur de vrais médias). Captures : `apres/e2e/` et
-  `apres/e2e-extraits-reels/`. Scripts
-  d'exploration réelle : `app/e2e/explore/`.
+  `apres/e2e-extraits-reels/`.
 - Job CI optionnel : `.github/workflows/e2e-linux.yml` (manuel, met en cache
   les poids des modèles). **Fichier nouveau, les workflows existants ne sont
   pas touchés** ; jamais exécuté sur GitHub (pas de push).

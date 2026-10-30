@@ -1,6 +1,5 @@
-// Shared helpers for the Electron end-to-end suite (and the exploration
-// scripts in e2e/explore/). Everything runs against the *built* app
-// (npm run build) and the real Python sidecar, with a throwaway profile:
+// Shared helpers for the Electron end-to-end suite. Everything runs
+// against the *built* app (npm run build) and the real Python sidecar, with a throwaway profile:
 // never the user's own userData, library or browser.
 import { _electron as electron } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
