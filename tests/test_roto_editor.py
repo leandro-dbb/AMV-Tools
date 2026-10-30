@@ -335,3 +335,16 @@ def test_steady_background_pocket_is_not_a_suspect_hole():
     a[30:44, 40:56] = 0          # a pocket that stays on every frame (between arm and body)
     feats = [frame_features(a), frame_features(a, a), frame_features(a, a)]
     assert not any("hole" in x["reasons"] for x in decide(feats))
+
+
+def test_brush_edge_snaps_to_the_drawn_line():
+    from backend.roto import engine
+    rgb = np.full((60, 120, 3), 230, np.uint8)
+    rgb[:, :80] = 20                              # a dark area ending on a drawn edge at x = 80
+    cur = np.zeros((60, 120), np.float32)
+    stroke = [{"points": [(70, 30)], "radius": 12, "mode": "add"}]   # the brush ends at x = 82
+    plain = engine.paint(cur, None, stroke)
+    snapped = engine.paint(cur, None, stroke, rgb=rgb)
+    assert plain[30, 81] > 0.9                     # the round brush spills 2 px past the edge
+    assert snapped[30, 81] < plain[30, 81] - 0.3   # snapped: it stops on the edge
+    assert snapped[30, 70] > 0.99 and snapped[5, 5] == 0

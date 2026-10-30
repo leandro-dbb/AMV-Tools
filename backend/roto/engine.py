@@ -166,18 +166,59 @@ def stroke_cover(shape, strokes: Sequence[dict]) -> List[tuple]:
     return out
 
 
-def paint(cur: np.ndarray, ai: Optional[np.ndarray], strokes: Sequence[dict]) -> np.ndarray:
+SNAP_RADIUS = 3        # the edge of a stroke snaps to a drawn edge this close (px)
+SNAP_EPS = 2e-3       # guided filter regularisation (higher: smoother, less snapping)
+
+
+def snap_to_edges(new: np.ndarray, before: np.ndarray, rgb: np.ndarray, radius: int = SNAP_RADIUS) -> np.ndarray:
+    """The outline a brush stroke drew, snapped to the drawing: in a thin
+    band around the part of the outline the stroke changed, the alpha is
+    replaced by its guided filter on the frame (He et al.), so a stroke that
+    ends 1-3 px from a line ends on the line, anti-aliased like the
+    drawing, instead of leaving the brush's round, jagged edge."""
+    import cv2
+    changed = np.abs(new - before) > 0.05
+    if not changed.any():
+        return new
+    edge = (new > 0.02) & (new < 0.98)
+    hard = new > 0.5
+    k = np.ones((3, 3), np.uint8)
+    outline = (cv2.dilate(hard.astype(np.uint8), k) - cv2.erode(hard.astype(np.uint8), k)) > 0
+    band = cv2.dilate(((edge | outline) & cv2.dilate(changed.astype(np.uint8), _disk(radius)).astype(bool))
+                      .astype(np.uint8), _disk(radius)) > 0
+    if not band.any():
+        return new
+    guide = cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    ks = (2 * radius + 1, 2 * radius + 1)
+    box = lambda x: cv2.boxFilter(x, -1, ks)   # noqa: E731
+    mi, mp = box(guide), box(new)
+    a = (box(guide * new) - mi * mp) / (box(guide * guide) - mi * mi + SNAP_EPS)
+    b = mp - a * mi
+    q = np.clip(box(a) * guide + box(b), 0.0, 1.0)
+    return np.where(band, q, new).astype(np.float32)
+
+
+def paint(cur: np.ndarray, ai: Optional[np.ndarray], strokes: Sequence[dict],
+          rgb: Optional[np.ndarray] = None) -> np.ndarray:
     """``cur`` (float matte) with the strokes applied: ``add`` paints the
-    character, ``remove`` the background, ``erase`` puts the AI pass back."""
-    out = np.clip(np.asarray(cur, np.float32), 0.0, 1.0).copy()
+    character, ``remove`` the background, ``erase`` puts the AI pass back.
+    With the frame (``rgb``), the new outline snaps to the drawing
+    (:func:`snap_to_edges`)."""
+    before = np.clip(np.asarray(cur, np.float32), 0.0, 1.0)
+    out = before.copy()
+    snap = False
     for mode, cov in stroke_cover(out.shape, strokes):
         if mode == "remove":
             out = out * (1.0 - cov)
+            snap = True
         elif mode == "erase":
             base = ai if ai is not None else np.zeros_like(out)
             out = out * (1.0 - cov) + base * cov
         else:
             out = np.maximum(out, cov)
+            snap = True
+    if snap and rgb is not None and rgb.shape[:2] == out.shape:
+        out = snap_to_edges(out, before, rgb)
     return out.astype(np.float32)
 
 
