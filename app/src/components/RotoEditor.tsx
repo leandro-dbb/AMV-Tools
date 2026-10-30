@@ -280,6 +280,15 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
     });
   }, [layerId, frame, enqueue, patchProject, jobRunning]);
 
+  // The character is not on this frame (hidden by smoke, off screen): one
+  // stroke over the whole frame, the frame locked empty.
+  const clearFrame = useCallback(() => {
+    const p = projectRef.current;
+    if (!p || jobRunning) return;
+    const w = p.width; const h = p.height;
+    onStroke({ points: [[0, 0], [w, 0], [w, h], [0, h], [0, 0], [w, h]], radius: Math.min(512, Math.max(w, h) / 2), mode: 'remove' });
+  }, [jobRunning, onStroke]);
+
   const propagate = useCallback((direction: 'forward' | 'backward' | 'both') => {
     const p = projectRef.current;
     if (!p || !layerId || jobRunning) return;
@@ -476,6 +485,7 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
       case 'f': toggleFullscreen(); break;
       case 'p': propagate('both'); break;
       case 'v': toggleLock(); break;
+      case 'delete': clearFrame(); break;
       case 'n': if (e.shiftKey) goPrevSuspect(); else goNextSuspect(); break;
       default: return;
     }
@@ -770,7 +780,8 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
               canUndo={project.can_undo} canRedo={project.can_redo}
               onUndo={() => undoRedo('undo')} onRedo={() => undoRedo('redo')} disabled={editDisabled}
             />
-            <PropagateSection onPropagate={propagate} locked={isLocked} onToggleLock={toggleLock} disabled={editDisabled} />
+            <PropagateSection onPropagate={propagate} locked={isLocked} onToggleLock={toggleLock} disabled={editDisabled}
+                              onClearFrame={clearFrame} />
             <LayersSection
               layers={project.layers} active={layerId || null} onSelect={(id) => setActiveLayer(id)}
               onAdd={() => void addLayer()} onDelete={(l) => void deleteLayer(l)} solo={solo} setSolo={setSolo} disabled={jobRunning}
