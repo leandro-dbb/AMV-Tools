@@ -290,7 +290,7 @@ demandée (encre ≥ 97 %, fond au contour ≤ 3 %), que ni la passe IA ni 30 ge
 
 ## 6. Livrables
 
-Sur la machine de mesure, `/srv/data/amv-tools/reports/roto/editeur/` :
+Sur la machine de mesure (hors dépôt, dossier `reports/roto/editeur/`) :
 
 - `demo/demo-editeur.mp4` : l'éditeur utilisé (enregistrement de l'écran Xvfb, 1 min 43 ; passe IA,
   propagations et export accélérés, avec leur durée réelle à l'écran) sur le plan SSJ3 : passe IA,
@@ -306,7 +306,8 @@ Sur la machine de mesure, `/srv/data/amv-tools/reports/roto/editeur/` :
 
 Dans le dépôt : le code (§1), `docs/roto-editor-api.md`, les tests, `tests/eval/roto_editor_sim.py`
 (simulation, mesure de latence, tableau), `tests/eval/roto_editor_examples.py` (les 3 exemples),
-`app/e2e/roto.e2e.mjs` (test de bout en bout), `app/e2e/explore/roto-demo*.{mjs,sh,py}` (la démo).
+`app/e2e/roto.e2e.mjs` (test de bout en bout). Les scripts ponctuels qui ont servi à enregistrer la démo
+(liés à une bibliothèque indexée locale) ont été retirés du dépôt à la relecture de la 0.5.0-beta.2.
 
 ## 7. Ce que Léandro doit tester
 
