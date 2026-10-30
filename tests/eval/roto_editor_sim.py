@@ -625,7 +625,7 @@ def main(argv=None):
     la.set_defaults(fn=cmd_latency)
     tb = sub.add_parser("table")
     tb.add_argument("--out", required=True)
-    tb.add_argument("--root", default="/srv/data/amv-tools/roto-stable/bench")
+    tb.add_argument("--root", required=True)
     tb.set_defaults(fn=cmd_table)
     args = ap.parse_args(argv)
     args.fn(args)

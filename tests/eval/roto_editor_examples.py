@@ -9,7 +9,9 @@ alone gives, what a few corrections give. Per example folder:
   contour-sur-rouge.png  the same on red
   chiffres.txt           gestures, time, metrics before / after
 
-usage: python -m tests.eval.roto_editor_examples --sim <sim out> --out <reports dir>
+usage: python -m tests.eval.roto_editor_examples --root <bench root> --src key=/path/video ...
+           --sim <sim out> --out <reports dir>
+(the bench root and the source episodes stay outside the repo, see roto_eval)
 """
 from __future__ import annotations
 
@@ -24,10 +26,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 from tests.eval import roto_eval as E
 
-R = Path("/srv/data/amv-tools/roto-stable/bench")
-SRC = {"d1": "/srv/data/media/attente/[SubsPlease] Dragon Ball Super - Beerus - 01 (1080p) [B3FEF9B7].mkv",
-       "d2": "/srv/data/media/attente/[SubsPlease] Dragon Ball Super - Beerus - 02 (1080p) [54BBBB45].mkv",
-       "bc": "/srv/data/media/attente/Black.Clover.S02E04.Day.of.Atonement.1080p.BILI.WEB-DL.JPN.AAC2.0.H.265.MSubs-ToonsHub.mkv"}
 EXAMPLES = [("b1", "01-calme-cigarette-black-clover"), ("s04", "02-quatre-personnages-plan-large"),
             ("s13", "03-aura-ssj3-camera-qui-tremble")]
 W, H = 1920, 1080
@@ -88,14 +86,14 @@ RED = np.zeros((H, W, 3), np.float32)
 RED[..., 0] = 220
 
 
-def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
+def make_example(sid: str, dname: str, sim: Path, out: Path, root: Path, srcs: dict) -> None:
     from backend.indexing.cuts import probe_video
     from backend.roto.export import export_project
     from backend.roto.project import RotoProject
     res = json.loads((sim / f"{sid}.json").read_text())
     p = RotoProject.load(Path(res["project_dir"]))
-    shot = {s["id"]: s for s in E.load_shots(R)}[sid]
-    src = SRC[shot["src"]]
+    shot = {s["id"]: s for s in E.load_shots(root)}[sid]
+    src = srcs[shot["src"]]
     fps = float(probe_video(src).get("fps") or 24.0)
     n = p.n
     start = int(round(shot["start"] * 1000))
@@ -213,14 +211,17 @@ def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
+    ap.add_argument("--root", required=True)
+    ap.add_argument("--src", nargs="+", required=True, help="key=/path/video for each source of shots.json")
     ap.add_argument("--sim", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--only", default="")
     a = ap.parse_args(argv)
+    srcs = dict(s.split("=", 1) for s in a.src)
     for sid, dname in EXAMPLES:
         if a.only and sid not in a.only.split(","):
             continue
-        make_example(sid, dname, Path(a.sim), Path(a.out))
+        make_example(sid, dname, Path(a.sim), Path(a.out), Path(a.root), srcs)
 
 
 if __name__ == "__main__":
