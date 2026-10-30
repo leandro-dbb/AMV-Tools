@@ -605,7 +605,7 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
         <div className="flex items-center gap-x-6 gap-y-0.5 flex-wrap px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/30">
           {m.sam3_missing && (
             <div className="text-[11px] text-amber-300 flex items-center gap-1.5" data-testid="roto-sam3-missing">
-              <AlertTriangle size={11} className="shrink-0" />{t('roto.models.sam3Missing')}
+              <AlertTriangle size={11} className="shrink-0" />{t('roto.models.sam3Missing', { model: m.tracker ?? m.clicks })}
             </div>
           )}
           {m.slow_machine && (

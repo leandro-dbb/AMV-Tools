@@ -75,7 +75,8 @@ def models_info(state) -> dict:
     mm = mask_models(state)
     backend = getattr(state.device, "backend", "cpu")
     sam3 = False
-    if mm.get("selector") == "sam3":
+    wants_sam3 = mm.get("selector") == "sam3"
+    if wants_sam3:
         try:
             from ..models.sam3_concept import weights_accessible
             sam3 = weights_accessible(state.settings.get("models", {}).get("hf_token") or None)
@@ -90,7 +91,9 @@ def models_info(state) -> dict:
         "characters": "SAM 3" if sam3 else None,
         "tracker": trk_label if (trk and backend != "cpu") else None,
         "clicks": trk_label or f"{det} (character under the click)",
-        "sam3_missing": not sam3,
+        # only where this machine's tier uses SAM 3 and its gated weights are
+        # not reachable (no Hugging Face access): the clicks then use SAM 2.1
+        "sam3_missing": wants_sam3 and not sam3,
         "slow_machine": backend == "cpu",
     }
 
