@@ -365,6 +365,7 @@ export default function MiniEditor({ scenes, index, onIndexChange, onJumpTo, onC
             >
               <Scissors size={16} />
               {t('roto.open')}
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#EC4899]/20 text-[#EC4899]">{t('roto.beta')}</span>
             </button>
             <SimilarButton sceneId={scene.id} label
                            className="ml-3 px-4 py-2.5 rounded-xl text-sm font-semibold bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] hover:text-[#FAFAFA] border-2 border-[#8B5CF6]/40 hover:border-[#8B5CF6] whitespace-nowrap" />
