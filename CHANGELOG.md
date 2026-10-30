@@ -2,75 +2,77 @@
 
 All notable changes to AMV Tools are documented here.
 
-## 0.5.0-beta.1 — 2026-10-30
+## 0.5.0-beta.2 — 2026-10-30
 
-First **beta**: installers for Windows, macOS (Apple Silicon) and Linux, still
-unsigned. [Release report](docs/reports/release-0.5.0-beta.1.md).
+Second **beta**: everything from 0.5.0-beta.1, plus the **roto editor**
+(marked *beta* in the app). Installers for Windows, macOS (Apple Silicon) and
+Linux, still unsigned. [Release report](docs/reports/release-0.5.0-beta.2.md).
 
 **En bref (pour un monteur)**
 
-- **Envoyer la timeline à son logiciel** : on choisit Premiere Pro, DaVinci
-  Resolve, After Effects, Vegas Pro, Final Cut Pro ou « Autre », et l'appli
-  écrit le bon format avec les étapes d'import (nouveau : EDL texte pour
-  Vegas, script `.jsx` pour After Effects). Imports corrigés (chemins
-  Premiere sous Windows, EDL, FCPXML, fréquences d'images mélangées).
-- **Synchro musique** (nouvel onglet *Musique*) : on dépose un morceau,
-  l'appli trouve tempo, temps, mesures, montées et drops, propose un montage
-  calé sur les temps avec les plans indexés (rythme, intensité, personnages,
-  verrous, régénérer un passage), puis l'exporte en timeline avec la musique
-  et les marqueurs, en marqueurs seuls ou en aperçu MP4.
-- **Corrections de bugs** : détection des coupes nettement plus juste ;
-  l'indexation d'un MKV HEVC ne bloque plus l'appli ; une indexation
-  interrompue reprend où elle s'était arrêtée ; glisser-déposer réparé ;
-  export de clip réparé sur les PC Windows sans carte NVIDIA ; noms avec
-  accents et japonais conservés ; nombreuses impasses de l'interface
-  corrigées (progression lisible, fichiers en échec affichés, menu Finition
-  accessible…).
-- **Upscale** : AnimeJaNai HD V3 (usage non commercial) remplace l'ancien
-  modèle à partir de 8 Go de VRAM et sur Mac : plus fidèle, sans halo sur
-  les traits sombres, plus rapide.
-- **Profondeur** : Video Depth Anything Large en *Qualité max* sur NVIDIA
-  (moins de scintillement, plus de relief).
-- **Premier lancement** : le backend proposé suit la carte graphique
-  détectée ; les modèles d'analyse se téléchargent avec une progression
-  visible.
-- Le détourage automatique (Mask Mode) reste désactivé par défaut ;
-  l'éditeur de roto n'est pas dans cette version.
+- **Nouveau : l'éditeur de détourage (bêta)**. Dans un plan, *Détourer ce
+  plan* : l'IA fait le premier jet (tous les personnages, le principal, ou
+  celui sur lequel on clique), puis on corrige au pinceau (vert = ajouter,
+  rouge = retirer) ou au clic (clic = ajouter la partie, Alt+clic ou clic
+  droit = la retirer), on **propage** la correction aux images voisines
+  (les images corrigées ne bougent plus), on passe d'une image *à vérifier*
+  à l'autre (`N`), on règle les bords (trait noir, adoucir / durcir,
+  élargir / rétrécir) et on exporte en **ProRes 4444 avec transparence**,
+  séquence PNG ou masque noir et blanc. Le plan détouré part dans la
+  sélection et **l'export timeline (Premiere, Resolve, After Effects, Vegas,
+  Final Cut) place le clip détouré** à la place de l'épisode. Sauvegarde
+  automatique : on ferme, on rouvre, on reprend. Rapide sur carte NVIDIA,
+  lent sans carte graphique (la passe IA d'un plan peut prendre plusieurs
+  minutes sur CPU).
+- **Détourage plus fiable** (le moteur de l'éditeur) : un objet tenu
+  (cigarette, bâton, épée, bol) n'est plus coupé, le trait noir du contour
+  reste, moins de fond dans les cheveux et plus de halo à l'export, un
+  personnage flou ou caché un instant ne disparaît plus.
+- Le **détourage automatique (Mask Mode auto) reste désactivé par défaut** :
+  l'éditeur est le point d'entrée.
+- Toujours là depuis la beta.1 : export timeline vers Premiere Pro,
+  DaVinci Resolve, After Effects, Vegas Pro et Final Cut Pro, synchro
+  musique, upscale AnimeJaNai, profondeur Video Depth Anything, corrections
+  de bugs (détails dans la section 0.5.0-beta.1 plus bas).
+- Corrigé : le déchargement automatique de SAM 2 au repos pouvait couper un
+  suivi en cours (erreur `reset_state`).
 
 **In short (for an editor)**
 
-- **Send the timeline to your editor**: pick Premiere Pro, DaVinci Resolve,
-  After Effects, Vegas Pro, Final Cut Pro or Other, and the app writes the
-  right format with its import steps (new: Vegas EDL text, After Effects
-  `.jsx` script). Import fixes (Premiere paths on Windows, EDL, FCPXML,
-  mixed frame rates).
-- **Music sync** (new *Music* tab): drop a song, the app finds tempo, beats,
-  bars, build-ups and drops, proposes a beat-aligned edit from your indexed
-  shots (rhythm, intensity, characters, locks, regenerate a passage), then
-  exports it as a timeline with the song and markers, markers only, or an
-  MP4 preview.
-- **Bug fixes**: much more accurate cut detection; indexing an HEVC MKV no
-  longer freezes the app; an interrupted indexing resumes where it stopped;
-  drag and drop works again; clip export fixed on Windows PCs without an
-  NVIDIA card; accented and Japanese names kept; many UI dead ends fixed
-  (readable progress, failed files listed, Finishing menu reachable…).
-- **Upscale**: AnimeJaNai HD V3 (non-commercial use) replaces the previous
-  model from 8 GB of VRAM and on Mac: more faithful, no halo on dark lines,
-  faster.
-- **Depth**: Video Depth Anything Large in *Max quality* on NVIDIA (less
-  flicker, more relief).
-- **First run**: the suggested backend follows the detected GPU; analysis
-  models download with visible progress.
-- Automatic cutout (Mask Mode) stays off by default; the roto editor is not
-  in this release.
+- **New: the cut-out (roto) editor (beta)**. In a shot, *Cut out this shot*:
+  the AI does the first pass (all characters, the main one, or the one you
+  click), then you fix it with a brush (green = add, red = remove) or with
+  clicks (click = add that part, Alt+click or right click = remove it),
+  **propagate** the fix to the neighbouring frames (corrected frames never
+  move again), jump from one *frame to check* to the next (`N`), tune the
+  edges (ink line, soften / harden, grow / shrink) and export **ProRes 4444
+  with alpha**, a PNG sequence or a black-and-white matte. The cut-out shot
+  goes into the selection and **the timeline export (Premiere, Resolve,
+  After Effects, Vegas, Final Cut) places the cut-out clip** instead of the
+  episode. Automatic save: close, reopen, carry on. Fast on an NVIDIA card,
+  slow without a GPU (the AI pass on one shot can take several minutes on
+  CPU).
+- **More reliable cutouts** (the editor's engine): held objects (cigarette,
+  staff, sword, bowl) are no longer cut, the outer ink line stays, less
+  background in the hair and no halo in the export, a character that blurs
+  or hides for a moment no longer disappears.
+- **Automatic cutout (Mask Mode auto) stays off by default**: the editor is
+  the entry point.
+- Still there from beta.1: timeline export to Premiere Pro, DaVinci Resolve,
+  After Effects, Vegas Pro and Final Cut Pro, music sync, AnimeJaNai upscale,
+  Video Depth Anything depth, bug fixes (details in the 0.5.0-beta.1 section
+  below).
+- Fixed: SAM 2's idle offload could stop a tracking in progress
+  (`reset_state` error).
 
-### Release review (0.5.0-beta.1)
+### Release review (0.5.0-beta.2)
 
-- macOS: without a certificate the app is now signed **ad hoc**
-  (`app/scripts/adhoc-sign.cjs`), so Apple Silicon accepts to run it after
-  the quarantine is cleared; the build workflow checks the signature.
-- Removed one-off exploration scripts (`app/e2e/explore/`) that depended on
-  local media; no personal paths in the reports.
+- The roto editor is labelled *beta* in the app (entry button and editor
+  bar).
+- Removed the one-off demo recording scripts (`app/e2e/explore/roto-*`) tied
+  to a local library; the roto evaluation scripts take the benchmark root
+  and source videos as arguments instead of hard-coded paths; no personal
+  paths in the roto reports.
 
 ### Roto editor: the AI cuts out, you finish (v06 roto editor)
 
@@ -97,162 +99,6 @@ unsigned. [Release report](docs/reports/release-0.5.0-beta.1.md).
   stays off by default, the editor is the entry point.
 - Fix: SAM 2's idle offload could drop the video predictor in the middle of a
   long tracking (`'NoneType' object has no attribute 'reset_state'`).
-
-### Bug-fix pass (v06 fix)
-
-([report](docs/reports/v06-fix.md))
-
-- **Cut detection** sees every frame, in context (motion-compensated
-  difference on the picture area, local activity, flash / impact-frame
-  rejection), one detector shared by the CPU, NVIDIA and Apple paths. On
-  frame-accurate annotations of two real extracts (109 cuts): recall
-  70 % → 81 % and 38 % → 86 % on the exact frame, precision 72 % → 92 % and
-  67 % → 90 %. Apple Silicon's chunked decode is off by default for now.
-- **HEVC froze the whole sidecar**: a PyAV log callback (also set by
-  torchvision on import) deadlocked the HEVC decoder against the GIL.
-  Without hardware decode, indexing now decodes in an ffmpeg subprocess.
-  10-bit HEVC in MKV failed the NVIDIA NVDEC pass (wrong bit depth).
-- **Interrupted indexing**: the episode shows as *incomplete* (not counted,
-  *Resume indexing* button) and resumes where it stopped instead of being
-  redone; a tagger error no longer marks an episode indexed without tags.
-- **Drag and drop**: the Music drop zone works again (Electron 32+); a file
-  dropped outside a zone no longer replaces the app with the file. E2E test.
-- Autotune unit test made deterministic (virtual clock).
-
-### Windows "works the first time" + timeline export for every editor (v06 A)
-
-([report](docs/reports/v06-A-windows-timeline.md),
-[import guide](docs/import-timeline.md))
-
-- **Windows smoke test on a real VM** (`.github/workflows/windows-smoke.yml`):
-  builds the NSIS installer, installs it silently, launches the installed app
-  with a user-data path holding spaces and accents, installs the CPU backend,
-  indexes, searches, exports a clip and every timeline format, checks the
-  degraded paths (offline download message, DirectML/CUDA requested without a
-  GPU), quits and checks no process is left. Screenshots and logs as
-  artifacts.
-- **Fixed on Windows**: clip export failed (500) on every PC without an
-  NVIDIA GPU — the bundled ffmpeg lists NVENC/CUDA everywhere; NVENC and CUDA
-  decode now need a detected NVIDIA GPU and a failing hardware encode falls
-  back to libx264. Sidecar log lines were mojibake (cp1252 pipe). ffmpeg
-  error output with Japanese names could not be decoded.
-- **First indexing**: SigLIP 2 / wd-tagger are downloaded up front with
-  progress in the status bar ("SigLIP 2 base (NaFlex) ↓ 512 / 1500 MB")
-  instead of silently inside the first batch (16 min at "0 %" on a slow day).
-- **First run**: the setup screen suggests the backend matching the detected
-  GPU (CUDA 13, CUDA 12.6 for pre-RTX cards or drivers < 580, DirectML for
-  AMD/Intel, CPU) instead of always CUDA 13 (`GET /api/setup/hardware`).
-- **Timeline export by editor**: Premiere Pro, DaVinci Resolve, After Effects,
-  Vegas Pro, Final Cut Pro or Other, each with its import steps (FR/EN). New
-  **Vegas EDL text** (`File → Import → EDL Text File`) and **After Effects
-  script** (`.jsx`) exports.
-- **Timeline fixes**: FCP 7 `pathurl` spelled like Premiere
-  (`file://localhost/C%3a/...`); EDL source/record durations always equal and
-  never zero; FROM CLIP NAME / FROM FILE no longer cut at 80 columns; OTIO
-  source in points exact for mixed frame rates; FCPXML markers valid against
-  Apple's DTD; exports byte-identical on every OS.
-- **Validation**: FCPXML against Apple's 1.9 DTD (pinned); every format read
-  back by third-party readers and rendered frame by frame with MLT.
-
-### UI journey — the app used end to end like an editor (v06 B)
-
-The built Electron app, real sidecar and real models (CPU) were driven by
-Playwright on real anime extracts
-([report](docs/reports/v06-B-parcours-ui.md)).
-
-- **E2E suite**: `npm run e2e` (app/e2e/, Playwright `_electron`, own Xvfb,
-  throwaway profile, synthetic clips or `AMV_E2E_MEDIA`) covers first launch →
-  library + indexing → search → derush basket, clip and timeline exports;
-  optional manual CI job `.github/workflows/e2e-linux.yml`.
-  `AMV_E2E_SKIP_SYNC=1` runs the first-run install without its `uv sync`.
-- **Indexing progress** in the status bar: current stage in plain words (FR/EN),
-  file *n/N*, time left, labelled *Stop* button; the sub-segmentation tagger
-  pass reports per batch (the bar used to sit at 5 % for 10+ minutes on CPU).
-- **Failures are visible**: a file that cannot be indexed (corrupted, still
-  copying…) is listed by name with its reason in the Library.
-- **Library** follows the running indexing (no more "Ready to index" + active
-  start button during a run, list refreshed as episodes finish), queued items
-  can be removed, and a first-run note says the analysis models (~2 GB) are
-  downloaded when the first indexing starts.
-- **Drag and drop of episode folders works again** (Electron 32+ removed
-  `File.path`; the preload now exposes `webUtils.getPathForFile`).
-- **Hover previews** play from the source file when no proxy exists (the
-  default), in Search and Tags; thumbnail fallback when the codec cannot play.
-- **Settings > Search** (threshold, max results, sort) is now used by the Search tab.
-- **Export folder**: a non-writable folder is refused with a clear message
-  instead of failing every later export; settings errors no longer show raw
-  `API 400: {json}`.
-- First-run screen: no more clipped title at 1280×720, *Fast* profile
-  pre-selected and explained for CPU-only installs, right version shown.
-- GPU fallback banner: no false "torch is not installed", reasons translated.
-- **Scene editor**: the Finishing menu no longer opens under the player (only
-  Upscale was reachable), the transport bar stays on screen below ~1000 px.
-- **Search**: the threshold slider and sort re-run the search; a hint (and a
-  one-click 5 % threshold) when few shots match (French queries find fewer);
-  visible wait for the first search (model load); an indexed library no
-  longer greeted with "index a folder first"; recent searches updated.
-- **Export names keep accented and Japanese letters** ("Clip été 01" used to
-  become `Clip_t_01`).
-- Derush export summary translated; timeline dialog says *Close* once done;
-  the backend-unreachable screen no longer shows a developer command.
-- Escape closes the scene editor; a queue left from the previous session is
-  explained in the Library at launch.
-- Small copy fixes (Derush empty state pointed to Settings instead of Library).
-
-### Music sync (v06 C)
-
-New **Music** tab ([report](docs/reports/v06-C-synchro-musique.md)):
-
-- **Song analysis** (librosa, CPU, cached by content hash): tempo (also
-  variable tempo), beats, bars, strong hits, smoothed energy curve, sections
-  (intro / verse / build-up / drop / chorus / calm part / outro) and drops.
-  On synthetic tracks with exact ground truth: beat F1 0.91-1.0 at 70 ms
-  (mean error 5-11 ms), bars 0.90-1.0, 2/2 drops at 6 ms; on two real songs
-  annotated by eye 2/4 drops found, no false drop. 1.5-4 s for a 2-4 min
-  song on a slow CPU; the analyser warms up when the tab opens.
-- **Edit proposal** from the indexed shots: beat-aligned cuts (1-8 beats per
-  shot depending on the passage and the chosen rhythm, accelerating through
-  build-ups, on strong hits at drops), shots picked by intensity / motion /
-  text and character wishes, series filter, no reuse; alternatives, locks,
-  regenerate one passage.
-- **Exports**: timeline (FCP 7 XML, FCPXML, EDL, OTIO, via the regular
-  timeline writers, unchanged) with the song on its own audio track and
-  beat / passage markers; markers-only (FCP 7 XML, FCPXML, Resolve marker
-  EDL, OTIO, CSV); low-resolution MP4 preview with the music. Real check
-  (2 indexed episode extracts + a CC-BY song): cuts 10 ms from the beat on
-  average, 21 ms max (frame rounding at 23.976) in the timeline and in the
-  rendered MP4.
-- **Hidden cuts**: the preview detects shots that contain a cut of the
-  episode (missed by the indexer's shot detection), flags them and splits
-  them in later proposals (35 -> 7 off-beat cuts on the real check).
-- New dependency: `librosa` (ISC).
-
-### Models — non-commercial candidates re-evaluated (chantier 4b)
-
-AMV Tools is non-commercial, so models rejected in chantier 4 only for a
-non-commercial license were measured with the same protocol
-([report](docs/reports/chantier-4b-modeles-non-commerciaux.md)).
-
-- **Upscale: AnimeJaNai HD V3 UltraCompact** (the-database, CC-BY-NC-SA-4.0)
-  replaces 2xHFA2kAVCCompact in every NVIDIA and Mac tier from 8 GB and in
-  *Max quality*, and animevideov3 in *Fast* (1.6-2x its throughput): LPIPS
-  0.030 vs 0.044 against the real 1080p (PSNR 42.7 vs
-  42.5 dB, dark shots 48.7 vs 45.3 dB), no colour halo on dark lines, half
-  the convolutions. Downloaded from the official archive, only the 2.5 MB
-  checkpoint is kept.
-- **Depth: Video Depth Anything Large** (CC-BY-NC-4.0) at 364 px in the
-  NVIDIA *Max quality* tier: flicker 0.21 % vs 0.24 % (Small 518 px) and
-  visibly sharper relief; 9.3 GB of VRAM, does not fit 24 GB at 518 px.
-- **Rejected after measurement**: AnimeJaNai V3.1 (SPAN, ONNX only, no gain
-  over V3), GIMM-VFI and AMT (no better than RIFE 4.26 on anime action,
-  8-22x slower, AMT needs 14-17 GB at 1080p), Video Depth Anything Base
-  (checkerboard artefacts on dark shots), PixAI tagger v1.0 (still no
-  Beerus/Whis; finds Asta and Cell but ~50x slower than wd-vit, lower tag F1).
-- **Licenses**: the download allow-list now accepts CC-BY-NC-4.0 and
-  CC-BY-NC-SA-4.0; Settings > Models (tier table and finishing models) shows a
-  *non-commercial use* mark next to those models; the README lists them.
-- Finishing registry: a model file can be a member of a checksum-verified zip
-  archive (only that member is kept on disk).
 
 ### Mask Mode — "Stable" Auto: nothing disappears (roto stable)
 
@@ -442,6 +288,232 @@ non-commercial license were measured with the same protocol
   fine-tuned on anime, MIT) is available as a detector variant. Both mask
   model settings now default to *Auto*.
 - Mask Mode stays **off by default** (see the report's verdict).
+
+## 0.5.0-beta.1 — 2026-10-30
+
+First **beta**: installers for Windows, macOS (Apple Silicon) and Linux, still
+unsigned. [Release report](docs/reports/release-0.5.0-beta.1.md).
+
+**En bref (pour un monteur)**
+
+- **Envoyer la timeline à son logiciel** : on choisit Premiere Pro, DaVinci
+  Resolve, After Effects, Vegas Pro, Final Cut Pro ou « Autre », et l'appli
+  écrit le bon format avec les étapes d'import (nouveau : EDL texte pour
+  Vegas, script `.jsx` pour After Effects). Imports corrigés (chemins
+  Premiere sous Windows, EDL, FCPXML, fréquences d'images mélangées).
+- **Synchro musique** (nouvel onglet *Musique*) : on dépose un morceau,
+  l'appli trouve tempo, temps, mesures, montées et drops, propose un montage
+  calé sur les temps avec les plans indexés (rythme, intensité, personnages,
+  verrous, régénérer un passage), puis l'exporte en timeline avec la musique
+  et les marqueurs, en marqueurs seuls ou en aperçu MP4.
+- **Corrections de bugs** : détection des coupes nettement plus juste ;
+  l'indexation d'un MKV HEVC ne bloque plus l'appli ; une indexation
+  interrompue reprend où elle s'était arrêtée ; glisser-déposer réparé ;
+  export de clip réparé sur les PC Windows sans carte NVIDIA ; noms avec
+  accents et japonais conservés ; nombreuses impasses de l'interface
+  corrigées (progression lisible, fichiers en échec affichés, menu Finition
+  accessible…).
+- **Upscale** : AnimeJaNai HD V3 (usage non commercial) remplace l'ancien
+  modèle à partir de 8 Go de VRAM et sur Mac : plus fidèle, sans halo sur
+  les traits sombres, plus rapide.
+- **Profondeur** : Video Depth Anything Large en *Qualité max* sur NVIDIA
+  (moins de scintillement, plus de relief).
+- **Premier lancement** : le backend proposé suit la carte graphique
+  détectée ; les modèles d'analyse se téléchargent avec une progression
+  visible.
+- Le détourage automatique (Mask Mode) reste désactivé par défaut ;
+  l'éditeur de roto n'est pas dans cette version.
+
+**In short (for an editor)**
+
+- **Send the timeline to your editor**: pick Premiere Pro, DaVinci Resolve,
+  After Effects, Vegas Pro, Final Cut Pro or Other, and the app writes the
+  right format with its import steps (new: Vegas EDL text, After Effects
+  `.jsx` script). Import fixes (Premiere paths on Windows, EDL, FCPXML,
+  mixed frame rates).
+- **Music sync** (new *Music* tab): drop a song, the app finds tempo, beats,
+  bars, build-ups and drops, proposes a beat-aligned edit from your indexed
+  shots (rhythm, intensity, characters, locks, regenerate a passage), then
+  exports it as a timeline with the song and markers, markers only, or an
+  MP4 preview.
+- **Bug fixes**: much more accurate cut detection; indexing an HEVC MKV no
+  longer freezes the app; an interrupted indexing resumes where it stopped;
+  drag and drop works again; clip export fixed on Windows PCs without an
+  NVIDIA card; accented and Japanese names kept; many UI dead ends fixed
+  (readable progress, failed files listed, Finishing menu reachable…).
+- **Upscale**: AnimeJaNai HD V3 (non-commercial use) replaces the previous
+  model from 8 GB of VRAM and on Mac: more faithful, no halo on dark lines,
+  faster.
+- **Depth**: Video Depth Anything Large in *Max quality* on NVIDIA (less
+  flicker, more relief).
+- **First run**: the suggested backend follows the detected GPU; analysis
+  models download with visible progress.
+- Automatic cutout (Mask Mode) stays off by default; the roto editor is not
+  in this release.
+
+### Release review (0.5.0-beta.1)
+
+- macOS: without a certificate the app is now signed **ad hoc**
+  (`app/scripts/adhoc-sign.cjs`), so Apple Silicon accepts to run it after
+  the quarantine is cleared; the build workflow checks the signature.
+- Removed one-off exploration scripts (`app/e2e/explore/`) that depended on
+  local media; no personal paths in the reports.
+
+### Bug-fix pass (v06 fix)
+
+([report](docs/reports/v06-fix.md))
+
+- **Cut detection** sees every frame, in context (motion-compensated
+  difference on the picture area, local activity, flash / impact-frame
+  rejection), one detector shared by the CPU, NVIDIA and Apple paths. On
+  frame-accurate annotations of two real extracts (109 cuts): recall
+  70 % → 81 % and 38 % → 86 % on the exact frame, precision 72 % → 92 % and
+  67 % → 90 %. Apple Silicon's chunked decode is off by default for now.
+- **HEVC froze the whole sidecar**: a PyAV log callback (also set by
+  torchvision on import) deadlocked the HEVC decoder against the GIL.
+  Without hardware decode, indexing now decodes in an ffmpeg subprocess.
+  10-bit HEVC in MKV failed the NVIDIA NVDEC pass (wrong bit depth).
+- **Interrupted indexing**: the episode shows as *incomplete* (not counted,
+  *Resume indexing* button) and resumes where it stopped instead of being
+  redone; a tagger error no longer marks an episode indexed without tags.
+- **Drag and drop**: the Music drop zone works again (Electron 32+); a file
+  dropped outside a zone no longer replaces the app with the file. E2E test.
+- Autotune unit test made deterministic (virtual clock).
+
+### Windows "works the first time" + timeline export for every editor (v06 A)
+
+([report](docs/reports/v06-A-windows-timeline.md),
+[import guide](docs/import-timeline.md))
+
+- **Windows smoke test on a real VM** (`.github/workflows/windows-smoke.yml`):
+  builds the NSIS installer, installs it silently, launches the installed app
+  with a user-data path holding spaces and accents, installs the CPU backend,
+  indexes, searches, exports a clip and every timeline format, checks the
+  degraded paths (offline download message, DirectML/CUDA requested without a
+  GPU), quits and checks no process is left. Screenshots and logs as
+  artifacts.
+- **Fixed on Windows**: clip export failed (500) on every PC without an
+  NVIDIA GPU — the bundled ffmpeg lists NVENC/CUDA everywhere; NVENC and CUDA
+  decode now need a detected NVIDIA GPU and a failing hardware encode falls
+  back to libx264. Sidecar log lines were mojibake (cp1252 pipe). ffmpeg
+  error output with Japanese names could not be decoded.
+- **First indexing**: SigLIP 2 / wd-tagger are downloaded up front with
+  progress in the status bar ("SigLIP 2 base (NaFlex) ↓ 512 / 1500 MB")
+  instead of silently inside the first batch (16 min at "0 %" on a slow day).
+- **First run**: the setup screen suggests the backend matching the detected
+  GPU (CUDA 13, CUDA 12.6 for pre-RTX cards or drivers < 580, DirectML for
+  AMD/Intel, CPU) instead of always CUDA 13 (`GET /api/setup/hardware`).
+- **Timeline export by editor**: Premiere Pro, DaVinci Resolve, After Effects,
+  Vegas Pro, Final Cut Pro or Other, each with its import steps (FR/EN). New
+  **Vegas EDL text** (`File → Import → EDL Text File`) and **After Effects
+  script** (`.jsx`) exports.
+- **Timeline fixes**: FCP 7 `pathurl` spelled like Premiere
+  (`file://localhost/C%3a/...`); EDL source/record durations always equal and
+  never zero; FROM CLIP NAME / FROM FILE no longer cut at 80 columns; OTIO
+  source in points exact for mixed frame rates; FCPXML markers valid against
+  Apple's DTD; exports byte-identical on every OS.
+- **Validation**: FCPXML against Apple's 1.9 DTD (pinned); every format read
+  back by third-party readers and rendered frame by frame with MLT.
+
+### UI journey — the app used end to end like an editor (v06 B)
+
+The built Electron app, real sidecar and real models (CPU) were driven by
+Playwright on real anime extracts
+([report](docs/reports/v06-B-parcours-ui.md)).
+
+- **E2E suite**: `npm run e2e` (app/e2e/, Playwright `_electron`, own Xvfb,
+  throwaway profile, synthetic clips or `AMV_E2E_MEDIA`) covers first launch →
+  library + indexing → search → derush basket, clip and timeline exports;
+  optional manual CI job `.github/workflows/e2e-linux.yml`.
+  `AMV_E2E_SKIP_SYNC=1` runs the first-run install without its `uv sync`.
+- **Indexing progress** in the status bar: current stage in plain words (FR/EN),
+  file *n/N*, time left, labelled *Stop* button; the sub-segmentation tagger
+  pass reports per batch (the bar used to sit at 5 % for 10+ minutes on CPU).
+- **Failures are visible**: a file that cannot be indexed (corrupted, still
+  copying…) is listed by name with its reason in the Library.
+- **Library** follows the running indexing (no more "Ready to index" + active
+  start button during a run, list refreshed as episodes finish), queued items
+  can be removed, and a first-run note says the analysis models (~2 GB) are
+  downloaded when the first indexing starts.
+- **Drag and drop of episode folders works again** (Electron 32+ removed
+  `File.path`; the preload now exposes `webUtils.getPathForFile`).
+- **Hover previews** play from the source file when no proxy exists (the
+  default), in Search and Tags; thumbnail fallback when the codec cannot play.
+- **Settings > Search** (threshold, max results, sort) is now used by the Search tab.
+- **Export folder**: a non-writable folder is refused with a clear message
+  instead of failing every later export; settings errors no longer show raw
+  `API 400: {json}`.
+- First-run screen: no more clipped title at 1280×720, *Fast* profile
+  pre-selected and explained for CPU-only installs, right version shown.
+- GPU fallback banner: no false "torch is not installed", reasons translated.
+- **Scene editor**: the Finishing menu no longer opens under the player (only
+  Upscale was reachable), the transport bar stays on screen below ~1000 px.
+- **Search**: the threshold slider and sort re-run the search; a hint (and a
+  one-click 5 % threshold) when few shots match (French queries find fewer);
+  visible wait for the first search (model load); an indexed library no
+  longer greeted with "index a folder first"; recent searches updated.
+- **Export names keep accented and Japanese letters** ("Clip été 01" used to
+  become `Clip_t_01`).
+- Derush export summary translated; timeline dialog says *Close* once done;
+  the backend-unreachable screen no longer shows a developer command.
+- Escape closes the scene editor; a queue left from the previous session is
+  explained in the Library at launch.
+- Small copy fixes (Derush empty state pointed to Settings instead of Library).
+
+### Music sync (v06 C)
+
+New **Music** tab ([report](docs/reports/v06-C-synchro-musique.md)):
+
+- **Song analysis** (librosa, CPU, cached by content hash): tempo (also
+  variable tempo), beats, bars, strong hits, smoothed energy curve, sections
+  (intro / verse / build-up / drop / chorus / calm part / outro) and drops.
+  On synthetic tracks with exact ground truth: beat F1 0.91-1.0 at 70 ms
+  (mean error 5-11 ms), bars 0.90-1.0, 2/2 drops at 6 ms; on two real songs
+  annotated by eye 2/4 drops found, no false drop. 1.5-4 s for a 2-4 min
+  song on a slow CPU; the analyser warms up when the tab opens.
+- **Edit proposal** from the indexed shots: beat-aligned cuts (1-8 beats per
+  shot depending on the passage and the chosen rhythm, accelerating through
+  build-ups, on strong hits at drops), shots picked by intensity / motion /
+  text and character wishes, series filter, no reuse; alternatives, locks,
+  regenerate one passage.
+- **Exports**: timeline (FCP 7 XML, FCPXML, EDL, OTIO, via the regular
+  timeline writers, unchanged) with the song on its own audio track and
+  beat / passage markers; markers-only (FCP 7 XML, FCPXML, Resolve marker
+  EDL, OTIO, CSV); low-resolution MP4 preview with the music. Real check
+  (2 indexed episode extracts + a CC-BY song): cuts 10 ms from the beat on
+  average, 21 ms max (frame rounding at 23.976) in the timeline and in the
+  rendered MP4.
+- **Hidden cuts**: the preview detects shots that contain a cut of the
+  episode (missed by the indexer's shot detection), flags them and splits
+  them in later proposals (35 -> 7 off-beat cuts on the real check).
+- New dependency: `librosa` (ISC).
+
+### Models — non-commercial candidates re-evaluated (chantier 4b)
+
+AMV Tools is non-commercial, so models rejected in chantier 4 only for a
+non-commercial license were measured with the same protocol
+([report](docs/reports/chantier-4b-modeles-non-commerciaux.md)).
+
+- **Upscale: AnimeJaNai HD V3 UltraCompact** (the-database, CC-BY-NC-SA-4.0)
+  replaces 2xHFA2kAVCCompact in every NVIDIA and Mac tier from 8 GB and in
+  *Max quality*, and animevideov3 in *Fast* (1.6-2x its throughput): LPIPS
+  0.030 vs 0.044 against the real 1080p (PSNR 42.7 vs
+  42.5 dB, dark shots 48.7 vs 45.3 dB), no colour halo on dark lines, half
+  the convolutions. Downloaded from the official archive, only the 2.5 MB
+  checkpoint is kept.
+- **Depth: Video Depth Anything Large** (CC-BY-NC-4.0) at 364 px in the
+  NVIDIA *Max quality* tier: flicker 0.21 % vs 0.24 % (Small 518 px) and
+  visibly sharper relief; 9.3 GB of VRAM, does not fit 24 GB at 518 px.
+- **Rejected after measurement**: AnimeJaNai V3.1 (SPAN, ONNX only, no gain
+  over V3), GIMM-VFI and AMT (no better than RIFE 4.26 on anime action,
+  8-22x slower, AMT needs 14-17 GB at 1080p), Video Depth Anything Base
+  (checkerboard artefacts on dark shots), PixAI tagger v1.0 (still no
+  Beerus/Whis; finds Asta and Cell but ~50x slower than wd-vit, lower tag F1).
+- **Licenses**: the download allow-list now accepts CC-BY-NC-4.0 and
+  CC-BY-NC-SA-4.0; Settings > Models (tier table and finishing models) shows a
+  *non-commercial use* mark next to those models; the README lists them.
+- Finishing registry: a model file can be a member of a checksum-verified zip
+  archive (only that member is kept on disk).
 
 ## 0.4.0-alpha — 2026-10-25
 

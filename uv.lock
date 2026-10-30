@@ -65,7 +65,7 @@ version = "10.15.1.29"
 
 [[package]]
 name = "amv-tools"
-version = "0.5.0b1"
+version = "0.5.0b2"
 source = { virtual = "." }
 dependencies = [
     { name = "av" },
