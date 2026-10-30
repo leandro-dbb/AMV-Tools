@@ -32,6 +32,7 @@ OBJ_NEAR_FRAC = 0.03        # coverage looked for within this share of the diago
 HOLE_TINY = 0.00015         # holes under this share of the (half-size) frame: pin-holes, always suspect
 SPECK_ORPHANS = 40          # faint isolated pixels (half size) counted as specks from this many
 
+PERSISTENT = ("hole", "specks", "rough")   # flagged where they start (see decide)
 WEIGHTS = {"lost": 5.0, "object_lost": 3.0, "jump": 2.0, "hole": 1.5, "specks": 1.0, "rough": 1.0}
 
 
@@ -105,10 +106,9 @@ def decide(features: List[dict], locked: Iterable[int] = (), shots=None) -> List
     med_rough = float(np.nanmedian(rough)) if np.isfinite(rough).any() else float("nan")
     shots = shots or [(0, T)]
     out = []
+    raw: Dict[int, Dict[str, float]] = {}
     for a, b in shots:
         for t in range(a, b):
-            if t in locked:
-                continue
             f = features[t]
             reasons: Dict[str, float] = {}
             med = _rolling_median(area, t, a, b)
@@ -132,7 +132,20 @@ def decide(features: List[dict], locked: Iterable[int] = (), shots=None) -> List
             r = f.get("rough", float("nan"))
             if np.isfinite(r) and np.isfinite(med_rough) and r > ROUGH_ABS and r > ROUGH_REL * med_rough:
                 reasons["rough"] = min(1.0, r / (3 * ROUGH_ABS))
-            if reasons:
+            raw[t] = reasons
+    # a defect that stays from frame to frame (the same speck, a pin-hole in
+    # a still shot, a jagged edge) is flagged where it starts, not on every
+    # frame: fixed there and propagated, it is gone from the whole run
+    for a, b in shots:
+        for t in range(a, b):
+            reasons = dict(raw.get(t) or {})
+            if not reasons:
+                continue
+            prev = raw.get(t - 1) if t > a else None
+            if prev:
+                for k in [k for k in reasons if k in PERSISTENT and k in prev]:
+                    del reasons[k]
+            if reasons and t not in locked:
                 score = sum(WEIGHTS[k] * (0.5 + 0.5 * v) for k, v in reasons.items())
                 out.append({"frame": t, "score": round(float(score), 3),
                             "reasons": sorted(reasons, key=lambda k: -WEIGHTS[k])})

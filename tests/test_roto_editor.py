@@ -359,3 +359,13 @@ def test_propagated_matte_has_no_faint_veil():
     assert m[48, 50] > 0.99
     m2 = merge_track(None, track)
     assert m2[:, 125:].max() == 0.0 and m2[48, 50] > 0.99
+
+
+def test_a_steady_defect_is_flagged_where_it_starts():
+    from backend.roto.suspects import decide, frame_features
+    a = _disc(0, r=30)
+    b = a.copy()
+    b[5:8, 140:143] = 1          # the same speck on frames 2..5 of a still shot
+    feats = [frame_features(x) for x in (a, a, b, b, b, b, a)]
+    flagged = [s["frame"] for s in decide(feats) if "specks" in s["reasons"]]
+    assert flagged == [2]

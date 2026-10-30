@@ -31,8 +31,8 @@ export const rotoStrings: Dict = {
   'roto.device.mps': { en: 'Apple GPU', fr: 'GPU Apple' },
   'roto.device.cpu': { en: 'CPU', fr: 'CPU' },
   'roto.models.sam3Missing': {
-    en: 'SAM 3 not available (no Hugging Face access): SAM 2.1 large used instead',
-    fr: 'SAM 3 indisponible (accès Hugging Face manquant) : SAM 2.1 large utilisé à la place',
+    en: 'SAM 3 not available (no Hugging Face access): {model} used instead',
+    fr: 'SAM 3 indisponible (accès Hugging Face manquant) : {model} utilisé à la place',
   },
   'roto.models.slow': {
     en: 'This computer has no graphics card the AI can use: each correction can take a few seconds',
