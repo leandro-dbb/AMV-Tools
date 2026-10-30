@@ -390,3 +390,14 @@ def test_propagating_an_emptied_frame_changes_nothing(project, state):
     project.apply("main", {3: np.zeros((96, 160), np.float32)}, label="brush", lock=[3])   # hidden by smoke
     new, method = engine.propagate(project, state, "main", 3, "both", use_sam2=False)
     assert new == {} and method == "nothing to follow"
+
+
+def test_cpu_clicks_reuse_what_is_computed(project, state, monkeypatch):
+    from backend.roto import engine
+    monkeypatch.setattr(engine, "editor_tracker", lambda st: None)   # no SAM 2 on this machine
+    _ai(project, [_disc(i) for i in range(project.n)])
+    project.apply("main", {0: np.zeros((96, 160), np.float32)}, label="brush", lock=[0])
+    region, model = engine.click_region(project, state, 0, 50, 48, positive=True)
+    assert model.startswith("AI pass") and region[48, 50] > 0.9 and region[5, 5] == 0   # the disc, from the AI pass
+    region, model = engine.click_region(project, state, 1, 5, 5, positive=False)
+    assert model == "colour under the click" and region[5, 5] > 0.9 and region[48, 50] < 0.1   # the light background only

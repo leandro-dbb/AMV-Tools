@@ -37,6 +37,7 @@ TRACK_ERODE_PX = 1     # the tracked object fills where the AI matte has nothing
 EMPTY_FRAC = 0.0005    # a frame with less matte than this has nothing to propagate
 THIN_PX = 3            # AI matte parts thinner than ~2x this (strands, tips) survive a propagation
 TRACK_LO, TRACK_HI = 0.35, 0.65   # SAM 2 probabilities ramped to 0..1 between these (no faint veil)
+WAND_TOL = 14          # CPU negative click: colour tolerance of the area under the click (0-255)
 CLICK_MAX_FRAC = 0.45  # a click region bigger than this share of the frame is refused
 WINDOW = 48            # SAM 2 propagation window (bounded memory on long shots)
 
@@ -277,9 +278,27 @@ def click_region(project, state, t: int, x: float, y: float, positive: bool = Tr
         hard = _piece_under(best > 0, x, y)
         region = cv2.GaussianBlur(hard.astype(np.float32), (0, 0), 0.8)
         return region.astype(np.float32), MASK_MODEL_INFO.get(variant, {}).get("label", variant)
-    # no SAM 2 here: the detected piece under the click
+    # no SAM 2 here (CPU): the piece under the click, taken from what is
+    # already computed — the AI pass for a positive click (a part it had
+    # and the user lost), the current matte for a negative one — instead of
+    # running the detector again (seconds per click on a CPU)
     from PIL import Image
     from ..models.auto_roto import clicked_targets
+    xi, yi = int(np.clip(round(x), 0, w - 1)), int(np.clip(round(y), 0, h - 1))
+    if not positive:
+        # the area of similar colour under the click (a magic wand), inside
+        # the current matte: a piece of sky or wall glued to the character
+        import cv2
+        ff = np.zeros((h + 2, w + 2), np.uint8)
+        cv2.floodFill(np.ascontiguousarray(rgb).copy(), ff, (xi, yi), (0, 0, 0), (WAND_TOL,) * 3, (WAND_TOL,) * 3,
+                      8 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
+        wand = ff[1:-1, 1:-1] > 0
+        return cv2.GaussianBlur(wand.astype(np.float32), (0, 0), 0.8), "colour under the click"
+    ais = [a[t].astype(np.float32) / 255.0 for a in project.ai.values() if a is not None]
+    base = np.max(ais, axis=0) if ais else None
+    if base is not None and base[yi, xi] > 0.5:
+        sel = clicked_targets(base, [(x, y)])
+        return (base * sel).astype(np.float32), "AI pass (piece under the click)"
     key = (project.id, int(t))
     det = _det_cache.get(key)
     if det is None:
