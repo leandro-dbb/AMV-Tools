@@ -56,6 +56,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [alphaCodec, setAlphaCodec] = useState<'prores_4444_alpha' | 'vp9_alpha'>('prores_4444_alpha');
   const [engine, setEngine] = useState<Engine>('birefnet');
+  const [autoTarget, setAutoTarget] = useState<'main' | 'all'>('all');
   const [tool, setTool] = useState<Tool>('points');
   const [brushRadius, setBrushRadius] = useState(14);
   const [viewMode, setViewMode] = useState<ViewMode>('overlay');
@@ -70,6 +71,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
     Promise.all([api.getSettings(), api.status()])
       .then(([s, status]) => {
         if (s.models?.mask_engine === 'sam2' && status.device !== 'dml') setEngine('sam2');
+        if (s.models?.mask_auto_target === 'main') setAutoTarget('main');
       })
       .catch(() => {});
   }, []);
@@ -83,7 +85,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
     setBusy(true);
     setViewIdx(0);
     viewIdxCommitted.current = 0;
-    api.segmentPreview(scene.id, { positive: [], negative: [], box: null, reference_frame_offset: 0, start_ms: trimStart, end_ms: trimEnd, engine })
+    api.segmentPreview(scene.id, { positive: [], negative: [], box: null, reference_frame_offset: 0, start_ms: trimStart, end_ms: trimEnd, engine, auto_target: autoTarget })
       .then((r) => {
         if (cancelled) return;
         setSession(r as SegmentSessionInfo);
@@ -96,7 +98,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene.id, trimStart, trimEnd, engine]);
+  }, [scene.id, trimStart, trimEnd, engine, autoTarget]);
 
   // ── cleanup on unmount: drop the server session (frees the tempdir) ──────
   useEffect(() => {
@@ -275,6 +277,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         start_ms: trimStart,
         end_ms: trimEnd,
         engine,
+        auto_target: autoTarget,
       });
       viewIdxCommitted.current = viewIdx;
       setSession(r as SegmentSessionInfo);
@@ -304,6 +307,7 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
         start_ms: trimStart,
         end_ms: trimEnd,
         engine,
+        auto_target: autoTarget,
       }) as Awaited<ReturnType<typeof api.segmentTrack>> & { keyframes?: number[]; corrected_frames?: number[] };
       setSession({ ...session, n_frames: r.n_frames, keyframes: r.keyframes, corrected_frames: r.corrected_frames, tracked: true });
       if (r.corrected_frames) setCorrected(r.corrected_frames);
@@ -411,6 +415,29 @@ export default function MaskMode({ scene, trimStart, trimEnd, onClose, onExportE
             </button>
           ))}
         </div>
+        {/* Auto engine: which characters to track (no click needed). */}
+        {engine === 'birefnet' && (
+          <div className="flex items-center bg-[#0F0F11] border border-[#27272A] rounded-lg p-0.5">
+            {([
+              { id: 'main', label: t('mask.autoTarget.main'), title: t('mask.autoTarget.mainTitle') },
+              { id: 'all', label: t('mask.autoTarget.all'), title: t('mask.autoTarget.allTitle') },
+            ] as const).map(({ id, label, title }) => (
+              <button
+                key={id}
+                onClick={() => setAutoTarget(id)}
+                disabled={busy}
+                className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                  autoTarget === id
+                    ? 'bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white'
+                    : 'text-[#A1A1AA] hover:text-[#FAFAFA]'
+                }`}
+                title={title}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Tool chip — click prompts vs. brush corrections. */}
         <div className="flex items-center bg-[#0F0F11] border border-[#27272A] rounded-lg p-0.5">
           {([

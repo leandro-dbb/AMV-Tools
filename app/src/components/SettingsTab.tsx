@@ -9,6 +9,9 @@ import DiagnosticSection from './DiagnosticSection';
 import FinishModelsSection from './FinishModelsSection';
 import ModelTiersSection from './ModelTiersSection';
 
+// mirrors backend/models/auto_roto.HELD_DEFAULT ("auto" value of mask_keep_held)
+const KEEP_HELD_DEFAULT = true;
+
 const sections = [
   { name: 'Indexing', icon: Cpu },
   { name: 'Models', icon: Zap },
@@ -340,11 +343,13 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
       </Row>
       <Row label={t('settings.models.autoModel.label')} hint={t('settings.models.autoModel.hint')}>
         <select
-          value={s.birefnet_variant || 'general'}
-          onChange={(e) => patch('models', { birefnet_variant: e.target.value as 'general' | 'hr' | 'portrait' | 'anime' })}
+          value={s.birefnet_variant || 'auto'}
+          onChange={(e) => patch('models', { birefnet_variant: e.target.value as 'auto' | 'toonout' | 'general' | 'hr' | 'portrait' | 'anime' })}
           disabled={!s.enable_mask || s.mask_engine !== 'birefnet'}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
+          <option value="auto">{t('settings.models.autoModel.opt.auto')}</option>
+          <option value="toonout">{t('settings.models.autoModel.opt.toonout')}</option>
           <option value="anime">{t('settings.models.autoModel.opt.anime')}</option>
           <option value="general">{t('settings.models.autoModel.opt.general')}</option>
           <option value="hr">{t('settings.models.autoModel.opt.hr')}</option>
@@ -353,11 +358,12 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
       </Row>
       <Row label={t('settings.models.sam2.label')} hint={t('settings.models.sam2.hint')}>
         <select
-          value={s.sam2_variant || 'base_plus'}
-          onChange={(e) => patch('models', { sam2_variant: e.target.value as 'tiny' | 'small' | 'base_plus' | 'large' })}
-          disabled={!s.enable_mask || !sam2Available || s.mask_engine !== 'sam2'}
+          value={s.sam2_variant || 'auto'}
+          onChange={(e) => patch('models', { sam2_variant: e.target.value as 'auto' | 'tiny' | 'small' | 'base_plus' | 'large' })}
+          disabled={!s.enable_mask || !sam2Available}
           className="bg-[#0F0F11] border-2 border-[#A855F7]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#A855F7] disabled:opacity-40"
         >
+          <option value="auto">{t('settings.models.sam2.opt.auto')}</option>
           <option value="tiny">{t('settings.models.sam2.opt.tiny')}</option>
           <option value="small">{t('settings.models.sam2.opt.small')}</option>
           <option value="base_plus">{t('settings.models.sam2.opt.basePlus')}</option>
@@ -372,6 +378,22 @@ function ModelsSection({ settings, patch, runtimeDevice }: { settings: AppSettin
           step={120}
           onChange={(v) => patch('models', { mask_max_dim: v })}
         />
+      </Row>
+      <Row label={t('settings.models.edgeMode.label')} hint={t('settings.models.edgeMode.hint')}>
+        <Toggle on={(s.mask_edge_mode ?? 'auto') !== 'legacy'} onChange={(v) => patch('models', { mask_edge_mode: v ? 'auto' : 'legacy' })} />
+      </Row>
+      <Row label={t('settings.models.maskQuality.label')} hint={t('settings.models.maskQuality.hint')}>
+        <select value={(s.mask_quality ?? 'auto') === 'auto' ? 'stable' : s.mask_quality} onChange={(e) => patch('models', { mask_quality: e.target.value === 'stable' ? 'auto' : e.target.value as any })} className="bg-[#0F0F11] border-2 border-[#8B5CF6]/30 rounded-lg px-5 py-2.5 text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]">
+          <option value="stable">{t('settings.models.maskQuality.stable')}</option>
+          <option value="max">{t('settings.models.maskQuality.max')}</option>
+          <option value="standard">{t('settings.models.maskQuality.standard')}</option>
+        </select>
+      </Row>
+      <Row label={t('settings.models.selector.label')} hint={t('settings.models.selector.hint')}>
+        <Toggle on={s.mask_selector_enabled ?? true} onChange={(v) => patch('models', { mask_selector_enabled: v })} />
+      </Row>
+      <Row label={t('settings.models.keepHeld.label')} hint={t('settings.models.keepHeld.hint')}>
+        <Toggle on={s.mask_keep_held === 'auto' || s.mask_keep_held === undefined ? KEEP_HELD_DEFAULT : !!s.mask_keep_held} onChange={(v) => patch('models', { mask_keep_held: v })} />
       </Row>
       <Row label={t('settings.models.edgeRefine.label')} hint={t('settings.models.edgeRefine.hint')}>
         <Toggle on={s.mask_edge_refine_enabled ?? true} onChange={(v) => patch('models', { mask_edge_refine_enabled: v })} />

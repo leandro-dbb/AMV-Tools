@@ -431,3 +431,14 @@ def decontaminate_rgb_with_alpha(
     valid_coords = np.argwhere(valid)
     result[valid_coords[:, 0], valid_coords[:, 1]] = image[nearest[:, 0], nearest[:, 1]]
     return result
+
+
+def export_edges(image: np.ndarray, alpha: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Export-time outline finishing (0.6): the matte is kept as is (the
+    guided filter added background along hair) and the colour of the
+    semi-transparent pixels is decontaminated (foreground estimation).
+    Returns ``(rgb_uint8, alpha_float32)``; see
+    :mod:`backend.models.edge_refine`."""
+    from .edge_refine import estimate_foreground
+    a = np.clip(alpha.astype(np.float32, copy=False), 0.0, 1.0)
+    return estimate_foreground(image, a), a
