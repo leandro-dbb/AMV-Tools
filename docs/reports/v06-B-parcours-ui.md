@@ -11,7 +11,7 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
   ceux de Léandro) avec le **vrai backend** et les **vrais modèles en CPU**
   (SigLIP 2 base + wd-tagger v3 ; aucun mode de test, aucune maquette), sur
   deux **vrais extraits** de 2 min 30 (DBS Beerus 01, Black Clover S02E04)
-  rangés dans `~/dev/amv-testdata/Séries test/` (espaces + accents).
+  rangés dans un dossier de test hors dépôt, `Séries test/` (espaces + accents).
 - **22 bugs trouvés, 21 corrigés**, tous avec un test de non-régression
   (vitest, pytest ou E2E) sauf un changement de texte. Les plus gênants : le glisser-déposer de dossiers
   ne faisait **rien** (Electron 33), l'indexation restait figée sur « 5 % »
@@ -28,7 +28,7 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
   5 min sur clips synthétiques, 12 min sur les vrais extraits), et un job
   CI Linux optionnel dans un fichier séparé (`.github/workflows/e2e-linux.yml`,
   déclenchement manuel) que la session A pourra reprendre.
-- Captures avant/après : `/home/leandro/dev/amv-v06-captures/` (`avant/`,
+- Captures avant/après : dossier de captures hors dépôt (`avant/`,
   `apres/`, `apres/e2e/`).
 
 
@@ -41,13 +41,14 @@ pendant toute la nuit, ce qui ralentit tout ce qui suit d'un facteur 3 à 5).
 | Profil | dossier `userData` temporaire neuf (`/tmp/amv-e2e-profile-*`), donc base, réglages et logs jetables |
 | Backend | le vrai sidecar Python (`uv run --no-sync`), sur CPU |
 | Modèles | **les vrais** : SigLIP 2 base NaFlex + wd-vit-tagger v3 (déjà dans le cache HF, rien retéléchargé) |
-| Médias | `~/dev/amv-testdata/Séries test/DBS Beerus 01 - extrait.mkv` (HEVC 1080p, 2 min 32) et `Black Clover S02E04 - extrait.mkv` (H.264 1080p, 2 min 35) |
+| Médias | deux extraits d'épisodes hors dépôt : Dragon Ball Super (HEVC 1080p, 2 min 32) et Black Clover (H.264 1080p, 2 min 35), dans `Séries test/` |
 | Ce qui est simulé | les boîtes de dialogue système (choix de dossier / « enregistrer sous ») sont remplacées par un chemin fixé, et le `uv sync` de l'écran d'installation est sauté (`AMV_E2E_SKIP_SYNC=1`, sinon il réinstallerait torch dans l'environnement de dev). Tout le reste de l'installation (réglages, marqueur) tourne vraiment. |
 
 Deux façons de rejouer :
 
-- **Exploration réelle** (`app/e2e/explore/*.mjs`) : les scripts qui ont servi
-  cette nuit sur les vrais extraits, avec une capture par étape.
+- **Exploration réelle** : des scripts jetables qui ont servi cette nuit sur
+  les vrais extraits, avec une capture par étape (retirés du dépôt à la
+  relecture de la 0.5.0-beta.1 : ils dépendaient de médias locaux).
 - **Suite rejouable** (`npm run e2e`) : le parcours 1 → 4 + paramètres + cas
   d'erreur + relancement de l'appli, sur deux petits clips synthétiques générés par ffmpeg dans un
   dossier piège `Séries test/Épisode spécial/` (+ un faux épisode corrompu),
@@ -193,8 +194,7 @@ confus ou faux ; **mineur** = texte, cosmétique.
   11 min 45 sur les deux vrais extraits** (`AMV_E2E_MEDIA="…/Séries test"`,
   indexation réelle comprise ; le test qui supprime un fichier source est
   sauté sur de vrais médias). Captures : `apres/e2e/` et
-  `apres/e2e-extraits-reels/`. Scripts
-  d'exploration réelle : `app/e2e/explore/`.
+  `apres/e2e-extraits-reels/`.
 - Job CI optionnel : `.github/workflows/e2e-linux.yml` (manuel, met en cache
   les poids des modèles). **Fichier nouveau, les workflows existants ne sont
   pas touchés** ; jamais exécuté sur GitHub (pas de push).
