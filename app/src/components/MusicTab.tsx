@@ -393,6 +393,9 @@ export default function MusicTab({ onOpenScene, onOpenLibrary }: Props) {
                 <Stat label={t('music.overview.sections')} value={String(sections.length)} />
                 <Stat label={t('music.overview.drops')} value={String(dropsCount)} accent={dropsCount > 0 ? '#EF4444' : undefined} />
               </div>
+              {analysis.bars_engine && analysis.bars_engine !== 'beat_this' && (
+                <div data-testid="music-bars-hint" className="text-[11px] text-[#71717A]">{t('fix.music.barsHint')}</div>
+              )}
 
               {/* player + zoom */}
               <div className="flex items-center gap-2 flex-wrap">

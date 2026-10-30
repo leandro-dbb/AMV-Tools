@@ -27,6 +27,10 @@ export const fixStrings: Dict = {
     fr: 'Impossible d’importer ces réglages : {reason}',
   },
   'fix.stage.download': { en: 'Downloading a model', fr: 'Téléchargement d’un modèle' },
+  'fix.music.barsHint': {
+    en: 'Bar lines (“1”) are estimated. For more reliable ones, download “Beat This!” in Settings > Models (8.5 MB).',
+    fr: 'Les premiers temps (« 1 ») sont estimés. Pour plus de fiabilité, télécharge « Beat This! » dans Paramètres > Modèles (8,5 Mo).',
+  },
   'fix.library.resume': { en: 'Resume indexing', fr: 'Reprendre l\'indexation' },
   'fix.library.incompleteChip': { en: 'incomplete', fr: 'incomplet' },
   'fix.library.incompleteChip.title': {

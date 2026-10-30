@@ -24,6 +24,8 @@ export interface MusicAnalysis {
   meter: number;
   beats_ms: number[];
   downbeats_ms: number[];
+  /** where the bar lines come from: 'beat_this' (optional model) or a heuristic */
+  bars_engine?: 'beat_this' | 'drops' | 'accents';
   strong_onsets_ms: number[];
   drops_ms: number[];
   sections: MusicSection[];
