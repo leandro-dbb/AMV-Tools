@@ -2,7 +2,75 @@
 
 All notable changes to AMV Tools are documented here.
 
-## 0.5.0-alpha — unreleased
+## 0.5.0-beta.1 — 2026-10-30
+
+First **beta**: installers for Windows, macOS (Apple Silicon) and Linux, still
+unsigned. [Release report](docs/reports/release-0.5.0-beta.1.md).
+
+**En bref (pour un monteur)**
+
+- **Envoyer la timeline à son logiciel** : on choisit Premiere Pro, DaVinci
+  Resolve, After Effects, Vegas Pro, Final Cut Pro ou « Autre », et l'appli
+  écrit le bon format avec les étapes d'import (nouveau : EDL texte pour
+  Vegas, script `.jsx` pour After Effects). Imports corrigés (chemins
+  Premiere sous Windows, EDL, FCPXML, fréquences d'images mélangées).
+- **Synchro musique** (nouvel onglet *Musique*) : on dépose un morceau,
+  l'appli trouve tempo, temps, mesures, montées et drops, propose un montage
+  calé sur les temps avec les plans indexés (rythme, intensité, personnages,
+  verrous, régénérer un passage), puis l'exporte en timeline avec la musique
+  et les marqueurs, en marqueurs seuls ou en aperçu MP4.
+- **Corrections de bugs** : détection des coupes nettement plus juste ;
+  l'indexation d'un MKV HEVC ne bloque plus l'appli ; une indexation
+  interrompue reprend où elle s'était arrêtée ; glisser-déposer réparé ;
+  export de clip réparé sur les PC Windows sans carte NVIDIA ; noms avec
+  accents et japonais conservés ; nombreuses impasses de l'interface
+  corrigées (progression lisible, fichiers en échec affichés, menu Finition
+  accessible…).
+- **Upscale** : AnimeJaNai HD V3 (usage non commercial) remplace l'ancien
+  modèle à partir de 8 Go de VRAM et sur Mac : plus fidèle, sans halo sur
+  les traits sombres, plus rapide.
+- **Profondeur** : Video Depth Anything Large en *Qualité max* sur NVIDIA
+  (moins de scintillement, plus de relief).
+- **Premier lancement** : le backend proposé suit la carte graphique
+  détectée ; les modèles d'analyse se téléchargent avec une progression
+  visible.
+- Le détourage automatique (Mask Mode) reste désactivé par défaut ;
+  l'éditeur de roto n'est pas dans cette version.
+
+**In short (for an editor)**
+
+- **Send the timeline to your editor**: pick Premiere Pro, DaVinci Resolve,
+  After Effects, Vegas Pro, Final Cut Pro or Other, and the app writes the
+  right format with its import steps (new: Vegas EDL text, After Effects
+  `.jsx` script). Import fixes (Premiere paths on Windows, EDL, FCPXML,
+  mixed frame rates).
+- **Music sync** (new *Music* tab): drop a song, the app finds tempo, beats,
+  bars, build-ups and drops, proposes a beat-aligned edit from your indexed
+  shots (rhythm, intensity, characters, locks, regenerate a passage), then
+  exports it as a timeline with the song and markers, markers only, or an
+  MP4 preview.
+- **Bug fixes**: much more accurate cut detection; indexing an HEVC MKV no
+  longer freezes the app; an interrupted indexing resumes where it stopped;
+  drag and drop works again; clip export fixed on Windows PCs without an
+  NVIDIA card; accented and Japanese names kept; many UI dead ends fixed
+  (readable progress, failed files listed, Finishing menu reachable…).
+- **Upscale**: AnimeJaNai HD V3 (non-commercial use) replaces the previous
+  model from 8 GB of VRAM and on Mac: more faithful, no halo on dark lines,
+  faster.
+- **Depth**: Video Depth Anything Large in *Max quality* on NVIDIA (less
+  flicker, more relief).
+- **First run**: the suggested backend follows the detected GPU; analysis
+  models download with visible progress.
+- Automatic cutout (Mask Mode) stays off by default; the roto editor is not
+  in this release.
+
+### Release review (0.5.0-beta.1)
+
+- macOS: without a certificate the app is now signed **ad hoc**
+  (`app/scripts/adhoc-sign.cjs`), so Apple Silicon accepts to run it after
+  the quarantine is cleared; the build workflow checks the signature.
+- Removed one-off exploration scripts (`app/e2e/explore/`) that depended on
+  local media; no personal paths in the reports.
 
 ### Bug-fix pass (v06 fix)
 
