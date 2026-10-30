@@ -352,7 +352,7 @@ sur « Régénérer ce passage » (seulement sur une nouvelle proposition).
   Hugging Face du NAS (utile à AMV Tools sur ce GPU). Les autres
   téléchargements (Beat This!, torchaudio pour la comparaison) ont été bridés
   à 5 Mo/s.
-- Fichiers de travail sur le NAS (`/srv/data/amv-tools/v06fix/` : extraits,
+- Fichiers de travail sur le NAS (extraits,
   morceaux, paquets de comparaison Beat This!) supprimés à la fin ; restent
   les checkpoints Beat This! dans `~/.cache/torch/hub/checkpoints/` (90 Mo)
   et le dossier `repo/` synchronisé sur la branche.
