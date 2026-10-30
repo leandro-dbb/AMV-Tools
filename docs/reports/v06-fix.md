@@ -360,7 +360,7 @@ sur « Régénérer ce passage » (seulement sur une nouvelle proposition).
 
 ## Tests
 
-- `uv run pytest -m "not slow"` : **444 passés**, 9 ignorés (tests sur
+- `uv run pytest -m "not slow"` : **447 passés**, 9 ignorés (tests sur
   vrai matériel / vrais médias opt-in, et la comparaison morceaux-séquentiel
   du décodage par morceaux désactivé). Les tests sur vrais extraits et vrais
   morceaux (`test_shotdetect`, `test_music_drops_real`) tournent dès que les
