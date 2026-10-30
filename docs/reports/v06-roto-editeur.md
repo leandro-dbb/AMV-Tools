@@ -55,10 +55,58 @@ Code : `backend/roto/` (projet + sauvegarde, bords, images suspectes, moteur, ex
 `app/src/i18n/strings.roto.ts`. Tests : `tests/test_roto_editor.py` (14), `app/src/components/rotoUtils.test.ts`,
 `app/e2e/roto.e2e.mjs`. Mesure : `tests/eval/roto_editor_sim.py`, `tests/eval/roto_editor_examples.py`.
 
-<!-- LATENCE -->
+## 2. Correction en direct : temps mesurés (RTX 3090)
+
+Image de travail 1080×608 (le 1080p de l'épisode, réduit comme pour tout le détourage de l'appli),
+plan b1 (cigarette), une seule mesure à la fois sur la carte, médiane de 5 gestes
+(`python -m tests.eval.roto_editor_sim latency`) :
+
+| geste | temps serveur | cible |
+|---|---|---|
+| clic (SAM 2.1 large) sur une **nouvelle** image (calcul de l'image + masque) | **112 ms** | < 300 ms |
+| clic suivant sur la **même** image (image déjà calculée) | **21 ms** | |
+| coup de pinceau | **6 ms** | |
+| aperçu de l'image avec les réglages de bord (trait noir compris) | **73 ms** | |
+| propagation SAM 2.1 large | **180 ms par image** (48 images en 8,7 s) | |
+
+Dans l'appli, l'éditeur affiche le temps total (serveur + transfert + affichage) ; mesuré pendant le
+chantier avec trois simulations qui tournaient en même temps sur la carte : clics 98 à 149 ms,
+pinceau 170 ms. Le **premier** clic chargeait le modèle (20 à 55 s sous charge) : le modèle de clic
+est maintenant préchargé en arrière-plan à l'ouverture d'un plan déjà détouré et à la fin de la
+passe IA. Mémoire vidéo de l'éditeur seul (clics + propagation) : 2,4 Go.
+
+Sur CPU (machine sans GPU, test de bout en bout) : la passe IA utilise ISNet anime sans suivi, les
+clics la pièce détectée sous le curseur, la propagation le flot optique ; tout tourne en tâche de
+fond (l'interface reste utilisable, la progression et le bouton Annuler restent là) mais c'est lent :
+voir §4.
+
 
 <!-- SIMULATION -->
 
 <!-- RESTE -->
 
-<!-- TESTER -->
+## 6. Ce que Léandro doit tester
+
+1. **Le parcours de base**, sur un plan que tu connais : Recherche → ouvrir un plan → « Détourer ce
+   plan » → *Tous les personnages* → Détourer. Pendant la passe IA, l'interface doit rester
+   utilisable (vues, navigation) et Annuler doit marcher.
+2. **Les deux façons de corriger**, sur une image où l'IA a pris du décor : Alt+clic (ou clic droit)
+   sur le morceau de décor, puis un coup de pinceau rouge sur ce qui reste ; ensuite un clic gauche
+   sur une partie oubliée (une main, un objet tenu). Regarde le temps affiché en bas à gauche du
+   panneau (« Image corrigée en … ms ») et dis-moi si ça te paraît instantané.
+3. **Propager ↔** depuis l'image corrigée, puis lire le plan (espace) : la correction doit suivre le
+   personnage, et les images que tu as corrigées ne doivent jamais bouger.
+4. **Les images à vérifier** (rouge sous la vidéo, `N`) : sur un plan calme il doit y en avoir peu
+   et elles doivent valoir le coup d'œil ; sur un plan à aura (SSJ3) il y en a trop (§5).
+5. **Les bords** : décoche « Garder le trait noir », bouge *Rétrécir ↔ Élargir* et *Adoucir ↔ Durcir* en
+   vue « Sur blanc » (`3`) zoomée : le changement doit se voir tout de suite.
+6. **Plusieurs personnages** : sur le plan large DBS (Goku, Kaio, Beerus, Whis), *Cliquer sur le
+   personnage* sur Beerus seul, puis « + Personnage » et clic sur Whis.
+7. **Fermer l'éditeur au milieu**, rouvrir le même plan : tout doit être là (corrections, images
+   validées, réglages).
+8. **Export** : les trois cases cochées → ouvrir le `_alpha.mov` dans After Effects / Premiere /
+   Resolve / Vegas (fond transparent, pas de liseré), le `_matte.mov` en luma matte ; puis exporter la
+   timeline de ta sélection : le plan détouré doit y être à la place de l'épisode.
+9. **Sur le PC Windows sans lancer de GPU lourd en même temps**, et si possible sur le Mac : l'éditeur
+   doit s'ouvrir et corriger partout (pas mesuré sur Mac ni sur Windows dans ce chantier).
+

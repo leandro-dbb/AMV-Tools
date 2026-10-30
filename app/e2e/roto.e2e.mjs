@@ -40,8 +40,9 @@ test('1. un vrai extrait indexé', async () => {
   await win.getByRole('button', { name: /^Bibliothèque/ }).first().click();
   await win.getByRole('button', { name: 'Ajouter un dossier' }).click();
   await win.getByRole('button', { name: /Lancer l'indexation/ }).click();
+  await expect(win.getByText('Indexation en cours')).toBeVisible();
   await expect(win.getByText('Inactif')).toBeVisible({ timeout: 45 * 60_000 });
-  await expect(win.getByText(`${media.files.length} épisode`, { exact: false })).toBeVisible();
+  await expect(win.getByText(`${media.files.length} épisode`, { exact: false }).first()).toBeVisible({ timeout: 60_000 });
 });
 
 test('2. ouvrir un plan et le détourer avec l’IA', async () => {
