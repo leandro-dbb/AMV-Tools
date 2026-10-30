@@ -239,7 +239,7 @@ installé (ouverture d'OTIO uniquement via son interface graphique).
   parallèles), sans lien avec ce chantier (passe seul 3/3, et dans le
   passage final).
 - Tests de rendu MLT sur vrais extraits (DBS Beerus 01 en H.264, Black
-  Clover S02E04 en HEVC, déjà présents dans `~/dev/amv-testdata`, aucun
+  Clover S02E04 en HEVC, déjà présents dans les données de test hors dépôt, aucun
   nouveau transfert depuis le NAS) : 6/6 formats OK.
 - `npx tsc --noEmit`, `npx vitest run` (28 passés), `npm run build` : OK.
 

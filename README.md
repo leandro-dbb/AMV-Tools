@@ -510,7 +510,7 @@ project's GitHub Releases page.
 
 1. If you have an NVIDIA GPU, make sure your driver is at least `581.x` for
    CUDA 13. Run `nvidia-smi` in PowerShell to confirm.
-2. Download `AMV Tools Setup x.y.z-alpha.exe` from the latest release.
+2. Download `AMV Tools Setup <version>.exe` from the latest release.
 3. Run it. The installer is currently unsigned, so Windows SmartScreen may
    warn you. Choose `More info -> Run anyway`.
 4. On first launch, pick the backend that matches your hardware, your indexing
@@ -532,7 +532,19 @@ detects the broken environment and repairs it automatically.
 
 ### macOS and Linux
 
-Not published yet. On Apple Silicon (`--extra mps`) indexing, search, export,
+Since 0.5.0-beta.1 the release also carries a macOS build (Apple Silicon,
+`.dmg` / `.zip`) and Linux builds (`.AppImage` / `.deb`, x64). They are not
+signed by a known developer:
+
+- **macOS**: the app is signed ad hoc only. After copying it to
+  Applications, right-click → Open (on macOS 15, if nothing offers to open it:
+  System Settings → Privacy & Security → *Open Anyway*), or run
+  `xattr -dr com.apple.quarantine "/Applications/AMV Tools.app"`.
+- **Linux**: `chmod +x` the AppImage and run it (it needs `libfuse2`; on
+  Ubuntu 24.04 `libfuse2t64`), or install the `.deb`
+  (`sudo apt install ./amv-tools_<version>_amd64.deb`).
+
+On Apple Silicon (`--extra mps`) indexing, search, export,
 finishing and Mask Mode have been benchmarked and checked end-to-end on an
 M1 Pro 16 GB (a 24-min episode indexes in about 2 minutes with the default
 Accurate profile, ~43 s with Fast — see [docs/PERFORMANCE.md](docs/PERFORMANCE.md));
@@ -540,8 +552,8 @@ the packaged app itself (signing, notarization) has not been QA'd. On Macs
 the wd-tagger runs on the GPU through PyTorch and downloads the same
 checkpoint as `model.safetensors` (Apache-2.0) instead of `model.onnx`.
 Linux is built in CI as
-`AppImage` and `.deb` but has not been QA'd end-to-end either. On those
-platforms, build from source (see below) — `.github/workflows/build.yml`
+`AppImage` and `.deb` but has not been QA'd end-to-end either. You can also
+build from source (see below) — `.github/workflows/build.yml`
 produces macOS builds on a Mac runner and Linux packages on Ubuntu (macOS
 builds cannot be produced from Windows). See `docs/RELEASING.md` for the
 signing/notarization secrets and the draft-release flow.

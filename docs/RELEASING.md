@@ -23,8 +23,8 @@ Release. A human still reviews the draft and publishes it.
 3. Commit, then tag and push:
 
    ```bash
-   git tag v0.4.0-alpha
-   git push origin v0.4.0-alpha
+   git tag v0.5.0-beta.1
+   git push origin v0.5.0-beta.1
    ```
 
 Pushing the tag runs `.github/workflows/build.yml`. Everyday push/PR validation
@@ -68,7 +68,9 @@ certificate), plus:
 
 `app/scripts/notarize.cjs` is wired as the electron-builder `afterSign` hook. It
 notarizes only when the three Apple variables are present; otherwise it logs a
-skip and the app remains unsigned. The macOS target keeps `hardenedRuntime`
+skip and the app remains unsigned. Without `CSC_LINK`,
+`app/scripts/adhoc-sign.cjs` (`afterPack`) signs the bundle **ad hoc** so that
+Apple Silicon accepts to run it, and the build workflow checks the signature. The macOS target keeps `hardenedRuntime`
 enabled with the entitlements in `app/build/entitlements.mac.plist`.
 
 `CSC_IDENTITY_AUTO_DISCOVERY` is derived from whether `CSC_LINK` is set, so a
