@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 
 NEAR_PX = 5            # the AI matte is kept within this distance of the tracked object (px)
 TRACK_ERODE_PX = 1     # the tracked object fills where the AI matte has nothing, shrunk by this
+EMPTY_FRAC = 0.0005    # a frame with less matte than this has nothing to propagate
 THIN_PX = 3            # AI matte parts thinner than ~2x this (strands, tips) survive a propagation
 TRACK_LO, TRACK_HI = 0.35, 0.65   # SAM 2 probabilities ramped to 0..1 between these (no faint veil)
 CLICK_MAX_FRAC = 0.45  # a click region bigger than this share of the frame is refused
@@ -373,8 +374,12 @@ def merge_track(ai: Optional[np.ndarray], track: np.ndarray, near_px: int = NEAR
     import cv2
     tr = crisp_track(track)
     trm = (tr > 0.5).astype(np.uint8)
-    if ai is None or float(ai.max()) < 0.3 or not trm.any():
-        return tr if trm.any() else np.zeros_like(tr)
+    if not trm.any():
+        # the tracker lost the character (or follows an emptied frame): the
+        # AI pass stays — a propagation never wipes a frame out
+        return np.zeros_like(tr) if ai is None else np.asarray(ai, np.float32).copy()
+    if ai is None or float(ai.max()) < 0.3:
+        return tr
     ai = np.asarray(ai, np.float32)
     near = cv2.dilate(trm, _disk(near_px)).astype(np.float32)
     near = cv2.GaussianBlur(near, (0, 0), 1.2)
@@ -487,6 +492,10 @@ def propagate(project, state, layer: str, t: int, direction: str = "both", *,
         start = project.matte(layer, t)
         prompts = {u: project.matte(layer, u) for u in locked}
     prompts[t] = start
+    if float((start > 0.5).mean()) < EMPTY_FRAC:
+        # an emptied frame (the character hidden, off screen) has nothing to
+        # follow: propagating it would only erase its neighbours
+        return {}, "nothing to follow"
     orders = _ranges(project.n, t, direction, locked - {t})
     total = sum(len(s) - 1 for s in orders) or 1
     done = [0]
