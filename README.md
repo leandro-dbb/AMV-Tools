@@ -15,7 +15,9 @@
 > and several flows break on real-world footage. Use it to experiment, not to
 > ship. The **roto / alpha-matte (Mask Mode)** feature in particular is **far
 > from ready and disabled by default** — matte quality is unreliable. You can
-> opt in from `Settings > Models`, but treat it as an experiment.
+> opt in from `Settings > Models`, but treat it as an experiment. The **roto
+> editor** (*Cut out this shot*, since 0.5.0-beta.2) is also **beta**: the AI
+> first pass plus your corrections, always available from a shot.
 
 AMV Tools turns a folder of episodes into a fast, visual editing library. It
 indexes your footage locally with semantic search and anime-oriented tags, lets
@@ -137,7 +139,7 @@ pulls, not full timeline editing.
 
 ![Mini editor trim workflow](assets/screenshots/mini-editor.png)
 
-### 8. Roto Editor — The AI Cuts Out, You Finish
+### 8. Roto Editor (beta) — The AI Cuts Out, You Finish
 
 Open any shot in the editor and press **Cut out this shot** (*Détourer ce
 plan*). The AI makes the first pass over the whole shot (the Stable Auto
