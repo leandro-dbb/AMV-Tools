@@ -1,4 +1,5 @@
-"""Temporally consistent depth with Video Depth Anything Small (Apache-2.0).
+"""Temporally consistent depth with Video Depth Anything (Small: Apache-2.0;
+Large: CC-BY-NC-4.0 weights, same network code, "Max quality" tier).
 
 Same windowing as the upstream ``infer_video_depth`` (32-frame windows that
 advance by 22 frames; the first 10 inputs of a window are key frames of the
@@ -24,6 +25,13 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 VDA_MODEL = "video-depth-anything-small"
+# registry id -> (encoder, features, out_channels, checkpoint file); upstream
+# ``run.py`` model_configs
+VDA_VARIANTS = {
+    VDA_MODEL: ("vits", 64, (48, 96, 192, 384), "video_depth_anything_vits.pth"),
+    "video-depth-anything-base": ("vitb", 128, (96, 192, 384, 768), "video_depth_anything_vitb.pth"),
+    "video-depth-anything-large": ("vitl", 256, (256, 512, 1024, 1024), "video_depth_anything_vitl.pth"),
+}
 _MEAN = (0.485, 0.456, 0.406)
 _STD = (0.229, 0.224, 0.225)
 
@@ -60,15 +68,16 @@ class VideoDepthEstimator:
 
     temporal = True
 
-    def __init__(self, device, *, input_size: int = 518):
+    def __init__(self, device, *, input_size: int = 518, model_id: str = VDA_MODEL, weights=None):
         import torch
 
         from . import registry
         from .archs.vda import VideoDepthAnything
 
-        d = registry.require(VDA_MODEL)
-        net = VideoDepthAnything(encoder="vits", features=64, out_channels=(48, 96, 192, 384))
-        sd = torch.load(d / "video_depth_anything_vits.pth", map_location="cpu", weights_only=True)
+        encoder, features, out_channels, fname = VDA_VARIANTS[model_id]
+        path = weights or registry.require(model_id) / fname
+        net = VideoDepthAnything(encoder=encoder, features=features, out_channels=out_channels)
+        sd = torch.load(path, map_location="cpu", weights_only=True)
         net.load_state_dict(sd, strict=True)
         self.device = device
         self.input_size = int(input_size)

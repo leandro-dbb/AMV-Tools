@@ -80,7 +80,7 @@ class TimelineSelection(BaseModel):
 
 
 class TimelineExportBody(TimelineSelection):
-    format: Literal["fcp7xml", "fcpxml", "edl", "otio"]
+    format: Literal["fcp7xml", "fcpxml", "edl", "otio", "vegas", "aftereffects"]
     output_path: Optional[str] = None
 
 

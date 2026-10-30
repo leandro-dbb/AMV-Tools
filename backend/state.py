@@ -193,6 +193,14 @@ class AppState:
         else:
             for db in self._settings["databases"]["active"]:
                 schema.init_db(db)
+        # Nothing indexes at startup: a video still "indexing" was cut off
+        # (app closed, crash). Say so — the Library shows it as incomplete.
+        for db in self._settings["databases"]["active"]:
+            try:
+                with schema.get_conn(db) as conn:
+                    conn.execute("UPDATE videos SET status = 'cancelled' WHERE status = 'indexing'")
+            except Exception as exc:
+                log.warning("could not flag interrupted videos in %s: %s", db, exc)
 
     def _migrate_model_tier(self) -> None:
         """Model tiers (0.4): installs that picked their own SigLIP / tagger /
@@ -688,6 +696,10 @@ class AppState:
             overlap = None
             try:
                 self.publish({"type": "indexing", "message": "Starting", "percent": 0})
+                # First run: fetch SigLIP/tagger now, with visible progress,
+                # instead of silently inside the first batch (never raises).
+                from .model_prefetch import prefetch_indexing_models
+                prefetch_indexing_models(self, self.publish, should_stop=self._cancel_event.is_set)
                 self._set_proxy_source_cache()
                 from .indexing import onepass as _op
                 video_done = None
@@ -721,7 +733,8 @@ class AppState:
                 self.invalidate_search_cache()
             except Exception as e:
                 log.exception("indexing crashed")
-                self.publish({"type": "indexing", "message": f"Failed: {e}", "percent": 0})
+                self.publish({"type": "indexing", "message": f"Failed: {e}", "percent": 0,
+                              "failed": True, "video": "Indexing"})
             finally:
                 self.invalidate_search_cache()
                 from .indexing import onepass
@@ -744,6 +757,21 @@ class AppState:
         self._index_thread = threading.Thread(target=run, daemon=True)
         self._index_thread.start()
         return True
+
+    def indexing_running(self) -> bool:
+        return bool(self._index_thread and self._index_thread.is_alive())
+
+    def indexing_busy_reason(self) -> Optional[str]:
+        """Why ``start_indexing`` refuses to start, if it does."""
+        if self.indexing_running():
+            return "indexing"
+        from .indexing import reembed
+        if reembed.is_running():
+            return "reembed"
+        from .db.merge import merge_running
+        if merge_running():
+            return "merge"
+        return None
 
     def stop_indexing(self) -> None:
         self._cancel_event.set()

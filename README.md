@@ -163,9 +163,9 @@ to `<export folder>/finish/`:
 
 | Pass | Model | What you get |
 |---|---|---|
-| **Upscale** x2 / x4 | Real-ESRGAN AnimeVideo v3 (fast, steady) or x4plus anime 6B (sharper) | Upscaled clip with the source audio, using your export codec. Tiled inference keeps VRAM bounded. |
+| **Upscale** x2 / x4 | AnimeJaNai HD V3 UltraCompact (per model tier, non-commercial), Real-ESRGAN AnimeVideo v3 (fast, steady) or x4plus anime 6B (sharper) | Upscaled clip with the source audio, using your export codec. Tiled inference keeps VRAM bounded. |
 | **Slow-mo / 60 fps** | RIFE 4.26 (or 4.26 heavy, per model tier) | x2/x4/x8 slow motion (audio muted or time-stretched) or 48/50/60 fps at the same duration (audio kept). *Don't interpolate across cuts* duplicates frames at hard cuts instead of morphing two shots. |
-| **Depth map** | Video Depth Anything Small (Depth Anything V2 Small on 8 GB Macs and the Mac *Fast* tier) | Grayscale depth (white = near), frame-synchronous with the clip, as a 16-bit PNG sequence, ProRes 422 HQ (10-bit) or H.264. Optional temporal smoothing. Made for parallax / 3D layers in After Effects. |
+| **Depth map** | Video Depth Anything Small (Large in *Max quality* on NVIDIA; Depth Anything V2 Small on 8 GB Macs and the Mac *Fast* tier) | Grayscale depth (white = near), frame-synchronous with the clip, as a 16-bit PNG sequence, ProRes 422 HQ (10-bit) or H.264. Optional temporal smoothing. Made for parallax / 3D layers in After Effects. |
 | **Cutout** | Mask Mode's Auto engine | ProRes 4444 / VP9 alpha in one click (requires Mask Mode). |
 
 Every pass is a background job: queue as many as you like, follow progress and
@@ -183,9 +183,20 @@ checksum-verified, and can be deleted at any time.
 | Real-ESRGAN `realesr-animevideov3` | 2.5 MB | BSD-3-Clause |
 | Real-ESRGAN `RealESRGAN_x4plus_anime_6B` | 18 MB | BSD-3-Clause |
 | `2xHFA2kAVCCompact` by Philip Hofmann ([Phhofm/models](https://github.com/Phhofm/models)) | 4.8 MB | CC-BY-4.0 (attribution: Philip Hofmann) |
+| `2x_AnimeJaNai_HD_V3_UltraCompact` by the-database ([mpv-upscale-2x_animejanai](https://github.com/the-database/mpv-upscale-2x_animejanai), official `ModelsOnly` archive, only this file is kept) | 24.7 MB download, 2.5 MB on disk | **CC-BY-NC-SA-4.0 — non-commercial use only** (attribution: the-database) |
 | RIFE 4.25 / 4.25 lite / 4.26 / 4.26 heavy (Practical-RIFE, mirrored by vs-rife) | 25 MB each | MIT |
 | Depth Anything V2 **Small** | 99 MB | Apache-2.0 (Base/Large are CC-BY-NC and deliberately not offered) |
-| Video Depth Anything **Small** (temporally stable, code vendored in `backend/finish/archs/vda`) | 116 MB | Apache-2.0 (Base/Large are CC-BY-NC and deliberately not offered) |
+| Video Depth Anything **Small** (temporally stable, code vendored in `backend/finish/archs/vda`) | 116 MB | Apache-2.0 |
+| Video Depth Anything **Large** (same code, *Max quality* tier on NVIDIA) | 1.5 GB | **CC-BY-NC-4.0 — non-commercial use only** |
+| Beat This! `small0` (CPJKU; Music tab bar lines — code vendored in `backend/music/beatthis` with rotary-embedding-torch, both MIT) | 8.5 MB | MIT |
+
+**Non-commercial models.** AMV Tools is a free, non-commercial tool, so it
+also offers models whose license forbids commercial use (marked *non-commercial
+use* in `Settings > Models`). Their weights are never committed or bundled:
+they are downloaded on demand from the official source. If you use AMV Tools
+or its output commercially, pick a tier or model with a permissive license
+(`Custom` + the finishing menu let you choose 2xHFA2kAVCCompact or Video Depth
+Anything Small instead).
 
 Which of them a job uses by default follows the **model tier** (below).
 
@@ -208,17 +219,18 @@ the VRAM (NVIDIA) or the unified memory (Mac); you can force a tier, *Fast*,
 *Max quality* or *Custom* (your own per-model choices). The choices come from
 measurements on three real episodes (hand-judged search and tag sets, x2
 upscale and frame-interpolation references, depth flicker) on an RTX 3090
-and an M1 Pro — see [docs/reports/chantier-4-modeles.md](docs/reports/chantier-4-modeles.md).
+and an M1 Pro — see [docs/reports/chantier-4-modeles.md](docs/reports/chantier-4-modeles.md)
+and, for the non-commercial models, [docs/reports/chantier-4b-modeles-non-commerciaux.md](docs/reports/chantier-4b-modeles-non-commerciaux.md).
 
 | Tier | Search | Tagger | Upscale | Interpolation | Depth |
 |---|---|---|---|---|---|
-| Fast | SigLIP 2 base | wd-vit v3 | animevideov3 | RIFE 4.26 | Video Depth Anything Small, 364 px (Mac: DA V2 Small, 364 px) |
-| NVIDIA 8 / 12 GB | SigLIP 2 so400m | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| NVIDIA 16 / 24 GB | SigLIP 2 so400m | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 518 px |
-| Mac 8 GB | SigLIP 2 base | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | DA V2 Small (Core ML) |
-| Mac 16 GB | SigLIP 2 base | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| Mac 24 / 32 GB+ | SigLIP 2 so400m | wd-vit v3 | 2xHFA2kAVCCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| Max quality | SigLIP 2 so400m, 256 patches | wd-eva02-large v3 (Mac: wd-vit v3) | 2xHFA2kAVCCompact | RIFE 4.26 heavy | Video Depth Anything Small (Mac: 364 px) |
+| Fast | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px (Mac: DA V2 Small, 364 px) |
+| NVIDIA 8 / 12 GB | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
+| NVIDIA 16 / 24 GB | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 518 px |
+| Mac 8 GB | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | DA V2 Small (Core ML) |
+| Mac 16 GB | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
+| Mac 24 / 32 GB+ | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
+| Max quality | SigLIP 2 so400m, 256 patches | wd-eva02-large v3 (Mac: wd-vit v3) | AnimeJaNai V3 UltraCompact | RIFE 4.26 heavy | Video Depth Anything Large, 364 px (Mac: Small, 364 px) |
 | CPU / DirectML / XPU | unchanged defaults | | | | |
 
 Changing the search model asks for an **embeddings-only re-index** (cuts,
@@ -226,12 +238,46 @@ tags and keeps are kept, progress shown, cancellable); until it is done the
 library keeps searching with the model it was indexed with, and every
 library remembers its own model. Models download on demand (10 MB/s,
 checksum-verified) and only after their license has been checked against an
-allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0).
+allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0, and the non-commercial
+CC-BY-NC-4.0 / CC-BY-NC-SA-4.0, flagged in Settings).
 
 | Model | Size | License |
 |---|---|---|
 | SigLIP 2 base / so400m NaFlex (google) | 1.5 / 4.5 GB | Apache-2.0 |
 | wd-vit / wd-eva02-large tagger v3 (SmilingWolf) | 0.4 / 1.3 GB | Apache-2.0 |
+
+## Music Sync — Cut On The Beat
+
+The **Music** tab turns a song into a first cut made of your own indexed
+shots:
+
+1. **Pick your song** (mp3, wav, flac, m4a, ogg, or the audio of a video).
+   AMV Tools finds the tempo, every beat and bar, the strong hits, an energy
+   curve and the parts of the song — intro, verse, build-up, drop, chorus,
+   calm part, outro — with the drops flagged on the waveform. About 1.5-4 s
+   for a 4-minute song on a modest CPU, cached by file content (renaming or moving the
+   file keeps the analysis).
+2. **Propose an edit.** Each passage gets shots whose intensity matches it
+   (calm shots on the intro and calm parts, faster cuts through the build-up,
+   action shots cut on 1-2 beats on the drop), using the motion / intensity
+   analysis of Search+, the tags and the text search. Choose the series and
+   characters, the cut rhythm (steady ↔ nervous), avoid reusing a shot, and
+   add keywords per passage ("Goku" on the drop).
+3. **Tweak it**: click a shot to swap it for one of its alternatives, lock
+   the ones you like, regenerate one passage or everything but the locked
+   shots, and watch a **low-resolution MP4 preview** with the music. The
+   preview also spots shots that hide a cut of the episode (it would fall
+   off the beat): they are marked in red and avoided by the next proposal.
+4. **Export** the edit as a timeline (FCP 7 XML for Premiere / Vegas /
+   Resolve / After Effects via Premiere, FCPXML, EDL, OTIO) with the song on
+   its own audio track and markers on the beats and passages — or only the
+   **markers** (beats + passages on the song, to cut by hand; also as a
+   DaVinci Resolve marker EDL and CSV).
+
+Every cut is placed on the frame nearest to its beat (at 23.976 fps that is
+at most ±21 ms, half a frame). Analysis uses librosa (ISC) and plain signal
+processing: no model to download, works on any CPU.
+Details and measurements: [v06 C report](docs/reports/v06-C-synchro-musique.md).
 
 ## Send To Your Editor
 
@@ -247,15 +293,20 @@ Where the button lives:
 - **Tags**: the selected scenes.
 - **Search**: the current result set.
 
-The dialog previews the clip count and total duration, then asks where to save
-the timeline. Formats:
+The dialog asks which editor you use (Premiere Pro, DaVinci Resolve, After
+Effects, Vegas Pro, Final Cut Pro, Other), shows how to import there, previews
+the clip count and total duration, then asks where to save the timeline.
+Step-by-step import guide with a 5-minute checklist per editor (FR):
+[docs/import-timeline.md](docs/import-timeline.md). Formats:
 
 | Format | Best for | Notes |
 | --- | --- | --- |
-| **FCP 7 XML** (xmeml v5) | Premiere Pro, Resolve, Vegas, AE via Premiere/Dynamic Link | Exact integer-frame in/out, NTSC flag, labels, markers. |
+| **FCP 7 XML** (xmeml v5) | Premiere Pro (also Resolve) | Exact integer-frame in/out, NTSC flag, labels, markers; `pathurl` spelled like Premiere's own exports (`file://localhost/C%3a/...`). |
 | **FCPXML 1.9** | Final Cut Pro 10.4+, Resolve | Rational times (`1001/24000s`), mixed source rates. |
-| **EDL CMX3600** | Any NLE, as a universal cut list | 8-char reel names and `* FROM CLIP NAME:` comments; no media paths. |
+| **EDL CMX3600** | Any NLE, as a universal cut list | 8-char reel names; `* FROM CLIP NAME:` / `* FROM FILE:` comments on one line each (what NLEs relink from). |
 | **OpenTimelineIO** | Resolve, Kdenlive, OTIO tools | Native OTIO JSON (with markers), written by AMV Tools itself — no extra package needed. |
+| **Vegas EDL text** (`.txt`) | Vegas Pro | Vegas' own event list (semicolons, milliseconds) for `File → Import → EDL Text File`; full source paths. |
+| **After Effects script** (`.jsx`) | After Effects | ExtendScript that imports the sources, creates the comp and places every clip with exact in/out. |
 
 Options in the dialog:
 
@@ -278,7 +329,7 @@ Options in the dialog:
   | --- | --- |
   | FCPXML, OpenTimelineIO | Relative to the timeline file: `timeline_media/clip.mp4`. Moving the timeline and its `_media` folder together keeps the media linked. |
   | EDL | No media path in the format; the `* FROM FILE:` comment carries the same relative path. |
-  | FCP 7 XML | **Absolute** `file://` URL of the copy, e.g. `file:///C:/Edits/timeline_media/clip.mp4`. |
+  | FCP 7 XML | **Absolute** `file://` URL of the copy, e.g. `file://localhost/C%3a/Edits/timeline_media/clip.mp4`. |
 
   Why FCP 7 XML stays absolute: xmeml's `<pathurl>` is a `file://` URL and
   Premiere Pro, Final Cut Pro 7, Resolve and Vegas do not resolve relative
@@ -313,15 +364,16 @@ and project are created automatically. FCP 7 XML can also be imported by FCP
 10 through `File → Import → XML…` in most versions; FCPXML is the recommended
 path.
 
-**Vegas Pro** — `File → Import → Final Cut Pro 7 XML…` (or use the bundled
-script/extension if your Vegas version hides the menu entry), then select the
-exported `.xml`. Relink to the collected `_media` folder if the originals
-moved.
+**Vegas Pro** — `File → Import → EDL Text File (*.txt)`, select the exported
+`.txt` (choose *Vegas Pro* in the dialog). Video lands on track 1, audio on
+track 2. Vegas 14+ can also try the FCP 7 XML through
+`File → Import → Final Cut Pro 7 / DaVinci Resolve Timeline (*.xml)`.
 
-**After Effects** — easiest path is Premiere + Dynamic Link as above. A
-standalone AE import can read the FCP 7 XML: `File → Import → File…`, choose
-the `.xml`, and select the sequence. Audio-only EDL workflows should use the
-EDL in the target NLE instead.
+**After Effects** — choose *After Effects* in the dialog, then in AE
+`File → Scripts → Run Script File…` and pick the `.jsx`: it imports each
+source once, creates a composition at the timeline's rate and size and places
+every clip as a layer with its exact in/out (one undo step). Missing files
+are listed in an alert; files next to the script are found too.
 
 **EDL in any NLE** — import the `.edl` as a pre-conformed/CMX3600 EDL. The
 `* FROM CLIP NAME:` and `* FROM FILE:` comment lines identify the source;
@@ -338,6 +390,9 @@ NLE asks.
 - OpenCV (Apache-2.0) optical-flow camera-motion / intensity analysis, CPU only.
 - wd-tagger for anime-oriented tag discovery.
 - ffmpeg-based proxies, trim previews, and clip exports.
+- librosa (ISC) beat / section / drop analysis for the Music tab (CPU, no
+  model weights; pulls numba, scikit-learn, soundfile and soxr — the latter
+  LGPL-2.1+, used as an unmodified dynamic library).
 - BiRefNet / ISNet anime + SAM 2 alpha workflow for short character cutouts (beta).
 - Finishing toolbox: Real-ESRGAN anime upscaling, RIFE interpolation, Depth
   Anything V2 depth maps, as queued background jobs.
@@ -360,7 +415,7 @@ project's GitHub Releases page.
 
 1. If you have an NVIDIA GPU, make sure your driver is at least `581.x` for
    CUDA 13. Run `nvidia-smi` in PowerShell to confirm.
-2. Download `AMV Tools Setup x.y.z-alpha.exe` from the latest release.
+2. Download `AMV Tools Setup <version>.exe` from the latest release.
 3. Run it. The installer is currently unsigned, so Windows SmartScreen may
    warn you. Choose `More info -> Run anyway`.
 4. On first launch, pick the backend that matches your hardware, your indexing
@@ -382,7 +437,19 @@ detects the broken environment and repairs it automatically.
 
 ### macOS and Linux
 
-Not published yet. On Apple Silicon (`--extra mps`) indexing, search, export,
+Since 0.5.0-beta.1 the release also carries a macOS build (Apple Silicon,
+`.dmg` / `.zip`) and Linux builds (`.AppImage` / `.deb`, x64). They are not
+signed by a known developer:
+
+- **macOS**: the app is signed ad hoc only. After copying it to
+  Applications, right-click → Open (on macOS 15, if nothing offers to open it:
+  System Settings → Privacy & Security → *Open Anyway*), or run
+  `xattr -dr com.apple.quarantine "/Applications/AMV Tools.app"`.
+- **Linux**: `chmod +x` the AppImage and run it (it needs `libfuse2`; on
+  Ubuntu 24.04 `libfuse2t64`), or install the `.deb`
+  (`sudo apt install ./amv-tools_<version>_amd64.deb`).
+
+On Apple Silicon (`--extra mps`) indexing, search, export,
 finishing and Mask Mode have been benchmarked and checked end-to-end on an
 M1 Pro 16 GB (a 24-min episode indexes in about 2 minutes with the default
 Accurate profile, ~43 s with Fast — see [docs/PERFORMANCE.md](docs/PERFORMANCE.md));
@@ -390,8 +457,8 @@ the packaged app itself (signing, notarization) has not been QA'd. On Macs
 the wd-tagger runs on the GPU through PyTorch and downloads the same
 checkpoint as `model.safetensors` (Apache-2.0) instead of `model.onnx`.
 Linux is built in CI as
-`AppImage` and `.deb` but has not been QA'd end-to-end either. On those
-platforms, build from source (see below) — `.github/workflows/build.yml`
+`AppImage` and `.deb` but has not been QA'd end-to-end either. You can also
+build from source (see below) — `.github/workflows/build.yml`
 produces macOS builds on a Mac runner and Linux packages on Ubuntu (macOS
 builds cannot be produced from Windows). See `docs/RELEASING.md` for the
 signing/notarization secrets and the draft-release flow.
@@ -548,6 +615,18 @@ Backend tests use synthetic clips generated with ffmpeg and mocked ML models,
 so a CPU-only machine is enough. `uv sync --extra cpu` installs the test group
 automatically. Tests marked `slow` run the real finishing models on CPU and are
 skipped unless their weights are present (`AMV_TEST_DOWNLOAD=1` fetches them).
+
+End-to-end UI journey (the built Electron app + the real sidecar and models on
+CPU, driven by Playwright under its own Xvfb, throwaway profile):
+
+```bash
+cd app
+npm run build
+npm run e2e                                   # synthetic clips, ~5 min
+AMV_E2E_MEDIA="/path/to/Séries test" AMV_E2E_CAPTURES=/tmp/caps npm run e2e
+```
+
+The first run needs the SigLIP 2 and wd-tagger weights (~2 GB, Hugging Face cache).
 
 Create a local unsigned Windows installer:
 

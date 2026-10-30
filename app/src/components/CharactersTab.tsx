@@ -287,6 +287,11 @@ function CharacterDetail({ character, groups, onOpenScene, onChanged, onDeleted,
           {t('sp.chars.showBorderline')}
         </label>
       </div>
+      {/* Real run: Beerus from 3 examples matched 86 of 98 shots, Goku included.
+          Nothing said that rejecting wrong shots is how it gets sharper. */}
+      {examples.length > 0 && examples.length < 6 && above > 0 && (
+        <div data-testid="chars-refine-hint" className="text-xs text-[#A1A1AA] -mt-2 px-1">{t('journey.chars.refine')}</div>
+      )}
 
       {visible.length === 0 && <div className="text-center text-sm text-[#71717A] py-8">{t('sp.chars.noMatches')}</div>}
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>

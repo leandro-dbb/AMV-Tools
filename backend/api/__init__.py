@@ -5,6 +5,7 @@ from . import finish
 from . import reembed
 from . import autotune
 from . import shutdown
+from . import music
 
 ROUTERS = [
     status.router,
@@ -28,4 +29,5 @@ ROUTERS = [
     reembed.router,
     autotune.router,
     shutdown.router,
+    music.router,
 ]

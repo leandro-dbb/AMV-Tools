@@ -1,0 +1,768 @@
+"""Tempo, beats, downbeats, onsets, energy curve, sections and drops.
+
+Design notes (the measured "why" is in docs/reports/v06-C-synchro-musique.md):
+
+* One STFT feeds everything (onset envelope, RMS, bass band, chroma, MFCC):
+  a 4-minute song is analysed in a few seconds on one CPU core, no model
+  weights, so the feature works on every machine.
+* Beats: librosa's dynamic-programming tracker (ISC licence) on a mel
+  spectral-flux envelope.  When the local tempo drifts (live drummer, tempo
+  ramps) the tracker is fed the time-varying tempo instead of one global BPM.
+* Downbeats: the beat phase (0-3 in 4/4) where harmony changes, bass and
+  attacks concentrate — bars start where chords and sections change.
+* Sections: self-similarity novelty on bar-level timbre/harmony/energy
+  features (Foote checkerboard kernel) plus energy jumps, so boundaries fall
+  on bar lines.  Each section is then labelled from its energy relative to
+  the whole song.
+* Drops: a section that starts with a strong jump of loudness *and* bass
+  after a quieter stretch; the bars that rise just before it become the
+  build-up.
+"""
+from __future__ import annotations
+
+import time
+from typing import Optional
+
+import numpy as np
+
+from .audio import DEFAULT_SR, decode_audio, fingerprint_file
+
+ANALYSIS_VERSION = 4   # 4: beat-level drops (v06 fix)
+HOP = 512
+N_FFT = 2048
+METER = 4
+LOW_WEIGHT = 4.0
+# The flux of a centred STFT frame peaks about a quarter window before the
+# attack (measured -20…-28 ms on click / kick tracks): shift beats back.
+LATENCY_S = N_FFT / 4 / DEFAULT_SR
+SECTION_TYPES = ("intro", "verse", "build", "drop", "chorus", "bridge", "outro")
+
+# Drop = energy jump into a loud section, with the bass coming in too.
+_DROP_JUMP = 0.17
+_DROP_BASS_JUMP = 0.12
+# Accent margin above which the bar phase is taken as obvious (see _accent_margin).
+_CLEAR_ACCENT = 0.8
+# Minimum section length in bars (shorter novelty peaks are merged).
+_MIN_SECTION_BARS = 4
+
+
+def _ms(t: float) -> int:
+    return int(round(float(t) * 1000.0))
+
+
+def _norm01(values: np.ndarray, lo_pct: float = 5, hi_pct: float = 98) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    if values.size == 0:
+        return values
+    lo, hi = np.percentile(values, [lo_pct, hi_pct])
+    if hi - lo < 1e-9:
+        return np.zeros_like(values)
+    return np.clip((values - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
+def _smooth(values: np.ndarray, sigma_frames: float) -> np.ndarray:
+    from scipy.ndimage import gaussian_filter1d
+
+    return gaussian_filter1d(np.asarray(values, dtype=np.float32),
+                             sigma=max(0.5, sigma_frames), mode="nearest")
+
+
+def _span_mean(x: np.ndarray, bounds: np.ndarray) -> np.ndarray:
+    """Column i = mean of x[:, bounds[i]:bounds[i+1]] (frames)."""
+    x = np.atleast_2d(x)
+    out = np.zeros((x.shape[0], max(0, len(bounds) - 1)), dtype=np.float32)
+    for i, (a, b) in enumerate(zip(bounds[:-1], bounds[1:])):
+        a = int(a)
+        b = max(a + 1, int(b))
+        out[:, i] = x[:, a:b].mean(axis=1) if a < x.shape[1] else x[:, -1]
+    return out
+
+
+# ── low-level features ──────────────────────────────────────────────────────
+def _features(y: np.ndarray, sr: int) -> dict:
+    import librosa
+
+    S = np.abs(librosa.stft(y, n_fft=N_FFT, hop_length=HOP)).astype(np.float32)
+    power = S ** 2
+    mel = librosa.feature.melspectrogram(S=power, sr=sr, n_mels=64)
+    mel_db = librosa.power_to_db(mel, ref=np.max)
+    # Spectral flux per mel band, weighted towards the low end: kicks and
+    # snares carry the beat, while hi-hats sit on the off-beats and would
+    # otherwise pull the tracker half a beat early.
+    flux = np.maximum(0.0, np.diff(mel_db, axis=1, prepend=mel_db[:, :1]))
+    weights = np.geomspace(LOW_WEIGHT, 1.0 / LOW_WEIGHT, mel_db.shape[0])[:, None]
+    onset_env = np.mean(flux * weights, axis=0)
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=N_FFT)
+    low_bins = freqs <= 150.0
+    rms = np.sqrt(np.mean(power, axis=0))
+    low = np.sqrt(np.mean(power[low_bins], axis=0))
+    # Loudness is perceived in dB: normalise the dB curves, not the linear RMS.
+    rms_db = 20.0 * np.log10(rms + 1e-6)
+    low_db = 20.0 * np.log10(low + 1e-6)
+    # tuning=0: estimating the tuning (piptrack) costs more than the whole
+    # beat tracker and only shifts chroma bins by a fraction of a semitone.
+    chroma = librosa.feature.chroma_stft(S=power, sr=sr, hop_length=HOP, tuning=0.0)
+    mfcc = librosa.feature.mfcc(S=mel_db, n_mfcc=13)
+    n = min(len(onset_env), S.shape[1])
+    return {
+        "onset_env": onset_env[:n],
+        "loud": _norm01(rms_db[:n]),
+        "loud_db": rms_db[:n].astype(np.float32),
+        "bass": _norm01(low_db[:n]),
+        "chroma": chroma[:, :n],
+        "mfcc": mfcc[:, :n],
+        "n": n,
+    }
+
+
+def _beat_fit(onset_env: np.ndarray, frames: np.ndarray) -> float:
+    """How well beats sit on attacks (mean local onset peak, normalised)."""
+    if not len(frames):
+        return 0.0
+    o = onset_env / (np.percentile(onset_env, 95) + 1e-9)
+    return float(np.mean([o[max(0, f - 1):f + 2].max() for f in frames if f < len(o)] or [0.0]))
+
+
+def _track_beats(onset_env: np.ndarray, sr: int, duration: float) -> tuple[float, np.ndarray, bool]:
+    """(bpm, beat times, variable_tempo)."""
+    import librosa
+
+    tempo = float(np.atleast_1d(librosa.feature.tempo(
+        onset_envelope=onset_env, sr=sr, hop_length=HOP))[0])
+    # AMV songs live between ~60 and ~180 BPM; outside that the estimate is
+    # almost always an octave error (hi-hats counted as beats, or half-time).
+    while tempo > 180.0:
+        tempo /= 2.0
+    while 0 < tempo < 60.0:
+        tempo *= 2.0
+    local = librosa.feature.tempo(onset_envelope=onset_env, sr=sr, hop_length=HOP,
+                                  aggregate=None)
+    local = np.asarray(local, dtype=np.float64)
+    variable = False
+
+    def track(bpm) -> np.ndarray:
+        _, fr = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, hop_length=HOP,
+                                        bpm=bpm, trim=True, units="frames")
+        return np.asarray(fr, dtype=int)
+
+    frames = track(tempo)
+    if local.size > 8 and np.all(np.isfinite(local)):
+        # Ignore octave flips of the local estimate (60 ↔ 120 BPM) when
+        # judging drift: only a gradual change means a real tempo change.
+        folded = local * np.where(local < tempo * 0.75, 2.0, 1.0)
+        folded = folded * np.where(folded > tempo * 1.5, 0.5, 1.0)
+        folded = _smooth(folded, 40).astype(np.float64)
+        p10, p90 = np.percentile(folded, [10, 90])
+        if p90 / max(1e-6, p10) > 1.12:
+            # Local tempo estimates are noisy on real songs (4 of our 6 real
+            # test songs drift by >12 % without any tempo change): follow the
+            # varying tempo only if its beats land clearly better on attacks.
+            # A steady accelerando/ritardando (tempo correlated with time) is
+            # trusted with a smaller margin.
+            trend = abs(float(np.corrcoef(np.arange(folded.size), folded)[0, 1]))
+            margin = 1.0 if trend > 0.8 else 1.05
+            var_frames = track(folded)
+            if _beat_fit(onset_env, var_frames) > margin * _beat_fit(onset_env, frames):
+                variable = True
+                frames = var_frames
+    beats = librosa.frames_to_time(np.asarray(frames, dtype=int), sr=sr, hop_length=HOP)
+    beats = beats + LATENCY_S
+    beats = np.asarray([t for t in beats if 0.0 <= t < duration], dtype=np.float64)
+    if beats.size >= 4:
+        # trim=True drops weak beats in silent heads/tails; re-extend the
+        # grid at the local period so every second of the song can be cut on.
+        period = float(np.median(np.diff(beats[:8])))
+        head = np.arange(beats[0] - period, -period * 0.25, -period)[::-1]
+        head = head[head >= 0.0]
+        period_end = float(np.median(np.diff(beats[-8:])))
+        tail = np.arange(beats[-1] + period_end, duration - period_end * 0.25, period_end)
+        beats = np.concatenate([head, beats, tail])
+        intervals = np.diff(beats)
+        med = float(np.median(intervals))
+        steady = intervals[(intervals > 0.6 * med) & (intervals < 1.6 * med)]
+        # mean, not median: beat frames are quantised to 23 ms hops, the
+        # median interval snaps to one of two hop counts.
+        tempo = float(60.0 / np.mean(steady if steady.size else intervals))
+    else:
+        # Too sparse to track (ambient intro, silence): constant grid.
+        period = 60.0 / max(40.0, tempo or 120.0)
+        beats = np.arange(0.0, duration, period)
+    return tempo, beats, variable
+
+
+def _downbeat_phase(beat_frames: np.ndarray, feats: dict) -> int:
+    """Beat phase (0..METER-1) where bars most likely start."""
+    import librosa
+
+    nb = len(beat_frames)
+    if nb < METER * 2:
+        return 0
+    n = feats["n"]
+    bounds = np.clip(beat_frames, 0, n - 1)
+    chroma = _span_mean(feats["chroma"], np.append(bounds, n))
+    cnorm = chroma / (np.linalg.norm(chroma, axis=0, keepdims=True) + 1e-9)
+    change = np.zeros(nb)
+    change[1:] = 1.0 - np.sum(cnorm[:, 1:] * cnorm[:, :-1], axis=0)
+    attack = feats["onset_env"][bounds]
+    bass = feats["bass"][bounds]
+    # accented beat = louder right on the beat than its neighbours
+    loud = np.asarray([float(np.max(feats["loud_db"][f:f + 4])) for f in bounds])
+
+    def z(v: np.ndarray) -> np.ndarray:
+        return (v - np.mean(v)) / (np.std(v) + 1e-9)
+
+    strength = z(change) + 0.7 * z(attack) + 0.5 * z(bass) + 0.7 * z(loud)
+    scores = [float(np.mean(strength[p::METER])) for p in range(METER)]
+    return int(np.argmax(scores))
+
+
+def _accent_margin(beat_frames: np.ndarray, feats: dict) -> float:
+    """How clearly one beat phase is accented: best minus second phase score
+    of ``_downbeat_phase`` (in z units). Large on a metronome-like accent,
+    small on real mixes where the heuristic often misses."""
+    nb = len(beat_frames)
+    if nb < METER * 2:
+        return 0.0
+    n = feats["n"]
+    bounds = np.clip(beat_frames, 0, n - 1)
+    loud = np.asarray([float(np.max(feats["loud_db"][f:f + 4])) for f in bounds])
+    attack = feats["onset_env"][bounds]
+    z = lambda v: (v - np.mean(v)) / (np.std(v) + 1e-9)  # noqa: E731
+    strength = 0.7 * z(attack) + 0.7 * z(loud)
+    scores = sorted((float(np.mean(strength[p::METER])) for p in range(METER)), reverse=True)
+    return scores[0] - scores[1]
+
+
+# ── sections ────────────────────────────────────────────────────────────────
+def _bar_features(bar_frames: np.ndarray, feats: dict, intensity: np.ndarray) -> dict:
+    import librosa
+
+    n = feats["n"]
+    nbars = len(bar_frames) - 1
+    idx = np.clip(bar_frames, 0, n - 1)
+
+    def sync(x: np.ndarray) -> np.ndarray:
+        return _span_mean(x, idx)
+
+    return {
+        "intensity": sync(intensity)[0],
+        "bass": sync(feats["bass"])[0],
+        "loud": sync(feats["loud"])[0],
+        "timbre": sync(feats["mfcc"]),
+        "harmony": sync(feats["chroma"]),
+        "attack": sync(feats["onset_env"])[0],
+    }
+
+
+def _novelty(bars: dict, width: int = 4) -> np.ndarray:
+    """Foote novelty on a bar-level self-similarity matrix."""
+    def zs(m: np.ndarray) -> np.ndarray:
+        m = np.atleast_2d(m)
+        return (m - m.mean(axis=1, keepdims=True)) / (m.std(axis=1, keepdims=True) + 1e-9)
+
+    X = np.vstack([
+        zs(bars["timbre"][1:]),               # drop MFCC 0 (≈ loudness, counted below)
+        0.6 * zs(bars["harmony"]),
+        2.5 * zs(bars["intensity"]),
+        1.5 * zs(bars["bass"]),
+    ])
+    n = X.shape[1]
+    if n < 2 * width + 1:
+        return np.zeros(n)
+    Xn = X / (np.linalg.norm(X, axis=0, keepdims=True) + 1e-9)
+    ssm = Xn.T @ Xn
+    g = np.exp(-0.5 * (np.linspace(-1.5, 1.5, 2 * width)) ** 2)
+    taper = np.outer(g, g)
+    sign = np.ones((2 * width, 2 * width))
+    sign[:width, width:] = -1
+    sign[width:, :width] = -1
+    kernel = taper * sign
+    pad = np.pad(ssm, width, mode="edge")
+    nov = np.zeros(n)
+    for i in range(n):
+        # boundary *before* bar i: window centred between bars i-1 and i
+        block = pad[i:i + 2 * width, i:i + 2 * width]
+        nov[i] = float(np.sum(block * kernel))
+    nov[0] = 0.0
+    return np.maximum(nov, 0.0)
+
+
+def _pick_boundaries(bars: dict, nov: np.ndarray) -> list[int]:
+    """Bar indices where a new section starts (always includes 0)."""
+    nbars = len(nov)
+    inten = bars["intensity"]
+    cands: list[tuple[float, int]] = []
+    if nbars:
+        peak = float(np.max(nov)) + 1e-9
+        thr = float(np.mean(nov) + 0.3 * np.std(nov))
+        for i in range(1, nbars):
+            left = nov[i - 1]
+            right = nov[i + 1] if i + 1 < nbars else -1
+            if nov[i] >= thr and nov[i] >= left and nov[i] >= right:
+                # Energy steps weigh extra: a drop or a breakdown is exactly
+                # "same loop, much louder / quieter".
+                step = abs(float(np.mean(inten[i:i + 2])) - float(np.mean(inten[max(0, i - 2):i])))
+                cands.append((float(nov[i]) / peak + 2.0 * step, i))
+    cands.sort(reverse=True)
+    chosen: list[int] = [0]
+    for _score, i in cands:
+        if i < _MIN_SECTION_BARS // 2 or nbars - i < 2:
+            continue
+        if any(abs(i - c) < _MIN_SECTION_BARS for c in chosen):
+            continue
+        chosen.append(i)
+    return sorted(chosen)
+
+
+def _label(segments: list[dict], bars: dict) -> None:
+    """Assign a type to every segment (in place)."""
+    inten = bars["intensity"]
+    bass = bars["bass"]
+    nseg = len(segments)
+    if not nseg:
+        return
+    hi = max(0.5, float(np.percentile(inten, 65)))
+    lo = min(0.45, float(np.percentile(inten, 30)))
+    for s in segments:
+        a, b = s["bar_start"], s["bar_end"]
+        s["energy"] = float(np.mean(inten[a:b]))
+        s["bass_level"] = float(np.mean(bass[a:b]))
+        s["head"] = float(np.mean(inten[a:min(b, a + 2)]))
+        s["bass_head"] = float(np.mean(bass[a:min(b, a + 2)]))
+        half = max(1, (b - a) // 2)
+        s["slope"] = float(np.mean(inten[a + half:b]) - np.mean(inten[a:a + half])) if b - a >= 2 else 0.0
+
+    for i, s in enumerate(segments):
+        if i > 0:
+            # Compared with the whole previous section: a build-up ends loud,
+            # but on average it sits well below the drop it leads to.
+            p = segments[i - 1]
+            s["jump"] = s["head"] - p["energy"]
+            s["bass_jump"] = s["bass_head"] - p["bass_level"]
+        else:
+            s["jump"] = s["bass_jump"] = 0.0
+        loud = s["energy"] >= hi
+        if i > 0 and loud and s["jump"] >= _DROP_JUMP and s["bass_jump"] >= _DROP_BASS_JUMP:
+            s["type"] = "drop"
+        elif loud:
+            s["type"] = "chorus"
+        elif i == 0:
+            s["type"] = "intro"
+        elif i == nseg - 1:
+            s["type"] = "outro"
+        elif s["energy"] <= lo:
+            s["type"] = "bridge"
+        else:
+            s["type"] = "verse"
+    # A song that starts loud has no intro; one that ends loud has no outro.
+    if segments[0]["type"] in ("verse", "bridge"):
+        segments[0]["type"] = "intro"
+    if nseg > 1 and segments[-1]["type"] in ("verse", "bridge") \
+            and segments[-1]["slope"] <= 0.05:
+        segments[-1]["type"] = "outro"
+    # Build-ups: what comes right before a drop (or a loud chorus) and rises.
+    for i in range(1, nseg):
+        if segments[i]["type"] not in ("drop", "chorus"):
+            continue
+        p = segments[i - 1]
+        if p["type"] in ("drop", "chorus") or i - 1 == 0 and p["type"] == "intro" and p["slope"] < 0.08:
+            continue
+        if p["slope"] > 0.04 or segments[i]["type"] == "drop":
+            p["type"] = "build"
+
+
+def _split_build(segments: list[dict], bars: dict) -> list[dict]:
+    """A long section before a drop: its rising tail becomes the build-up."""
+    inten = bars["intensity"]
+    out: list[dict] = []
+    for i, s in enumerate(segments):
+        nxt = segments[i + 1] if i + 1 < len(segments) else None
+        a, b = s["bar_start"], s["bar_end"]
+        if nxt is not None and nxt["type"] == "drop" and s["type"] != "build" and b - a >= 12:
+            tail = inten[b - 8:b]
+            start = b - 8 + int(np.argmin(tail))
+            start = max(a + 4, start - (start - a) % 2)
+            if b - start >= 2 and float(inten[b - 1] - inten[start]) > 0.06:
+                head = dict(s, bar_end=start)
+                build = dict(s, bar_start=start, type="build")
+                out.extend([head, build])
+                continue
+        if nxt is not None and nxt["type"] == "drop" and s["type"] not in ("build", "intro") \
+                and b - a < 12:
+            s = dict(s, type="build")
+        out.append(s)
+    return out
+
+
+def _merge_same(segments: list[dict]) -> list[dict]:
+    """Neighbours with the same label read as one section (a drop followed
+    by an equally loud stretch is still the drop)."""
+    out: list[dict] = []
+    for s in segments:
+        if out:
+            p = out[-1]
+            same = p["type"] == s["type"] and s["type"] != "drop"
+            drop_tail = p["type"] == "drop" and s["type"] == "chorus"
+            if same or drop_tail:
+                p["bar_end"] = s["bar_end"]
+                continue
+        out.append(dict(s))
+    return out
+
+
+def _snap(t: float, candidates: np.ndarray, tol: float) -> float:
+    if candidates.size:
+        i = int(np.argmin(np.abs(candidates - t)))
+        if abs(candidates[i] - t) <= tol:
+            return float(candidates[i])
+    return float(t)
+
+
+def _beat_novelty(beat_frames: np.ndarray, feats: dict, intensity: np.ndarray,
+                  width: int = 4) -> np.ndarray:
+    """Foote novelty at beat resolution (value i = change just before beat i)."""
+    n = feats["n"]
+    bounds = np.append(np.clip(beat_frames, 0, n - 1), n)
+    beats = {
+        "intensity": _span_mean(intensity, bounds)[0],
+        "bass": _span_mean(feats["bass"], bounds)[0],
+        "timbre": _span_mean(feats["mfcc"], bounds),
+        "harmony": _span_mean(feats["chroma"], bounds),
+    }
+    return _novelty(beats, width=width)
+
+
+def _refine_boundary(start: float, beats: np.ndarray, beat_nov: np.ndarray, reach: int = 2) -> float:
+    """Move a bar-line boundary to the beat (within ±reach beats) where the
+    music changes most: a wrong bar phase must not put a section change —
+    or a drop — half a bar off."""
+    if not beats.size or beat_nov.size != beats.size:
+        return start
+    k = int(np.argmin(np.abs(beats - start)))
+    lo, hi = max(1, k - reach), min(len(beats) - 1, k + reach)
+    if hi < lo:
+        return start
+    best = lo + int(np.argmax(beat_nov[lo:hi + 1]))
+    # Only move for a clearly stronger change than at the bar line itself.
+    if beat_nov[best] > 1.2 * beat_nov[k]:
+        return float(beats[best])
+    return float(beats[k]) if abs(beats[k] - start) < 0.05 else start
+
+
+def _refine_drop(start: float, bar_s: float, intensity: np.ndarray, times: np.ndarray,
+                 beats: np.ndarray, strong: np.ndarray) -> float:
+    """Exact drop time.
+
+    The section boundary sits on a bar line; when the bar phase is wrong it
+    can trail the real drop by a beat or two.  If a much sharper loudness +
+    bass rise exists within a bar of it, the drop is there (snapped to a
+    beat or a strong attack when one is within 0.1 s); otherwise the
+    boundary is kept (a drop can be a texture change at equal loudness).
+    """
+    if times.size < 4:
+        return start
+    frame_s = float(times[1] - times[0])
+    half = max(2, int(round(0.8 / frame_s)))
+
+    def rise(i: int) -> float:
+        return float(np.mean(intensity[i:i + half]) - np.mean(intensity[i - half:i]))
+
+    lo = max(half, int(np.searchsorted(times, start - bar_s)))
+    hi = min(len(intensity) - half, int(np.searchsorted(times, start + 0.5 * bar_s)))
+    i0 = int(np.clip(np.searchsorted(times, start), half, max(half, len(intensity) - half - 1)))
+    t = start
+    if hi > lo:
+        rises = [rise(i) for i in range(lo, hi)]
+        k = int(np.argmax(rises))
+        if rises[k] >= 0.25 and rises[k] > rise(i0) + 0.1:
+            t = float(times[lo + k])
+    snapped = _snap(t, strong, 0.07)
+    if snapped == t:
+        snapped = _snap(t, beats, 0.1)
+    return snapped
+
+
+# Beat-level drops: the full beat and the bass come back after a break or a
+# build. Section boundaries alone missed drops that sit inside a section
+# (the same loop, much louder) or a bar off its boundary. A pause after
+# which the same groove resumes at the same level is not a drop: the music
+# after must be louder than the passage before the break, or come back on
+# a hit (kick / crash: more attack than before).
+_BD_WINDOW = 8          # beats compared on each side (2 bars)
+_BD_JUMP = 0.15         # intensity after - before
+_BD_BASS_JUMP = 0.15    # bass after - before
+_BD_BREAK = 0.20        # bass after - quietest bass of the beat before
+_BD_CONTEXT = 0.10      # intensity after - the 6 bars before the break
+_BD_HIT = 0.08          # or: attack after - before (normalised)
+_BD_HIGH_PCT = 62       # the passage after is among the loud ones
+_BD_MIN_GAP = 32        # beats between two drops (8 bars)
+# A drop into a passage less loud than the song's peak sections: only with a
+# big bass return above a clearly quieter stretch, landing on a hit.
+_BD_SOFT_PCT = 25
+_BD_SOFT_CONTEXT = 0.20
+_BD_SOFT_BASS = 0.30
+
+
+def _beat_drops(beat_frames: np.ndarray, feats: dict, intensity: np.ndarray) -> list[tuple[int, float]]:
+    """(beat index, strength) of the drops, strongest first."""
+    n = feats["n"]
+    nb = len(beat_frames)
+    W = _BD_WINDOW
+    if nb < 3 * W:
+        return []
+    bounds = np.append(np.clip(beat_frames, 0, n - 1), n)
+    inten = _span_mean(intensity, bounds)[0]
+    bass = _span_mean(feats["bass"], bounds)[0]
+    attack = _span_mean(feats["onset_env"], bounds)[0]
+    attack = attack / (float(np.percentile(attack, 90)) + 1e-9)
+    floor = float(np.percentile(inten, _BD_HIGH_PCT))
+    soft_floor = float(np.percentile(inten, _BD_SOFT_PCT))
+    score = np.zeros(nb)
+    for i in range(W, nb - W):
+        after, before = float(inten[i:i + W].mean()), float(inten[i - W:i].mean())
+        b_after, b_before = float(bass[i:i + W].mean()), float(bass[i - W:i].mean())
+        if after < soft_floor or after - before < _BD_JUMP or b_after - b_before < _BD_BASS_JUMP:
+            continue
+        if b_after - float(bass[i - 4:i].min()) < _BD_BREAK:
+            continue
+        context = after - float(inten[max(0, i - 4 * W):i - W].mean()) if i > W else after - before
+        hit = float(attack[i:i + W].mean() - attack[i - W:i].mean())
+        loud = after >= floor and (context >= _BD_CONTEXT or hit >= _BD_HIT)
+        soft = context >= _BD_SOFT_CONTEXT and b_after - b_before >= _BD_SOFT_BASS and hit >= 0.05
+        if loud or soft:
+            score[i] = (after - before) + (b_after - b_before)
+    found: list[tuple[int, float]] = []
+    for i in np.argsort(-score):
+        if score[i] <= 0:
+            break
+        # the 2-bar windows peak around the drop: it is the beat, near the
+        # peak, where the bass comes back the most sharply
+        near = range(max(1, int(i) - 2), min(nb, int(i) + 3))
+        k = max(near, key=lambda j: float(bass[j] - bass[j - 1]))
+        if all(abs(k - j) >= _BD_MIN_GAP for j, _ in found):
+            found.append((k, float(score[i])))
+    return found
+
+
+def _apply_beat_drops(sections: list[dict], drops: list[float], bar_s: float) -> list[dict]:
+    """Make every beat-level drop a "drop" section: the section starting
+    within a bar of it becomes the drop (starting on it), otherwise the
+    section holding it is split there."""
+    out = [dict(s) for s in sections]
+    for t in drops:
+        # the section-level drop already marks this one (it is refined on
+        # the sharpest rise; the beat-level window can sit up to 2 bars off)
+        if any(s["type"] == "drop" and abs(s["start"] - t) <= 2 * bar_s for s in out):
+            continue
+        # a drop a few bars ahead: this is the build-up leading to it
+        if any(s["type"] == "drop" and 0 < s["start"] - t <= 4 * bar_s for s in out):
+            continue
+        near = [s for s in out if abs(s["start"] - t) <= bar_s and s["start"] > 0]
+        if near:
+            s = min(near, key=lambda x: abs(x["start"] - t))
+            k = out.index(s)
+            s["type"] = "drop"
+            s["start"] = t
+            if k > 0:
+                out[k - 1]["end"] = t
+            continue
+        for k, s in enumerate(out):
+            if s["start"] < t < s["end"] and t - s["start"] >= bar_s and s["end"] - t >= bar_s:
+                tail = dict(s, type="drop", start=t)
+                s["end"] = t
+                out.insert(k + 1, tail)
+                break
+    return out
+
+
+def _beat_this_phase(y: np.ndarray, sr: int, beats: np.ndarray) -> Optional[int]:
+    """Bar phase of ``beats`` agreeing best with Beat This!'s first beats, or
+    None (model not downloaded / unusable, or too little agreement)."""
+    if len(beats) < 2 * METER:
+        return None
+    from . import beatthis
+    res = beatthis.beats_and_downbeats(y, sr)
+    if res is None or len(res[1]) < 4:
+        return None
+    db = res[1]
+    hits = []
+    for p in range(METER):
+        grid = beats[p::METER]
+        d = np.min(np.abs(grid[:, None] - db[None, :]), axis=1)
+        hits.append(int(np.sum(d <= 0.07)))
+    best = int(np.argmax(hits))
+    # its bars must mostly sit on our beats (same tempo octave, same grid)
+    if hits[best] < 0.5 * min(len(db), len(beats[best::METER])):
+        return None
+    return best
+
+
+def _segments(y: np.ndarray, sr: int) -> dict:
+    import librosa
+
+    duration = float(len(y)) / sr
+    feats = _features(y, sr)
+    n = feats["n"]
+    times = librosa.frames_to_time(np.arange(n), sr=sr, hop_length=HOP)
+    intensity = _smooth(0.6 * feats["loud"] + 0.4 * feats["bass"], 0.15 * sr / HOP)
+
+    tempo, beats, variable = _track_beats(feats["onset_env"], sr, duration)
+    beat_frames = np.clip(librosa.time_to_frames(beats, sr=sr, hop_length=HOP), 0, n - 1)
+    phase = _downbeat_phase(beat_frames, feats)
+    # Drops land on the first beat of a bar: when the song has some, they
+    # set the bar phase (found from the beats alone, so no circularity).
+    # The accent heuristic above was 1-2 beats off on 3 of 6 real songs.
+    drop_times: list[float] = []
+    if len(beats) >= 2 * METER:
+        bar_guess = METER * float(np.median(np.diff(beats)))
+        votes = np.zeros(METER)
+        for k, strength in _beat_drops(beat_frames, feats, intensity):
+            t = _refine_drop(float(beats[k]), bar_guess, intensity, times, beats, np.zeros(0))
+            drop_times.append(t)
+            votes[int(np.argmin(np.abs(beats - t))) % METER] += strength
+        if drop_times:
+            phase = int(np.argmax(votes))
+    bars_engine = "drops" if drop_times else "accents"
+    downbeats = beats[phase::METER]
+    # Beat This! (optional model): its first beats choose the phase of our
+    # beat grid for the bar markers shown and exported (our beats stay:
+    # steadier on synthetic and slow songs). The sections keep the grid
+    # above: re-cut on these bars, they lost drops (measured).
+    marker_downbeats = downbeats
+    # A metronome-clear accent (margin ~1.5; real mixes measured 0.08-0.35)
+    # is kept: Beat This! missed every bar of a 120 BPM click track.
+    bt_phase = _beat_this_phase(y, sr, beats) if _accent_margin(beat_frames, feats) <= _CLEAR_ACCENT else None
+    if bt_phase is not None:
+        marker_downbeats, bars_engine = beats[bt_phase::METER], "beat_this"
+
+    onset_frames = librosa.onset.onset_detect(onset_envelope=feats["onset_env"], sr=sr,
+                                              hop_length=HOP, units="frames")
+    onset_frames = np.clip(np.asarray(onset_frames, dtype=int), 0, n - 1)
+    onsets = librosa.frames_to_time(onset_frames, sr=sr, hop_length=HOP) + LATENCY_S
+    strengths = feats["onset_env"][onset_frames] if onset_frames.size else np.zeros(0)
+    if strengths.size:
+        strong = onsets[strengths >= np.percentile(strengths, 85)]
+    else:
+        strong = np.zeros(0)
+
+    # Bars: from each downbeat to the next (plus the pickup before the first).
+    bar_times = list(downbeats)
+    if not bar_times or bar_times[0] > 0.05:
+        bar_times.insert(0, 0.0)
+    bar_times.append(duration)
+    bar_times = np.asarray(bar_times)
+    bar_frames = np.clip(librosa.time_to_frames(bar_times, sr=sr, hop_length=HOP), 0, n)
+
+    sections: list[dict] = []
+    if len(bar_times) >= 3:
+        bars = _bar_features(bar_frames, feats, intensity)
+        nbars = len(bar_times) - 1
+        bounds = _pick_boundaries(bars, _novelty(bars))
+        segs = [{"bar_start": a, "bar_end": b}
+                for a, b in zip(bounds, bounds[1:] + [nbars]) if b > a]
+        _label(segs, bars)
+        segs = _merge_same(segs)
+        segs = _split_build(segs, bars)
+        # A near-silent tail is not a section: it ends the outro.
+        if len(segs) > 1:
+            a, b = segs[-1]["bar_start"], segs[-1]["bar_end"]
+            if float(np.mean(bars["intensity"][a:b])) < 0.06:
+                tail = segs.pop()
+                segs[-1] = dict(segs[-1], bar_end=tail["bar_end"])
+                last = segs[-1]
+                if last["type"] in ("verse", "bridge") and tail["bar_start"] - last["bar_start"] <= 8:
+                    last["type"] = "outro"
+        _label_energy = bars["intensity"]
+        beat_nov = _beat_novelty(beat_frames, feats, intensity)
+        for s in segs:
+            a, b = s["bar_start"], s["bar_end"]
+            start = float(bar_times[a])
+            end = float(bar_times[b]) if b < len(bar_times) else duration
+            if a > 0:
+                start = _refine_boundary(start, beats, beat_nov)
+            if s["type"] == "drop":
+                start = _refine_drop(start, float(np.median(np.diff(bar_times))),
+                                     intensity, times, beats, strong)
+            sections.append({
+                "type": s["type"],
+                "start": start,
+                "end": end,
+                "energy": float(np.mean(_label_energy[a:b])) if b > a else 0.0,
+            })
+        # keep contiguity after snapping
+        for prev, cur in zip(sections, sections[1:]):
+            prev["end"] = cur["start"]
+        if sections:
+            sections[0]["start"] = 0.0
+            sections[-1]["end"] = duration
+    else:
+        sections.append({"type": "verse", "start": 0.0, "end": duration,
+                         "energy": float(np.mean(intensity)) if n else 0.0})
+
+    if sections and len(beats) and len(bar_times) >= 3:
+        bar_s = float(np.median(np.diff(bar_times)))
+        found = [_snap(t, strong, 0.07) for t in drop_times]
+        sections = _apply_beat_drops(sections, sorted(found), bar_s)
+
+    drops = [s["start"] for s in sections if s["type"] == "drop"]
+
+    # ── UI-friendly curves ─────────────────────────────────────────────────
+    step_s = 0.1
+    grid = np.arange(0.0, duration, step_s)
+    # The shown curve (and the shot-matching target) is smoothed over ~half
+    # a second: per-beat pumping is rhythm, not the passage's intensity.
+    calm_curve = _smooth(intensity, 0.5 * sr / HOP)
+    energy_grid = np.interp(grid, times, calm_curve).clip(0.0, 1.0)
+    buckets = 1500
+    edges = np.linspace(0, len(y), buckets + 1).astype(int)
+    peak = float(np.max(np.abs(y))) or 1.0
+    waveform = [round(float(np.max(np.abs(y[a:b]))) / peak, 3) if b > a else 0.0
+                for a, b in zip(edges[:-1], edges[1:])]
+
+    return {
+        "duration_ms": _ms(duration),
+        "bpm": round(float(tempo), 2),
+        "variable_tempo": bool(variable),
+        "meter": METER,
+        "beats_ms": [_ms(t) for t in beats],
+        "downbeats_ms": [_ms(t) for t in marker_downbeats],
+        "bars_engine": bars_engine,
+        "onsets_ms": [_ms(t) for t in onsets],
+        "strong_onsets_ms": [_ms(t) for t in strong],
+        "drops_ms": [_ms(t) for t in drops],
+        "sections": [
+            {"index": i, "type": s["type"], "start_ms": _ms(s["start"]),
+             "end_ms": _ms(s["end"]), "energy": round(s["energy"], 3),
+             "drop": s["type"] == "drop"}
+            for i, s in enumerate(sections)
+        ],
+        "energy": {"step_ms": int(step_s * 1000),
+                   "values": [round(float(v), 3) for v in energy_grid]},
+        "waveform": waveform,
+    }
+
+
+def analyze_signal(y: np.ndarray, sr: int = DEFAULT_SR) -> dict:
+    """Analyse an in-memory mono signal (the tests feed synthetic tracks)."""
+    y = np.asarray(y, dtype=np.float32)
+    if y.ndim > 1:
+        y = y.mean(axis=1)
+    t0 = time.perf_counter()
+    data = _segments(y, int(sr))
+    data["analysis_version"] = ANALYSIS_VERSION
+    data["analysis_seconds"] = round(time.perf_counter() - t0, 3)
+    return data
+
+
+def analyze_audio(path: str, *, sr: int = DEFAULT_SR, file_hash: Optional[str] = None) -> dict:
+    """Decode + fingerprint + analyse a file.  The caller handles caching."""
+    t0 = time.perf_counter()
+    y = decode_audio(path, sr=sr)
+    data = analyze_signal(y, sr)
+    data.update({
+        "path": str(path),
+        "hash": file_hash or fingerprint_file(path),
+        "sample_rate": int(sr),
+        "analysis_seconds": round(time.perf_counter() - t0, 3),
+    })
+    return data

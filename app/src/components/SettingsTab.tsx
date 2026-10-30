@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Cpu, Zap, Target, Layers, FileVideo, Palette, Download, Settings2, FolderOpen, Loader2, Trash2, Upload, AlertTriangle, Clapperboard, RotateCcw, Activity } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppSettings } from '../api/types';
+import { parseApiError } from '../modelTiers';
 import { DERUSH_ACTIONS, DERUSH_DEFAULT_KEYS, displayKey } from '../derushKeys';
 import { useI18n, useT, type Lang } from '../i18n';
 import DiagnosticSection from './DiagnosticSection';
@@ -42,8 +43,15 @@ export default function SettingsTab({ runtimeDevice, gpuName, vramGb }: { runtim
     try {
       const saved = await api.saveSettings({ [section]: next[section] } as Partial<AppSettings>);
       setSettings(saved);
+      setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      // Show the reason, not the raw "API 400: {json}", and put the rejected
+      // value back (a refused export folder must not look accepted).
+      const info = parseApiError(err);
+      setError(info.code === 'output_folder_not_writable'
+        ? t('journey.settings.folderNotWritable', { path: String((partial as Record<string, unknown>).output_folder ?? '') })
+        : info.message);
+      setSettings(settings);
     } finally {
       setSaving(false);
     }
@@ -78,7 +86,8 @@ export default function SettingsTab({ runtimeDevice, gpuName, vramGb }: { runtim
           {saving && <div className="text-xs text-[#71717A] flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {t('common.saving')}</div>}
         </div>
 
-        {error && <div className="relative z-10 mb-4 bg-red-500/10 border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2">{error}</div>}
+        {/* Sticky: the rows that fail (e.g. the export folder) sit far below. */}
+        {error && <div role="alert" className="sticky top-0 z-20 mb-4 bg-[#2a1215] border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-2 shadow-lg">{error}</div>}
 
         {!settings ? (
           <div className="relative z-10 text-[#71717A] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> {t('settings.loading')}</div>
@@ -670,46 +679,49 @@ function UpdatesSection() {
   const t = useT();
   return (
     <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
-      <div className="text-[#FAFAFA] font-semibold mb-1">AMV Tools v0.2.0-alpha</div>
+      <div className="text-[#FAFAFA] font-semibold mb-1">AMV Tools v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''}</div>
       <div className="text-[#71717A] text-sm">{t('settings.updates.body')}</div>
     </div>
   );
 }
 
 function AdvancedSection({ settings, setSettings }: { settings: AppSettings; setSettings: (s: AppSettings) => void }) {
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const t = useT();
+
+  // A download: Electron asks where to save it (one dialog). The former
+  // extra "save as" dialog's answer was ignored, then a second one opened.
   async function exportJson() {
-    const path = await window.amvBridge?.saveFileDialog({
-      defaultPath: 'amv-tools-settings.json',
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-    });
-    if (!path) return;
     const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = path.split(/[\\/]/).pop() || 'amv-tools-settings.json';
+    a.href = url; a.download = 'amv-tools-settings.json';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
 
   async function importJson(file: File) {
-    const text = await file.text();
-    const parsed = JSON.parse(text) as AppSettings;
-    const saved = await api.importSettings(parsed);
-    setSettings(saved);
+    setJsonError(null);
+    try {
+      const parsed = JSON.parse(await file.text()) as AppSettings;
+      setSettings(await api.importSettings(parsed));
+    } catch (e) {
+      setJsonError(t('fix.settings.importFailed', { reason: (e as Error).message }));
+    }
   }
 
   const ref = useRef<HTMLInputElement>(null);
-  const t = useT();
 
   return (
     <>
       <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">
         <div className="text-[#FAFAFA] font-semibold mb-2">{t('settings.advanced.json.title')}</div>
+        {jsonError && <div role="alert" className="text-xs text-red-300 mb-2">{jsonError}</div>}
         <div className="text-[#71717A] text-sm mb-4">{t('settings.advanced.json.hint')}</div>
         <div className="flex gap-3">
           <button onClick={exportJson} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Download size={14} /> {t('settings.advanced.exportJson')}</button>
           <button onClick={() => ref.current?.click()} className="bg-[#27272A] hover:bg-[#3f3f46] text-[#FAFAFA] px-4 py-2 rounded-lg text-sm flex items-center gap-2"><Upload size={14} /> {t('settings.advanced.importJson')}</button>
-          <input ref={ref} type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importJson(f); }} />
+          <input ref={ref} type="file" accept=".json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importJson(f); e.target.value = ''; }} />
         </div>
       </div>
       <div className="bg-gradient-to-br from-[#18181B] to-[#0F0F11] border-2 border-[#27272A] rounded-xl p-5">

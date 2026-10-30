@@ -77,7 +77,7 @@ async def _lifespan(app: FastAPI):
 
 
 def make_app() -> FastAPI:
-    app = FastAPI(title="AMV Tools sidecar", version="0.4.0a0", lifespan=_lifespan)
+    app = FastAPI(title="AMV Tools sidecar", version="0.5.0b1", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -95,6 +95,13 @@ def make_app() -> FastAPI:
     for r in ROUTERS:
         app.include_router(r)
 
+    @app.get("/health")
+    def health():
+        # Cheap liveness probe used by the Windows smoke test and by anyone
+        # wiring the sidecar into a launcher/healthcheck.  It must not touch
+        # the DB or the models so it answers even while indexing runs.
+        return {"ok": True, "service": "amv-tools"}
+
     @app.exception_handler(ImportError)
     async def _import_error_handler(request: Request, exc: ImportError):
         # BiRefNet (and other HF models loaded with trust_remote_code=True)
@@ -107,7 +114,10 @@ def make_app() -> FastAPI:
             status_code=503,
             content={
                 "error": "runtime_incomplete",
-                "detail": str(exc),
+                # the hint in "detail" too: most panels only show that field
+                "detail": f"{exc} — the app's Python environment is missing a module: "
+                          "restart AMV Tools (it installs new dependencies after an update) "
+                          "or reinstall the backend from Settings → Models.",
                 "hint": (
                     "A model runtime dependency is missing from the sidecar venv. "
                     "Reinstall the GPU backend from Settings → Models, or run "

@@ -37,6 +37,7 @@ declare global {
       saveFileDialog: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       reveal: (p: string) => void;
       openPath?: (p: string) => Promise<string>;
+      pathForFile?: (f: File) => string;
       platform: () => string;
       onBootstrap?: (cb: (e: { line: string; stream: 'stdout' | 'stderr' }) => void) => () => void;
       onBootstrapReady?: (cb: (port: number) => void) => () => void;
@@ -98,6 +99,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ backend }),
     }),
+
+  setupHardware: () =>
+    req<{ recommended: string; reason: string; nvidia: { name: string; driver: string }[]; adapters: { name: string; vendor: string }[] }>('/api/setup/hardware'),
 
   search: (body: SearchRequest) =>
     req<{ results: SceneResult[]; total: number }>('/api/search', {
@@ -187,14 +191,18 @@ export const api = {
   scenePreview: (sceneId: number) =>
     req<{ frames: string[]; proxy_url?: string }>(`/api/scene/${sceneId}/preview`),
 
-  queue: () => req<{ items: IndexQueueItem[] }>('/api/index/queue'),
+  queue: () => req<{ items: IndexQueueItem[]; running?: boolean }>('/api/index/queue'),
+  modelsStatus: () =>
+    req<{ models: { key: string; label: string; enabled: boolean; present: boolean }[] }>('/api/models/status'),
+  removeFromQueue: (id: number) =>
+    req<{ ok: boolean }>(`/api/index/queue/${id}`, { method: 'DELETE' }),
   enqueue: (paths: { path: string; recursive?: boolean; group?: string | null }[]) =>
     req<{ added: number }>('/api/index/queue', {
       method: 'POST',
       body: JSON.stringify({ paths }),
     }),
   startIndexing: (phases: ('tag' | 'embed')[] = ['tag', 'embed']) =>
-    req<{ started: boolean; phases: string[] }>('/api/index/start', {
+    req<{ started: boolean; phases: string[]; reason?: 'indexing' | 'reembed' | 'merge' | null }>('/api/index/start', {
       method: 'POST',
       body: JSON.stringify({ phases }),
     }),
@@ -224,7 +232,7 @@ export const api = {
     }),
 
   listDatabases: () =>
-    req<{ databases: { path: string; scenes: number; videos: number; size_kb: number; primary: boolean }[] }>(
+    req<{ databases: { path: string; scenes: number; videos: number; incomplete?: number; size_kb: number; primary: boolean }[] }>(
       '/api/databases'
     ),
   setPrimaryDatabase: (path: string) =>

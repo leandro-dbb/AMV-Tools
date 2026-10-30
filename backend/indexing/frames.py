@@ -34,7 +34,6 @@ import av
 from . import cuts  # for _ffmpeg_path and _ffmpeg_hw_profile
 
 log = logging.getLogger(__name__)
-av.logging.set_level(av.logging.PANIC)
 
 
 # Safety margin: seek lands on the previous keyframe, so we ask for a position

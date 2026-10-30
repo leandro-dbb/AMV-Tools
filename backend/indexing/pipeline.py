@@ -105,8 +105,10 @@ def _batched_tagger_embeddings(
     tagger: WDTaggerModel,
     batch_size: int,
     cancelled: Callable[[], bool],
+    on_batch: Optional[Callable[[int], None]] = None,
 ) -> list[tuple[int, object]]:
-    """Run wd-tagger over (deduped, sorted) timestamps with proper batching."""
+    """Run wd-tagger over (deduped, sorted) timestamps with proper batching.
+    ``on_batch(done)``: called after each batch (progress for slow CPUs)."""
     embeddings: list[tuple[int, object]] = []
     batch_ts: list[int] = []
     batch_imgs: list = []
@@ -119,6 +121,8 @@ def _batched_tagger_embeddings(
         embeddings.extend((ts, emb) for ts, emb in zip(batch_ts, batch_embs))
         batch_ts = []
         batch_imgs = []
+        if on_batch is not None:
+            on_batch(len(embeddings))
 
     for ts, img in frames.extract_frames_at(video_path, timestamps_ms):
         if cancelled():
@@ -415,6 +419,182 @@ def _store_scene_metrics(db_path: str, acc, work: list, scene_db_ids: list[int],
         log.warning("search+ metrics failed for %d scenes: %s", len(scene_db_ids), exc)
 
 
+_PROGRESS_KEY = "index_progress:{}"
+# A run left one of these behind (app closed, crash, Stop, failure): the
+# episode is not indexed and its next run picks up where this one stopped.
+UNFINISHED_STATUSES = ("indexing", "cancelled", "failed")
+
+
+def _finish_video(db_path: str, video_id: int, status: str) -> None:
+    with schema.get_conn(db_path) as conn:
+        queries.set_video_status(conn, video_id, status)
+        conn.execute("DELETE FROM settings WHERE key = ?", (_PROGRESS_KEY.format(video_id),))
+
+
+def mark_failed(db_path: str, video_path: str) -> None:
+    """An indexing error: never leave the episode looking indexed."""
+    try:
+        with schema.get_conn(db_path) as conn:
+            conn.execute("UPDATE videos SET status = 'failed' WHERE filepath = ? AND status != 'completed'",
+                         (video_path,))
+    except Exception as exc:
+        log.warning("could not mark %s as failed: %s", video_path, exc)
+
+
+def _resume_point(db_path: str, video_path: str, cache_key: str) -> Optional[dict]:
+    """Where an unfinished run of this video stopped, if it can be resumed:
+    same file (mtime), same models and phases (``cache_key``), scene rows
+    written. Returns ``{video_id, scenes: [(id, idx, start, end, has_emb)],
+    tagged_through}`` — scenes with ``id <= tagged_through`` have their tags
+    committed (atomically with that marker), embeddings are per row."""
+    if not os.path.exists(video_path):
+        return None
+    with schema.get_conn(db_path) as conn:
+        row = conn.execute("SELECT id, modified_at, model_version, status FROM videos WHERE filepath = ?",
+                           (video_path,)).fetchone()
+        if not row:
+            return None
+        video_id, modified_at, stored_model, status = row
+        if status not in UNFINISHED_STATUSES or stored_model != cache_key:
+            return None
+        if abs(float(modified_at or 0) - os.path.getmtime(video_path)) > 1e-6:
+            return None
+        scenes = conn.execute(
+            "SELECT id, scene_index, start_ms, end_ms, embedding IS NOT NULL FROM scenes "
+            "WHERE video_id = ? ORDER BY id", (video_id,)).fetchall()
+        mark = conn.execute("SELECT value FROM settings WHERE key = ?",
+                            (_PROGRESS_KEY.format(video_id),)).fetchone()
+    if not scenes:
+        return None
+    try:
+        tagged_through = int(mark[0]) if mark else 0
+    except ValueError:
+        tagged_through = 0
+    return {"video_id": video_id, "scenes": scenes, "tagged_through": tagged_through}
+
+
+def _tag_and_embed(db_path: str, video_path: str, video_id: int, tag_items: list, embed_items: list, *,
+                   phases: Sequence[str], tagger, siglip, batch_size: int, tag_threshold: float,
+                   cancelled: Callable[[], bool], report: Callable[..., None],
+                   pre_tags: Optional[dict] = None, pre_embs: Optional[dict] = None,
+                   total: Optional[int] = None) -> bool:
+    """Tag then embed ``[(scene_id, median_ms, image)]``. False when cancelled
+    (status ``cancelled``, resumable). A failing batch raises: the episode
+    must not end up "indexed" with its tags or embeddings silently missing
+    (e.g. onnxruntime absent)."""
+    pre_tags = pre_tags or {}
+    pre_embs = pre_embs or {}
+    total = total or max(len(tag_items), len(embed_items), 1)
+    done_before_tag = total - len(tag_items)
+    done_before_emb = total - len(embed_items)
+    progress_key = _PROGRESS_KEY.format(video_id)
+
+    # ── Phase A — Tag pass ───────────────────────────────────────────────────
+    if "tag" in phases and tag_items:
+        report(30, f"Tagging {total} scenes")
+        try:
+            # One connection for the whole pass (a connection + commit per
+            # batch cost ~3 s per episode on a hard disk); periodic commits keep
+            # the write lock short for the Search+ metrics writer.
+            with schema.get_conn(db_path) as conn:
+                committed = time.monotonic()
+                for batch_start in range(0, len(tag_items), batch_size):
+                    if cancelled():
+                        queries.set_video_status(conn, video_id, "cancelled")
+                        return False
+                    batch = tag_items[batch_start:batch_start + batch_size]
+                    batch_end = done_before_tag + batch_start + len(batch)
+                    try:
+                        if all(t in pre_tags for _sid, t, _img in batch):
+                            batch_tags = [pre_tags[t] for _sid, t, _img in batch]
+                        else:
+                            batch_tags = tagger.tag_images([img for _sid, _t, img in batch])
+                    except Exception as e:
+                        log.error("tagging batch failed for %s: %s", video_path, e)
+                        conn.commit()   # keep the batches done: the next run resumes after them
+                        raise RuntimeError(f"tagging failed: {e}") from e
+                    for (sid, _t, _img), tags in zip(batch, batch_tags):
+                        keep = [(t, c, cf) for t, c, cf in (tags or []) if cf >= tag_threshold]
+                        if keep:
+                            queries.insert_tags(conn, sid, keep)
+                    # same transaction as the tags: a resumed run re-tags none twice
+                    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                                 (progress_key, str(batch[-1][0])))
+                    if time.monotonic() - committed > 0.5:
+                        conn.commit()
+                        committed = time.monotonic()
+                    pct = 30 + int((batch_end / total) * (30 if "embed" in phases else 65))
+                    report(pct, f"Tagged {batch_end}/{total}")
+        finally:
+            # Free the tagger before SigLIP loads on the same GPU.
+            if "embed" in phases and _offload_tagger_between_phases(tagger):
+                tagger.offload()
+
+    # ── Phase B — Embed pass ─────────────────────────────────────────────────
+    if "embed" in phases and embed_items:
+        report(60 if "tag" in phases else 30, f"Embedding {total} scenes")
+        with schema.get_conn(db_path) as conn:
+            committed = time.monotonic()
+            for batch_start in range(0, len(embed_items), batch_size):
+                if cancelled():
+                    queries.set_video_status(conn, video_id, "cancelled")
+                    return False
+                batch = embed_items[batch_start:batch_start + batch_size]
+                batch_end = done_before_emb + batch_start + len(batch)
+                try:
+                    if all(t in pre_embs for _sid, t, _img in batch):
+                        batch_embs = [pre_embs[t] for _sid, t, _img in batch]
+                    else:
+                        batch_embs = siglip.embed_images([img for _sid, _t, img in batch])
+                except Exception as e:
+                    log.error("embedding batch failed for %s: %s", video_path, e)
+                    conn.commit()
+                    raise
+                for (sid, _t, _img), emb in zip(batch, batch_embs):
+                    queries.update_scene_embedding(conn, sid, emb)
+                if time.monotonic() - committed > 0.5:
+                    conn.commit()
+                    committed = time.monotonic()
+                pct = (60 if "tag" in phases else 30) + int((batch_end / total) * (35 if "tag" in phases else 65))
+                report(pct, f"Embedded {batch_end}/{total}")
+    return True
+
+
+def _resume_video(db_path: str, video_path: str, point: dict, *, phases: Sequence[str], tagger, siglip,
+                  batch_size: int, tag_threshold: float, cancelled: Callable[[], bool],
+                  report: Callable[..., None], final_status: str) -> None:
+    """Finish an interrupted run: no cut detection, no new scene rows; only
+    the median frames of the scenes still missing tags or an embedding are
+    decoded."""
+    video_id, scenes = point["video_id"], point["scenes"]
+    through = point["tagged_through"]
+    need_tag = {sid for sid, *_ in scenes if sid > through} if "tag" in phases else set()
+    need_emb = {sid for sid, _i, _s, _e, has in scenes if not has} if "embed" in phases else set()
+    log.info("resuming %s: %d/%d scenes left to tag, %d to embed", video_path, len(need_tag),
+             len(scenes), len(need_emb))
+    report(3, f"Resuming: {len(scenes) - len(need_tag)} scenes tagged, "
+              f"{len(scenes) - len(need_emb)} embedded")
+    todo = [(sid, _median_ms(s, e)) for sid, _i, s, e, _h in scenes if sid in need_tag or sid in need_emb]
+    images: dict = {}
+    if todo:
+        report(22, f"Extracting {len(todo)} median frames")
+        images = dict(frames.extract_frames_at(video_path, sorted({t for _sid, t in todo})))
+        if cancelled():
+            return
+    items = [(sid, t, images[t]) for sid, t in todo if t in images]
+    if len(items) < len(todo):
+        raise RuntimeError(f"could not decode {len(todo) - len(items)} median frames")
+    if not _tag_and_embed(db_path, video_path, video_id,
+                          [it for it in items if it[0] in need_tag],
+                          [it for it in items if it[0] in need_emb],
+                          phases=phases, tagger=tagger, siglip=siglip, batch_size=batch_size,
+                          tag_threshold=tag_threshold, cancelled=cancelled, report=report,
+                          total=len(scenes)):
+        return
+    _finish_video(db_path, video_id, final_status)
+    report(100, "Done")
+
+
 def index_video(
     db_path: str,
     video_path: str,
@@ -465,6 +645,12 @@ def index_video(
     if auto_skip_indexed and _is_video_current_for_phases(db_path, video_path, cache_key, phases):
         report(100, "Already indexed")
         return
+    point = _resume_point(db_path, video_path, cache_key) if auto_skip_indexed else None
+    if point is not None:
+        _resume_video(db_path, video_path, point, phases=phases, tagger=tagger, siglip=siglip,
+                      batch_size=batch_size, tag_threshold=tag_threshold, cancelled=cancelled,
+                      report=report, final_status=final_status)
+        return None
 
     if not _offload_tagger_between_phases(tagger):
         _prewarm([m for m, phase in ((tagger, "tag"), (siglip, "embed"))
@@ -608,9 +794,13 @@ def index_video(
             all_sample_ts.update(samples)
 
         if all_sample_ts:
-            report(5, f"Sub-segmenting (decoding {len(all_sample_ts)} samples in one pass)")
+            n_samples = len(all_sample_ts)
+            report(5, f"Sub-segmenting (decoding {n_samples} samples in one pass)")
+            # On CPU this pass alone takes minutes: keep the bar moving (5 → 15).
             global_embs_list = _batched_tagger_embeddings(
-                video_path, sorted(all_sample_ts), tagger, batch_size, cancelled
+                video_path, sorted(all_sample_ts), tagger, batch_size, cancelled,
+                on_batch=lambda done: report(5 + int(done / n_samples * 10),
+                                             f"Sub-segmenting (decoding {n_samples} samples in one pass)"),
             )
             if cancelled():
                 return
@@ -636,7 +826,7 @@ def index_video(
                 final_segments.append((s_ms, e_ms, -this_seq))  # negative = "I am parent #this_seq"
                 for sub_s, sub_e in subs:
                     final_segments.append((sub_s, sub_e, this_seq))  # positive = child of parent #this_seq
-            pct = 5 + int(((i + 1) / len(hard_cuts)) * 15)
+            pct = 15 + int(((i + 1) / len(hard_cuts)) * 5)
             report(pct, f"Sub-segmenting {i + 1}/{len(hard_cuts)}")
 
         # If embed is requested, free the tagger before SigLIP loads. If tag
@@ -689,6 +879,7 @@ def index_video(
             group_name=group_name,
         )
         queries.delete_scenes_for_video(conn, video_id)
+        conn.execute("DELETE FROM settings WHERE key = ?", (_PROGRESS_KEY.format(video_id),))
         for (scene_idx, s_ms, e_ms, parent_marker, _img), thumb in zip(work, thumbs):
             if parent_marker is None:
                 parent_db_id = None
@@ -723,81 +914,16 @@ def index_video(
             queries.set_video_status(conn, video_id, "cancelled")
         return
 
-    # ── Phase A — Tag pass ───────────────────────────────────────────────────
-    if "tag" in phases:
-        report(30, f"Tagging {len(work)} scenes")
-        try:
-            # One connection for the whole pass (a connection + commit per
-            # batch cost ~3 s per episode on a hard disk); periodic commits keep
-            # the write lock short for the Search+ metrics writer.
-            with schema.get_conn(db_path) as conn:
-                committed = time.monotonic()
-                for batch_start in range(0, len(work), batch_size):
-                    if cancelled():
-                        queries.set_video_status(conn, video_id, "cancelled")
-                        return
-                    batch_end = min(batch_start + batch_size, len(work))
-                    batch_imgs = [w[4] for w in work[batch_start:batch_end]]
-                    batch_sids = scene_db_ids[batch_start:batch_end]
-                    batch_ts = [_median_ms(w[1], w[2]) for w in work[batch_start:batch_end]]
-                    try:
-                        if all(t in pre_tags for t in batch_ts):
-                            batch_tags = [pre_tags[t] for t in batch_ts]
-                        else:
-                            batch_tags = tagger.tag_images(batch_imgs)
-                    except Exception as e:
-                        log.warning("tagging batch failed for %s: %s", video_path, e)
-                        batch_tags = [[] for _ in batch_imgs]
-                    for sid, tags in zip(batch_sids, batch_tags):
-                        if not tags:
-                            continue
-                        keep = [(t, c, cf) for t, c, cf in tags if cf >= tag_threshold]
-                        if keep:
-                            queries.insert_tags(conn, sid, keep)
-                    if time.monotonic() - committed > 0.5:
-                        conn.commit()
-                        committed = time.monotonic()
-                    pct = 30 + int((batch_end / len(work)) * (30 if "embed" in phases else 65))
-                    report(pct, f"Tagged {batch_end}/{len(work)}")
-        finally:
-            # Free the tagger before SigLIP loads on the same GPU.
-            if "embed" in phases and _offload_tagger_between_phases(tagger):
-                tagger.offload()
-
-    # ── Phase B — Embed pass ─────────────────────────────────────────────────
-    if "embed" in phases:
-        report(60 if "tag" in phases else 30, f"Embedding {len(work)} scenes")
-        with schema.get_conn(db_path) as conn:
-            committed = time.monotonic()
-            for batch_start in range(0, len(work), batch_size):
-                if cancelled():
-                    queries.set_video_status(conn, video_id, "cancelled")
-                    return
-                batch_end = min(batch_start + batch_size, len(work))
-                batch_imgs = [w[4] for w in work[batch_start:batch_end]]
-                batch_sids = scene_db_ids[batch_start:batch_end]
-                batch_ts = [_median_ms(w[1], w[2]) for w in work[batch_start:batch_end]]
-                try:
-                    if all(t in pre_embs for t in batch_ts):
-                        batch_embs = [pre_embs[t] for t in batch_ts]
-                    else:
-                        batch_embs = siglip.embed_images(batch_imgs)
-                except Exception as e:
-                    log.error("embedding batch failed for %s: %s", video_path, e)
-                    raise
-                for sid, emb in zip(batch_sids, batch_embs):
-                    queries.update_scene_embedding(conn, sid, emb)
-                if time.monotonic() - committed > 0.5:
-                    conn.commit()
-                    committed = time.monotonic()
-                pct = (60 if "tag" in phases else 30) + int((batch_end / len(work)) * (35 if "tag" in phases else 65))
-                report(pct, f"Embedded {batch_end}/{len(work)}")
+    tag_items = embed_items = [(sid, _median_ms(w[1], w[2]), w[4]) for w, sid in zip(work, scene_db_ids)]
+    if not _tag_and_embed(db_path, video_path, video_id, tag_items, embed_items, phases=phases,
+                          tagger=tagger, siglip=siglip, batch_size=batch_size, tag_threshold=tag_threshold,
+                          cancelled=cancelled, report=report, pre_tags=pre_tags, pre_embs=pre_embs):
+        return
 
     # ── Done ────────────────────────────────────────────────────────────────
     if metrics_thread is not None:
         metrics_thread.join()
-    with schema.get_conn(db_path) as conn:
-        queries.set_video_status(conn, video_id, final_status)
+    _finish_video(db_path, video_id, final_status)
     report(100, "Done")
     return next_prefetch
 
@@ -819,19 +945,46 @@ def index_queue(
     # (filepath, group) pairs — the queue item's user-chosen import group is
     # stamped on every video found under it.
     all_files: list[tuple[str, str | None]] = []
+    # queued items that give nothing to index: said, not silently dropped
+    skipped: list[tuple[str, str]] = []
     for item in items:
         p = Path(item["path"])
         group = item.get("group_name") or None
         if not p.exists():
+            skipped.append((str(p), "not found (moved, renamed or drive unplugged?)"))
             continue
         if p.is_file():
             if p.suffix.lower() in VIDEO_EXTENSIONS:
                 all_files.append((str(p), group))
             continue
+        before = len(all_files)
         pattern_iter = p.rglob("*") if item["recursive"] else p.iterdir()
         for sub in pattern_iter:
             if sub.is_file() and sub.suffix.lower() in VIDEO_EXTENSIONS:
                 all_files.append((str(sub), group))
+        if len(all_files) == before:
+            skipped.append((str(p), "no video file in this folder"))
+
+    # Episodes whose last run did not finish (app closed, Stop, failure) are
+    # picked up again even when their folder already left the queue; their
+    # run resumes where it stopped (``_resume_point``).
+    seen = {f for f, _g in all_files}
+    with schema.get_conn(db_path) as conn:
+        unfinished = conn.execute(
+            f"SELECT filepath, group_name FROM videos WHERE status IN ({','.join('?' * len(UNFINISHED_STATUSES))}) "
+            "ORDER BY id", UNFINISHED_STATUSES).fetchall()
+    for fp, group in unfinished:
+        if fp in seen:
+            continue
+        if os.path.exists(fp):
+            all_files.append((fp, group))
+            seen.add(fp)
+        else:
+            skipped.append((fp, "not found: cannot finish indexing it (moved, renamed or drive unplugged?)"))
+    if progress_cb:
+        for path_, why in skipped:
+            progress_cb({"type": "indexing", "video": Path(path_).name, "percent": 0,
+                         "message": f"Failed: {why}", "failed": True, "path": path_})
 
     video_done_cb = kwargs.pop("video_done_cb", None)
     pending = None
@@ -847,6 +1000,13 @@ def index_queue(
             lambda: bool(cancel_event and cancel_event.is_set()),
             lambda path: not (skip and _is_video_current_for_phases(db_path, path, key, phases)),
             depth=depth)
+
+    def file_progress(i: int):
+        # Tags every event with the file's rank so the UI can say "file 1/2".
+        if not progress_cb:
+            return None
+        return lambda evt: progress_cb({**evt, "file_index": i + 1, "file_count": len(all_files)})
+
     try:
         for i, (fp, group) in enumerate(all_files):
             if cancel_event and cancel_event.is_set():
@@ -856,7 +1016,7 @@ def index_queue(
                 pending, nxt = scheduler.get(fp), None
             try:
                 pending = index_video(db_path, fp, siglip, tagger, cancel_event=cancel_event,
-                                      progress_cb=progress_cb, group_name=group,
+                                      progress_cb=file_progress(i), group_name=group,
                                       next_video=nxt, prefetched=pending, **kwargs)
                 if video_done_cb is not None and not (cancel_event and cancel_event.is_set()):
                     try:
@@ -866,9 +1026,11 @@ def index_queue(
             except Exception as e:
                 pending = None
                 log.error("indexing failed for %s: %s", fp, e, exc_info=True)
+                mark_failed(db_path, fp)
                 if progress_cb:
                     progress_cb({"type": "indexing", "video": Path(fp).name, "percent": 0,
-                                 "message": f"Failed: {e}"})
+                                 "message": f"Failed: {e}", "failed": True, "path": fp,
+                                 "file_index": i + 1, "file_count": len(all_files)})
     finally:
         # The tagger may have stayed resident across videos (Apple Silicon).
         tagger.offload()

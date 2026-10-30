@@ -102,9 +102,13 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
         # EDL timecodes are on the sequence timebase.  Source in/out are
         # converted from the clip's own rate, never guessed from ms.
         src_in = convert_frames(clip.in_frame, clip.source.fps, seq_rate)
-        src_out = convert_frames(clip.out_frame, clip.source.fps, seq_rate)
         rec_in = clip.record_start
         rec_out = clip.record_end
+        # Source and record durations must match exactly (a 1-frame
+        # difference reads as a speed change), and an event is never
+        # shorter than one frame: rounding in and out separately broke
+        # both for very short clips at a foreign rate (60 fps → 23.976).
+        src_out = src_in + max(1, rec_out - rec_in)
         tc_in = frames_to_timecode(src_in, seq_rate, drop)
         tc_out = frames_to_timecode(src_out, seq_rate, drop)
         rec_tc_in = frames_to_timecode(rec_in, seq_rate, drop)
@@ -115,8 +119,12 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
             f"{event:03d}  {reel:<8} V     C        "
             f"{tc_in} {tc_out} {rec_tc_in} {rec_tc_out}"
         )
-        lines.extend(_comment_lines("* FROM CLIP NAME:", clip.name))
-        lines.extend(_comment_lines("* FROM FILE:", _source_path_comment(clip, timeline)))
+        # Never wrapped: Premiere and Resolve read FROM CLIP NAME / FROM FILE
+        # from ONE line (that's how they relink); wrapping a long path at 80
+        # columns left them with a truncated name. Their own exports write
+        # these lines at full length too.
+        lines.append(f"* FROM CLIP NAME: {clip.name}")
+        lines.append(f"* FROM FILE: {_source_path_comment(clip, timeline)}")
         lines.extend(_comment_lines("* SOURCE FPS:", f"{float(clip.source.fps):.6f}"))
         if clip.label:
             lines.extend(_comment_lines("* LABEL:", clip.label))
@@ -132,5 +140,5 @@ def dumps(timeline: Timeline, options: Optional[TimelineOptions] = None) -> str:
                 f"{event:03d}  {reel:<8} A     C        "
                 f"{tc_in} {tc_out} {rec_tc_in} {rec_tc_out}"
             )
-            lines.extend(_comment_lines("* FROM CLIP NAME:", clip.name))
+            lines.append(f"* FROM CLIP NAME: {clip.name}")
     return "\n".join(lines) + "\n"

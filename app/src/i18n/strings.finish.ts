@@ -128,7 +128,7 @@ export const finishStrings: Dict = {
   'finish.status.cancelled': { en: 'Cancelled', fr: 'Annulé' },
 
   // settings > models
-  'finish.models.title': { en: 'Finishing models', fr: 'Modèles de finition' },
+  'finish.models.title': { en: 'Downloadable models (finishing, music)', fr: 'Modèles à télécharger (finition, musique)' },
   'finish.models.hint': {
     en: 'Downloaded on demand (throttled to 10 MB/s) into {root}. Nothing is fetched until you click Download.',
     fr: 'Téléchargés à la demande (bridé à 10 Mo/s) dans {root}. Rien n\'est récupéré avant de cliquer sur Télécharger.',
@@ -137,6 +137,7 @@ export const finishStrings: Dict = {
   'finish.models.notInstalled': { en: 'Not installed · {size}', fr: 'Non installé · {size}' },
   'finish.models.delete': { en: 'Delete', fr: 'Supprimer' },
   'finish.models.license': { en: 'License: {license}', fr: 'Licence : {license}' },
+  'finish.models.nonCommercial': { en: 'non-commercial use only', fr: 'usage non commercial uniquement' },
   'finish.models.error': { en: 'Download failed: {message}', fr: 'Échec du téléchargement : {message}' },
 
   // Mask Mode corrections

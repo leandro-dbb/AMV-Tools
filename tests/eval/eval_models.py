@@ -292,6 +292,9 @@ def cmd_embed(args) -> None:
 
 # ── tagger ──────────────────────────────────────────────────────────────────
 def _make_tagger(model: str, backend: str):
+    if model == "pixai-v1.0":
+        from tests.eval.pixai import PixAIV1Tagger
+        return PixAIV1Tagger(model, backend)
     if model.startswith("pixai"):
         from tests.eval.pixai import PixAITagger
         return PixAITagger(model, backend)

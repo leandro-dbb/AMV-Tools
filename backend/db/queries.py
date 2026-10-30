@@ -529,8 +529,15 @@ def derush_items_for_export(conn: sqlite3.Connection,
 
 def db_stats(db_path: str) -> dict:
     if not Path(db_path).exists():
-        return dict(scenes=0, videos=0, size_kb=0)
+        return dict(scenes=0, videos=0, incomplete=0, size_kb=0)
+    # An episode whose indexing did not finish (app closed, Stop, failure)
+    # is not "indexed": counted apart, so the Library can say so.
+    done = "('completed', 'tags_only', 'embeddings_only')"
     with get_conn(db_path) as conn:
-        scenes = conn.execute("SELECT COUNT(*) FROM scenes").fetchone()[0]
-        videos = conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
-    return dict(scenes=scenes, videos=videos, size_kb=int(Path(db_path).stat().st_size / 1024))
+        scenes = conn.execute(
+            f"SELECT COUNT(*) FROM scenes s JOIN videos v ON v.id = s.video_id WHERE v.status IN {done}"
+        ).fetchone()[0]
+        videos = conn.execute(f"SELECT COUNT(*) FROM videos WHERE status IN {done}").fetchone()[0]
+        incomplete = conn.execute(f"SELECT COUNT(*) FROM videos WHERE status NOT IN {done}").fetchone()[0]
+    return dict(scenes=scenes, videos=videos, incomplete=incomplete,
+                size_kb=int(Path(db_path).stat().st_size / 1024))

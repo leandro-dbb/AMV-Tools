@@ -18,6 +18,9 @@ import { searchPlusStrings } from './strings.searchplus';
 import { finishStrings } from './strings.finish';
 import { modelsStrings } from './strings.models';
 import { autotuneStrings } from './strings.autotune';
+import { journeyStrings } from './strings.journey';
+import { musicStrings } from './strings.music';
+import { fixStrings } from './strings.fix';
 
 export type Lang = 'en' | 'fr';
 export type Entry = { en: string; fr: string };
@@ -40,6 +43,9 @@ export const DICT: Dict = {
   ...finishStrings,
   ...modelsStrings,
   ...autotuneStrings,
+  ...journeyStrings,
+  ...musicStrings,
+  ...fixStrings,
 };
 
 const LANG_KEY = 'amv-lang';
