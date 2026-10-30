@@ -168,8 +168,9 @@ def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
     shutil.rmtree(tmp, ignore_errors=True)
 
     ai, fin = res["ai"], res["final"]
-    fmt = lambda v: "n/a" if v is None or (isinstance(v, float) and not np.isfinite(v)) else (  # noqa: E731
-        f"{v:.1f}" if isinstance(v, float) else str(v))
+    from tests.eval.roto_editor_sim import HUMAN_S_PER_GESTURE, QUIET_AI_S_PER_FRAME, left, quiet_s
+    fmt = lambda v, d=1: "n/a" if v is None or (isinstance(v, float) and not np.isfinite(v)) else (  # noqa: E731
+        f"{v:.{d}f}" if isinstance(v, float) else str(v))
     lines = [
         f"Plan {sid} ({dname}) — {n} images, {fps:.3f} images/s",
         "",
@@ -177,15 +178,21 @@ def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
         "puis propagation dans les deux sens, jusqu'à « propre » ou 30 gestes.",
         "",
         f"Gestes                      : {res['gestures']} (dont {res['undos']} annulations), "
-        f"{res['propagations']} propagations",
+        f"{res['propagations']} propagations ; premier choix : "
+        f"{'cliquer sur le personnage' if res.get('target') == 'click' else 'tous les personnages'}",
         f"Propre à la fin             : {'OUI' if res['final_clean']['all'] else 'NON'} "
         f"(critères : {', '.join(k for k, v in res['final_clean'].items() if k != 'all' and not v) or 'tous tenus'}"
         f"{' manqués' if not res['final_clean']['all'] else ''})",
-        f"Temps machine               : passe IA {res['ai_s']:.0f} s + corrections et propagations "
-        f"{res['machine_s'] - res['ai_s']:.0f} s = {res['machine_s']:.0f} s",
-        f"Temps total estimé          : {res['total_s_with_user']:.0f} s (machine + 5 s par geste pour viser et vérifier)",
-        f"Clic (médiane)              : {fmt(res['click_ms_med'])} ms ; pinceau {fmt(res['brush_ms_med'])} ms ; "
-        f"propagation {fmt(res['prop_s_med'])} s",
+        f"Temps machine, carte calme  : {quiet_s(res):.0f} s (passe IA {n * QUIET_AI_S_PER_FRAME:.0f} s, "
+        f"propagations, gestes) — estimé à partir des vitesses mesurées seules sur la RTX 3090",
+        f"Temps total estimé          : {quiet_s(res) + HUMAN_S_PER_GESTURE * res['gestures']:.0f} s "
+        f"(+ {HUMAN_S_PER_GESTURE} s par geste pour viser et vérifier)",
+        f"Mesuré pendant la simulation : {res['machine_s']:.0f} s (quatre simulations à la fois sur la carte : "
+        f"clic {fmt(res['click_ms_med'], 0)} ms, pinceau {fmt(res['brush_ms_med'], 0)} ms en médiane)",
+        "",
+        f"Erreur restante (pixels faux sur les images de référence, en % de ceux de la passe IA) après",
+        f"  5 / 10 / tous les gestes  : {left(res, ai)}",
+        f"Recouvrement avec la référence (IoU) : {fmt(ai.get('J'), 3)} -> {fmt(fin.get('J'), 3)}",
         "",
         "                              IA seule   après corrections   cible",
         f"encre de contour (%)        : {fmt(ai['ink']):>8}   {fmt(fin['ink']):>8}            >= 97",
