@@ -566,6 +566,10 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
         <div className="bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white text-xs font-bold px-3 py-1.5 rounded-lg uppercase tracking-wider shrink-0">
           {t('roto.badge')}
         </div>
+        <div className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#EC4899]/20 text-[#EC4899] shrink-0"
+             title={t('roto.betaTitle')} data-testid="roto-beta">
+          {t('roto.beta')}
+        </div>
         <div className="min-w-0 flex flex-col">
           <div className="text-sm font-semibold truncate" data-testid="roto-title">{project?.name ?? t('roto.opening')}</div>
           {m && (

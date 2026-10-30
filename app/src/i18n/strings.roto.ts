@@ -12,6 +12,11 @@ export const rotoStrings: Dict = {
 
   // top bar
   'roto.badge': { en: 'Cut-out', fr: 'Détourage' },
+  'roto.beta': { en: 'beta', fr: 'bêta' },
+  'roto.betaTitle': {
+    en: 'Beta: the editor is new, tell us what is missing or slow',
+    fr: 'Bêta : l\'éditeur est nouveau, dites-nous ce qui manque ou ce qui est lent',
+  },
   'roto.opening': { en: 'Opening the shot…', fr: 'Ouverture du plan…' },
   'roto.openError': { en: 'Could not open the shot: {message}', fr: 'Impossible d\'ouvrir le plan : {message}' },
   'roto.retry': { en: 'Retry', fr: 'Réessayer' },
