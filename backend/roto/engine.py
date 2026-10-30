@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 
 NEAR_PX = 5            # the AI matte is kept within this distance of the tracked object (px)
 TRACK_ERODE_PX = 1     # the tracked object fills where the AI matte has nothing, shrunk by this
+THIN_PX = 3            # AI matte parts thinner than ~2x this (strands, tips) survive a propagation
 TRACK_LO, TRACK_HI = 0.35, 0.65   # SAM 2 probabilities ramped to 0..1 between these (no faint veil)
 CLICK_MAX_FRAC = 0.45  # a click region bigger than this share of the frame is refused
 WINDOW = 48            # SAM 2 propagation window (bounded memory on long shots)
@@ -364,11 +365,29 @@ def merge_track(ai: Optional[np.ndarray], track: np.ndarray, near_px: int = NEAR
     trm = (tr > 0.5).astype(np.uint8)
     if ai is None or float(ai.max()) < 0.3 or not trm.any():
         return tr if trm.any() else np.zeros_like(tr)
+    ai = np.asarray(ai, np.float32)
     near = cv2.dilate(trm, _disk(near_px)).astype(np.float32)
     near = cv2.GaussianBlur(near, (0, 0), 1.2)
-    kept = np.asarray(ai, np.float32) * np.clip(near, 0.0, 1.0)
+    kept = ai * np.clip(near, 0.0, 1.0)
     fill = cv2.erode(tr, _disk(TRACK_ERODE_PX)) if TRACK_ERODE_PX > 0 else tr
-    return np.maximum(kept, fill).astype(np.float32)
+    out = np.maximum(kept, fill)
+    # thin parts of the AI matte (a hair strand, the tip of a cigarette)
+    # that SAM 2's coarser mask does not follow, still attached to the
+    # character: kept whole. Thick pieces (a chunk of scenery the user cut
+    # off on the corrected frame) stay out.
+    solid = (ai > 0.5).astype(np.uint8)
+    if solid.any():
+        thick = cv2.morphologyEx(solid, cv2.MORPH_OPEN, _disk(THIN_PX))
+        thin = (solid > 0) & (thick == 0) & (near < 0.99)
+        if thin.any():
+            body = out > 0.5
+            n, lab = cv2.connectedComponents((thin | body).astype(np.uint8), connectivity=8)
+            hit = np.zeros(n, bool)
+            hit[np.unique(lab[body])] = True
+            hit[0] = False
+            keep = thin & hit[lab]
+            out = np.where(keep, np.maximum(out, ai), out)
+    return out.astype(np.float32)
 
 
 def _ranges(n: int, t: int, direction: str, locked: set) -> List[List[int]]:

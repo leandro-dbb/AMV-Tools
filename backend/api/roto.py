@@ -383,7 +383,7 @@ def export(pid: str, body: ExportBody):
             added = add_to_selection(int(p.meta["scene_id"]))
         with p.lock:
             p.meta["exports"] = {k: v for k, v in files.items()}
-            p.schedule_save(0.0)
+        p.save()   # now: the timeline export reads the cut-out from project.json
         job.result = {"files": files, "added_to_selection": added}
         job.message = "Exported"
     return _start_job(p, "export", run)

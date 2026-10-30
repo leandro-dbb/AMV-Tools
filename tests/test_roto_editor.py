@@ -369,3 +369,14 @@ def test_a_steady_defect_is_flagged_where_it_starts():
     feats = [frame_features(x) for x in (a, a, b, b, b, b, a)]
     flagged = [s["frame"] for s in decide(feats) if "specks" in s["reasons"]]
     assert flagged == [2]
+
+
+def test_propagation_keeps_thin_strands_but_not_thick_chunks():
+    from backend.roto.engine import merge_track
+    ai = _disc(0)
+    ai[46:49, 74:120] = 1.0      # a hair strand (3 px) sticking out 46 px
+    ai[10:40, 90:130] = 1.0      # a thick chunk of scenery glued to it, cut by the user
+    track = _disc(0)             # SAM 2 follows the body only
+    m = merge_track(ai, track)
+    assert m[47, 110] > 0.9      # the strand stays whole
+    assert m[20, 115] < 0.1      # the chunk stays out
