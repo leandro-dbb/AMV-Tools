@@ -7,7 +7,8 @@
 #   - Windows: set CSC_LINK + CSC_KEY_PASSWORD repository secrets.
 #   - macOS:   set CSC_LINK + CSC_KEY_PASSWORD plus APPLE_ID,
 #              APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID for notarization.
-# With no secrets the workflow still succeeds and produces unsigned builds.
+# With no secrets the workflow still succeeds and produces unsigned builds
+# (macOS: signed ad hoc by scripts/adhoc-sign.cjs, so Apple Silicon runs it).
 name: build
 
 on:
@@ -76,6 +77,21 @@ jobs:
             if [ -z "${!v}" ]; then unset "$v"; fi
           done
           npx electron-builder --publish never
+
+      # Apple Silicon does not run unsigned code: the bundle must carry at
+      # least an ad-hoc signature (or a real one when CSC_LINK is set).
+      - name: Check macOS signature
+        if: runner.os == 'macOS'
+        working-directory: app
+        shell: bash
+        run: |
+          app="$(ls -d release/mac*/*.app | head -1)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | tee sig.txt
+          grep -q '^Signature=' sig.txt
+          rm -rf /tmp/zipcheck && mkdir /tmp/zipcheck
+          ditto -x -k release/*.zip /tmp/zipcheck
+          codesign --verify --deep --strict "/tmp/zipcheck/$(basename "$app")"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
