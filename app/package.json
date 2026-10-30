@@ -52,6 +52,7 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
+    "afterPack": "scripts/adhoc-sign.cjs",
     "afterSign": "scripts/notarize.cjs",
     "extraResources": [
       {
