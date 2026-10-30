@@ -210,7 +210,7 @@ def _fake_models(monkeypatch):
             progress(i + 1, project.n)
         return out
 
-    def fake_region(project, state, t, x, y):
+    def fake_region(project, state, t, x, y, positive=True):
         yy, xx = np.mgrid[0:96, 0:160]
         return (((xx - x) ** 2 + (yy - y) ** 2) <= 64).astype(np.float32), "fake SAM"
 
@@ -289,6 +289,13 @@ def test_api_editor_flow(client, db_path, tmp_path, monkeypatch):
     tl = client.post("/api/timeline/preview", json={"scene_ids": [sid]})
     assert tl.status_code == 200, tl.text
     assert "_alpha.mov" in tl.text
+    # every editor format writes a timeline with the cut-out clip (no audio in it)
+    for fmt in ("fcp7xml", "fcpxml", "edl", "otio", "vegas", "aftereffects"):
+        out = tmp_path / f"tl_{fmt}"
+        r = client.post("/api/timeline/export", json={"scene_ids": [sid], "format": fmt, "output_path": str(out)})
+        assert r.status_code == 200, (fmt, r.text)
+    off = client.post("/api/timeline/preview", json={"scene_ids": [sid], "options": {"use_cutouts": False}})
+    assert "_alpha.mov" not in off.text
 
     # reopening the same shot resumes the saved project
     from backend.roto import project as proj
