@@ -95,7 +95,9 @@ def detect_device(forced: Optional[str] = None) -> DeviceInfo:
             return DeviceInfo("dml", "DirectML GPU", torch_directml.device(), torch.float32)
         if forced == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return mps_info()
-        return DeviceInfo("cpu", "CPU (forced fallback)", torch.device("cpu"), torch.float32)
+        # CPU chosen on purpose (first-run "CPU only") is not a fallback.
+        label = "CPU" if forced == "cpu" else "CPU (forced fallback)"
+        return DeviceInfo("cpu", label, torch.device("cpu"), torch.float32)
 
     if torch.cuda.is_available():
         return cuda_info()

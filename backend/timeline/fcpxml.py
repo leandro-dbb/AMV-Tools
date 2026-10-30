@@ -48,13 +48,14 @@ def _marker_xml(marker, clip, seq_rate: Fraction) -> str:
     # source in point (the clip's own ``start``), not at 0.
     local = max(0, marker.frame - clip.record_start)
     start = Fraction(int(clip.in_frame)) / clip.source.fps + Fraction(local) / seq_rate
+    # FCPXML 1.9 declares <marker> EMPTY: the comment is the ``note``
+    # attribute (a child <note> makes the file invalid against Apple's DTD).
+    note = f' note="{xml_attr(marker.comment)}"' if marker.comment else ""
     return (
         "<marker "
         f'start="{fcpxml_seconds(start)}" '
         f'duration="{fcpxml_time(1, seq_rate)}" '
-        f'value="{xml_attr(marker.name)}">'
-        f"<note>{xml_text(marker.comment)}</note>"
-        "</marker>"
+        f'value="{xml_attr(marker.name)}"{note}/>'
     )
 
 

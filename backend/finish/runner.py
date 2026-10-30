@@ -122,11 +122,11 @@ def _rife(dev, model_id: str, scale: float):
 
 def _depth(dev, model_id: str, input_size: Optional[int]):
     from .depth import DEPTH_MODEL, DepthEstimator
-    from .vda import VDA_MODEL, VideoDepthEstimator
+    from .vda import VDA_MODEL, VDA_VARIANTS, VideoDepthEstimator
     kw: dict = {"model_id": model_id} if model_id not in (DEPTH_MODEL, VDA_MODEL) else {}
     if input_size:
         kw["input_size"] = int(input_size)
-    cls = VideoDepthEstimator if model_id == VDA_MODEL else DepthEstimator
+    cls = VideoDepthEstimator if model_id in VDA_VARIANTS else DepthEstimator
     return _get_model(("depth", model_id, dev.backend, input_size), lambda: cls(dev, **kw))
 
 

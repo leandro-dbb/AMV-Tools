@@ -44,7 +44,38 @@ const FORMAT_I18N: Record<TimelineFormat['id'], string> = {
   fcpxml: 'timeline.format.fcpxml',
   edl: 'timeline.format.edl',
   otio: 'timeline.format.otio',
+  vegas: 'timeline.format.vegas',
+  aftereffects: 'timeline.format.aftereffects',
 };
+
+type SoftwareId = 'premiere' | 'resolve' | 'aftereffects' | 'vegas' | 'finalcut' | 'other';
+
+interface SoftwareOption {
+  id: SoftwareId;
+  labelKey: string;
+  hintKey: string;
+  format: TimelineFormat['id'];
+}
+
+const SOFTWARE_OPTIONS: SoftwareOption[] = [
+  { id: 'premiere', labelKey: 'timeline.format.forPremiere', hintKey: 'timeline.import.premiere', format: 'fcp7xml' },
+  { id: 'resolve', labelKey: 'timeline.format.forResolve', hintKey: 'timeline.import.resolve', format: 'fcpxml' },
+  { id: 'aftereffects', labelKey: 'timeline.format.forAE', hintKey: 'timeline.import.aftereffects', format: 'aftereffects' },
+  { id: 'vegas', labelKey: 'timeline.format.forVegas', hintKey: 'timeline.import.vegas', format: 'vegas' },
+  { id: 'finalcut', labelKey: 'timeline.format.forFinalCut', hintKey: 'timeline.import.finalcut', format: 'fcpxml' },
+  { id: 'other', labelKey: 'timeline.software.other', hintKey: 'timeline.import.other', format: 'otio' },
+];
+
+// The editor rarely changes between exports: remember the last choice.
+const SOFTWARE_KEY = 'amv.timeline.software';
+
+function savedSoftware(): SoftwareId {
+  try {
+    const v = localStorage.getItem(SOFTWARE_KEY);
+    if (v && SOFTWARE_OPTIONS.some((o) => o.id === v)) return v as SoftwareId;
+  } catch {}
+  return 'premiere';
+}
 
 function fmtDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
@@ -82,7 +113,9 @@ export default function TimelineExportDialog({
 }: TimelineExportDialogProps) {
   const t = useT();
   const [formats, setFormats] = useState<TimelineFormat[]>([]);
-  const [format, setFormat] = useState<TimelineFormat['id']>('fcp7xml');
+  const [software, setSoftware] = useState<SoftwareId>(savedSoftware);
+  const [format, setFormat] = useState<TimelineFormat['id']>(
+    () => SOFTWARE_OPTIONS.find((o) => o.id === software)?.format ?? 'fcp7xml');
   const [title, setTitle] = useState(defaultName ?? 'AMV timeline');
   const [sequenceFps, setSequenceFps] = useState('first');
   const [resolution, setResolution] = useState('first');
@@ -126,6 +159,22 @@ export default function TimelineExportDialog({
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function chooseSoftware(id: SoftwareId) {
+    setSoftware(id);
+    try { localStorage.setItem(SOFTWARE_KEY, id); } catch {}
+    const option = SOFTWARE_OPTIONS.find((o) => o.id === id);
+    if (!option) return;
+    if (id !== 'other') {
+      setFormat(option.format);
+      return;
+    }
+    // "Other" keeps the current OTIO/EDL choice; fall back when the previous
+    // software implied a script format.
+    if (format !== 'otio' && format !== 'edl' && format !== 'fcp7xml' && format !== 'fcpxml') {
+      setFormat('otio');
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -214,20 +263,44 @@ export default function TimelineExportDialog({
             </div>
           )}
 
-          {/* format picker */}
+          {/* software picker: one choice per NLE, with the import steps */}
           <label className="flex flex-col gap-1.5">
             <span className="text-xs uppercase tracking-wider text-[#71717A]">{t('timeline.dialog.format')}</span>
             <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value as TimelineFormat['id'])}
+              value={software}
+              onChange={(e) => chooseSoftware(e.target.value as SoftwareId)}
               className="bg-[#0F0F11] border border-[#8B5CF6]/40 rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]"
             >
-              {formats.map((f) => (
-                <option key={f.id} value={f.id}>{t(FORMAT_I18N[f.id])}</option>
+              {SOFTWARE_OPTIONS.map((o) => (
+                <option key={o.id} value={o.id}>{t(o.labelKey)}</option>
               ))}
             </select>
-            <span className="text-[11px] text-[#71717A]">{t('timeline.dialog.formatHint')}</span>
+            <span className="text-[11px] text-[#71717A] leading-relaxed">
+              {t(SOFTWARE_OPTIONS.find((o) => o.id === software)?.hintKey ?? 'timeline.import.other')}
+            </span>
+            <span className="text-[11px] text-[#52525B]">{t('timeline.dialog.formatHint')}</span>
           </label>
+
+          {software === 'other' && (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs uppercase tracking-wider text-[#71717A]">{t('timeline.software.otherFormat')}</span>
+              <select
+                value={format}
+                onChange={(e) => setFormat(e.target.value as TimelineFormat['id'])}
+                className="bg-[#0F0F11] border border-[#8B5CF6]/40 rounded-lg px-3 py-2 text-sm text-[#FAFAFA] focus:outline-none focus:border-[#8B5CF6]"
+              >
+                {formats.map((f) => (
+                  <option key={f.id} value={f.id}>{t(FORMAT_I18N[f.id])}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {software !== 'other' && selectedFormat && (
+            <div className="text-[11px] text-[#52525B] -mt-2">
+              {selectedFormat.label} · {extension}
+            </div>
+          )}
 
           {/* preview */}
           <div className="flex items-center gap-3 bg-[#0F0F11] border border-[#27272A] rounded-lg px-4 py-3">
@@ -365,7 +438,8 @@ export default function TimelineExportDialog({
 
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#27272A] bg-[#0F0F11]/40">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-[#A1A1AA] hover:text-[#FAFAFA] hover:bg-[#27272A]">
-            {t('timeline.dialog.cancel')}
+            {/* After a successful export there is nothing left to cancel. */}
+            {result ? t('common.close') : t('timeline.dialog.cancel')}
           </button>
           <button
             onClick={doExport}

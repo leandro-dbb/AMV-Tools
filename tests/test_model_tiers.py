@@ -610,11 +610,15 @@ def test_license_allow_list(monkeypatch, tmp_path):
 
     for ok in ("apache-2.0", "MIT", "bsd-2-clause", "BSD-3-Clause", "cc-by-4.0", "cc0-1.0", ["mit"]):
         assert md.license_allowed(ok), ok
-    for bad in ("openrail", "openrail++", "creativeml-openrail-m", "cc-by-nc-4.0", "cc-by-nc-sa-4.0",
+    # non-commercial Creative Commons: accepted (AMV Tools is non-commercial)
+    for nc in ("cc-by-nc-4.0", "CC-BY-NC-SA-4.0"):
+        assert md.license_allowed(nc) and md.is_non_commercial(nc), nc
+    assert not md.is_non_commercial("apache-2.0")
+    for bad in ("openrail", "openrail++", "creativeml-openrail-m",
                 "gpl-3.0", "agpl-3.0", "other", "", None, ["mit", "gpl-3.0"]):
         assert not md.license_allowed(bad), bad
 
-    monkeypatch.setattr(md, "hub_license", lambda repo, token=None: "cc-by-nc-4.0")
+    monkeypatch.setattr(md, "hub_license", lambda repo, token=None: "openrail")
     with pytest.raises(md.ModelDownloadError) as exc:
         md.check_license("someone/model")
     assert "allow-list" in str(exc.value) and "Apache-2.0" in exc.value.hint
@@ -655,7 +659,8 @@ def test_finish_registry_license_check(monkeypatch, client):
 
     for spec in registry.MODELS.values():
         md.check_finish_license(spec)
-    nc = registry.ModelSpec(id="nc-model", kind="depth", label="nc", license="CC-BY-NC-4.0", source="x",
+    # GPL (copyleft) stays refused; NC licenses are accepted since chantier 4b
+    nc = registry.ModelSpec(id="nc-model", kind="depth", label="nc", license="GPL-3.0", source="x",
                             files=(registry.ModelFile("w.bin", "http://x/w.bin", 3),))
     monkeypatch.setitem(registry.MODELS, nc.id, nc)
     started = []
@@ -676,7 +681,8 @@ def test_measured_choices_per_tier():
         t = tiers.NVIDIA_TIERS[tid]
         assert t["embedding"] == {"model": so400m, "patches": 128}
         assert t["tagger"] == "SmilingWolf/wd-vit-tagger-v3"
-        assert t["upscale"] == "hfa2k-avc-compact" and t["interpolate"] == "rife-4.26"
+        # chantier 4b: AnimeJaNai V3 UltraCompact (LPIPS 0.030 vs 0.044)
+        assert t["upscale"] == "animejanai-v3-uc" and t["interpolate"] == "rife-4.26"
     for tid in ("mac24", "mac32"):
         assert tiers.MAC_TIERS[tid]["embedding"]["model"] == so400m
     for tid in ("mac8", "mac16"):
@@ -684,9 +690,14 @@ def test_measured_choices_per_tier():
     for table in (tiers.NVIDIA_TIERS, tiers.MAC_TIERS):
         assert table["fast"]["embedding"]["model"] == base
         assert table["fast"]["depth_input_size"] == 364
+        assert table["fast"]["upscale"] == "animejanai-v3-uc"
         assert table["max"]["embedding"]["patches"] == 256
         assert table["max"]["interpolate"] == "rife-4.26-heavy"
     assert tiers.NVIDIA_TIERS["24gb"]["depth"] == "video-depth-anything-small"
+    # chantier 4b: Video Depth Anything Large at 364 px in Max quality (NVIDIA)
+    assert tiers.NVIDIA_TIERS["max"]["depth"] == "video-depth-anything-large"
+    assert tiers.NVIDIA_TIERS["max"]["depth_input_size"] == 364
+    assert tiers.MAC_TIERS["max"]["depth"] == "video-depth-anything-small"
     assert tiers.NVIDIA_TIERS["8gb"]["depth_input_size"] == 364
     # CPU keeps the previous defaults: no regression there
     cpu = tiers.CPU_TIERS["fast"]

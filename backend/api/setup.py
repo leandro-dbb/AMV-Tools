@@ -152,6 +152,10 @@ async def install_backend(req: SetupRequest):
         return {"ok": False, "log": f"Unknown backend: {req.backend}"}
 
     cmd = [_uv_exe(), "sync", *_install_flags(req.backend)]
+    if os.environ.get("AMV_E2E_SKIP_SYNC") == "1":
+        # End-to-end UI tests: keep the whole first-run flow (settings, marker,
+        # validation) but do not reinstall torch into the developer's venv.
+        cmd = [sys.executable, "-c", "print('AMV_E2E_SKIP_SYNC: uv sync skipped')"]
     state = get_state()
     state.publish({"type": "install", "line": f"$ {' '.join(cmd)}\n"})
 
@@ -214,3 +218,11 @@ async def install_backend(req: SetupRequest):
 def setup_status():
     marker = user_data_dir() / ".setup_complete"
     return {"complete": marker.exists(), "backend": marker.read_text() if marker.exists() else None}
+
+
+@router.get("/api/setup/hardware")
+def setup_hardware():
+    # Pre-install GPU probe (nvidia-smi / WMI, no torch): the onboarding
+    # screen preselects the suggested backend instead of always CUDA 13.
+    from .. import gpu_probe
+    return gpu_probe.probe()

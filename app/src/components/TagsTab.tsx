@@ -2,6 +2,7 @@ import { ChevronDown, Copy, Film, Tag, ArrowUpDown, Loader2, Check, Layers, Down
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useT } from '../i18n';
+import SourcePreview from './SourcePreview';
 import { requestSimilar } from '../searchplus';
 import type { SceneResult, TagSummary, VideoSummary } from '../api/types';
 import TimelineExportDialog from './TimelineExportDialog';
@@ -324,9 +325,11 @@ function TagRow({ occ, isSelected, onToggle, onOpen, hoverDelayMs, showVideo }:
   { occ: SceneResult; isSelected: boolean; onToggle: () => void; onOpen: () => void; hoverDelayMs: number; showVideo: boolean }) {
   const t = useT();
   const [showProxy, setShowProxy] = useState(false);
+  const [sourceFailed, setSourceFailed] = useState(false);
   const timeoutRef = useRef<number | null>(null);
   function start() {
-    if (occ.proxy_path) timeoutRef.current = window.setTimeout(() => setShowProxy(true), hoverDelayMs);
+    // No proxy (the default): preview from the source file instead.
+    if (occ.proxy_path || !sourceFailed) timeoutRef.current = window.setTimeout(() => setShowProxy(true), hoverDelayMs);
   }
   function end() {
     setShowProxy(false);
@@ -340,6 +343,8 @@ function TagRow({ occ, isSelected, onToggle, onOpen, hoverDelayMs, showVideo }:
       <div onMouseEnter={start} onMouseLeave={end} className="w-44 aspect-video bg-[#0F0F11] rounded-lg overflow-hidden border-2 border-[#27272A] relative group">
         {showProxy && occ.proxy_path ? (
           <video src={api.proxyUrl(occ.id)} autoPlay muted loop playsInline className="w-full h-full object-cover" />
+        ) : showProxy && !sourceFailed ? (
+          <SourcePreview scene={occ} onFail={() => { setSourceFailed(true); setShowProxy(false); }} />
         ) : (
           <img src={api.thumbnailUrl(occ.id)} alt={t('tags.sceneAlt')} className="w-full h-full object-cover" loading="lazy" />
         )}

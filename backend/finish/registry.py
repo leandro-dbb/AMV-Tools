@@ -32,6 +32,9 @@ class ModelFile:
     url: str
     size: int                      # bytes, used for progress + UI before download
     sha256: Optional[str] = None
+    # ``url`` is a zip archive (``size``/``sha256`` are the archive's): only
+    # this member is kept, saved as ``name``
+    member: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,24 @@ MODELS: dict[str, ModelSpec] = {
             ),),
         ),
         ModelSpec(
+            id="animejanai-v3-uc",
+            kind="upscale",
+            # the-database (AnimeJaNai): CC-BY-NC-SA-4.0, non-commercial use
+            # only, attribution, share-alike. Only the UltraCompact member of
+            # the official "ModelsOnly" archive is kept (2.5 MB on disk).
+            label="2x AnimeJaNai HD V3 UltraCompact by the-database (non-commercial)",
+            license="CC-BY-NC-SA-4.0",
+            source="https://github.com/the-database/mpv-upscale-2x_animejanai",
+            files=(ModelFile(
+                "2x_AnimeJaNai_HD_V3_UltraCompact.pth",
+                "https://github.com/the-database/mpv-upscale-2x_animejanai/releases/download/3.0.0/"
+                "2x_AnimeJaNai_HD_V3_ModelsOnly.zip",
+                24_674_026,
+                "50eefb2b657a19934f33ca002ab8f701b5c960566bd54b23f658bdeb19d7788f",
+                member="2x_AnimeJaNai_HD_V3_ModelsOnly/2x_AnimeJaNai_HD_V3_UltraCompact.pth",
+            ),),
+        ),
+        ModelSpec(
             id="rife-4.25",
             kind="interpolate",
             label="RIFE 4.25 (Practical-RIFE)",
@@ -153,7 +174,7 @@ MODELS: dict[str, ModelSpec] = {
         ModelSpec(
             id="video-depth-anything-small",
             kind="depth",
-            # Only Small is Apache-2.0 (Base/Large: CC-BY-NC-4.0, not offered).
+            # Small is Apache-2.0; Large (CC-BY-NC-4.0) is offered below.
             label="Video Depth Anything Small (temporally stable)",
             license="Apache-2.0",
             source="https://github.com/DepthAnything/Video-Depth-Anything",
@@ -163,6 +184,24 @@ MODELS: dict[str, ModelSpec] = {
                 "256875362cff76724b920335dfb4b29dd611f66e/video_depth_anything_vits.pth",
                 116_440_756,
                 "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609",
+            ),),
+        ),
+        ModelSpec(
+            id="video-depth-anything-large",
+            kind="depth",
+            # CC-BY-NC-4.0 (non-commercial). Same network code as Small
+            # (Apache-2.0, vendored), ViT-L encoder. Chantier 4b: flicker
+            # 0.21 % at 364 px, sharper relief; 9.3 GB of VRAM at 364 px, does
+            # not fit 24 GB at 518 px -> "Max quality" only, at 364 px.
+            label="Video Depth Anything Large (non-commercial, max quality)",
+            license="CC-BY-NC-4.0",
+            source="https://github.com/DepthAnything/Video-Depth-Anything",
+            files=(ModelFile(
+                "video_depth_anything_vitl.pth",
+                "https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/"
+                "7aafbcb5c6af0bac741aad2b6471894fb4761afa/video_depth_anything_vitl.pth",
+                1_538_392_012,
+                "43df27c6b396042ba34ff7b798ab279f64d204d2e86d7a373968f8fa36d0e6fa",
             ),),
         ),
         ModelSpec(
@@ -181,6 +220,21 @@ MODELS: dict[str, ModelSpec] = {
                 ModelFile("model.safetensors", f"{_DEPTH_REPO}/model.safetensors", 99_173_660,
                           "3152477ce0d8d6978d76b995120de97cb5b928701fd0f817769f59e249a16b70"),
             ),
+        ),
+        # Music tab: bar lines (first beats). Optional; without it the bars
+        # come from a heuristic that was 1-2 beats off on half the real songs.
+        ModelSpec(
+            id="beat-this-small0",
+            kind="music",
+            label="Beat This! small — music bars (first beats)",
+            license="MIT",
+            source="https://github.com/CPJKU/beat_this",
+            files=(ModelFile(
+                "beat_this-small0.ckpt",
+                "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/small0.ckpt",
+                8_451_101,
+                "6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b",
+            ),),
         ),
     )
 }
@@ -244,6 +298,7 @@ def describe(model_id: str) -> dict:
         "kind": spec.kind,
         "label": spec.label,
         "license": spec.license,
+        "non_commercial": is_non_commercial(spec.license),
         "source": spec.source,
         "size": spec.size,
         "installed": is_installed(model_id),
@@ -252,6 +307,11 @@ def describe(model_id: str) -> dict:
         "download_percent": dl.get("percent"),
         "download_error": dl.get("error"),
     }
+
+
+def is_non_commercial(license_id: str) -> bool:
+    from ..model_download import is_non_commercial as nc
+    return nc(license_id)
 
 
 def list_models() -> list[dict]:
@@ -338,11 +398,27 @@ def download(model_id: str, *, progress_cb: Optional[Callable[[int, int], None]]
                 on_bytes(f.size)
                 continue
             log.info("downloading %s -> %s", f.url, dest)
-            _fetch(f.url, dest, on_bytes=on_bytes, cancel=cancel, expected_sha=f.sha256)
+            if f.member:
+                archive = d / (f.name + ".zip")
+                _fetch(f.url, archive, on_bytes=on_bytes, cancel=cancel, expected_sha=f.sha256)
+                _extract_member(archive, f.member, dest)
+            else:
+                _fetch(f.url, dest, on_bytes=on_bytes, cancel=cancel, expected_sha=f.sha256)
     finally:
-        for p in d.glob("*.part"):
+        for p in list(d.glob("*.part")) + list(d.glob("*.zip")):
             p.unlink(missing_ok=True)
     return d
+
+
+def _extract_member(archive: Path, member: str, dest: Path) -> None:
+    """Copy one member of a (checksum-verified) zip to ``dest`` atomically."""
+    import zipfile
+
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    with zipfile.ZipFile(archive) as z, z.open(member) as src, open(tmp, "wb") as out:
+        shutil.copyfileobj(src, out)
+    os.replace(tmp, dest)
+    archive.unlink(missing_ok=True)
 
 
 def start_download(model_id: str, publish: Callable[[dict], None]) -> bool:

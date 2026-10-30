@@ -28,6 +28,7 @@ export const modelsStrings: Dict = {
   'models.table.model': { en: 'Model', fr: 'Modèle' },
   'models.table.size': { en: 'Size', fr: 'Taille' },
   'models.table.license': { en: 'License', fr: 'Licence' },
+  'models.table.nonCommercial': { en: 'non-commercial use', fr: 'usage non commercial' },
   'models.table.patches': { en: '{n} patches', fr: '{n} patches' },
   'models.table.custom': {
     en: 'Custom: the models below are your own choices.',

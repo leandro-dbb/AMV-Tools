@@ -76,7 +76,11 @@ def workers() -> int:
 def supported(path: str) -> bool:
     """macOS with ffmpeg's VideoToolbox, a video the single pass would
     decode in software, long enough to split."""
-    if sys.platform != "darwin" or os.environ.get("AMV_CHUNKED", "1") == "0":
+    # Off by default since v06: the cut detector now decides on every frame
+    # with look-back/look-ahead context (``shotdetect``), which this
+    # chunk-stitching path does not carry across chunk boundaries yet; the
+    # sequential single pass gives the right cuts. ``AMV_CHUNKED=1`` (benchmarks).
+    if sys.platform != "darwin" or os.environ.get("AMV_CHUNKED", "0") != "1":
         return False
     prof = cuts._ffmpeg_hw_profile()
     if prof is None or prof.get("name") != "videotoolbox" or not single_pass.supported(path):

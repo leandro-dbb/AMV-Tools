@@ -170,15 +170,25 @@ def download_file(
 
 
 # ── license allow-list ──────────────────────────────────────────────────────
-# Only weights we may redistribute/use in a commercial-friendly tool. Every
-# OpenRAIL flavour, non-commercial (NC), GPL/AGPL and "other" is refused.
-ALLOWED_LICENSES = frozenset({
+# AMV Tools is a non-commercial tool: permissive licenses and the Creative
+# Commons non-commercial ones are accepted. Weights are never bundled, they
+# are fetched on demand from the official source, and Settings shows a
+# "non-commercial use" mark next to NC models. OpenRAIL, GPL/AGPL, "other"
+# (custom licenses) and unknown licenses are refused here; a custom NC
+# license (S-Lab, SAM License) is only accepted for a model the catalogue
+# lists explicitly (``NON_COMMERCIAL_LICENSES``).
+PERMISSIVE_LICENSES = frozenset({
     "apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause", "cc-by-4.0", "cc0-1.0",
 })
+NON_COMMERCIAL_LICENSES = frozenset({
+    "cc-by-nc-4.0", "cc-by-nc-sa-4.0",
+})
+ALLOWED_LICENSES = PERMISSIVE_LICENSES | NON_COMMERCIAL_LICENSES
 
 _LICENSE_HINT = (
     "AMV Tools only downloads models published under a permissive license "
-    "(Apache-2.0, MIT, BSD-2/3-Clause, CC-BY-4.0, CC0-1.0). Pick another model "
+    "(Apache-2.0, MIT, BSD-2/3-Clause, CC-BY-4.0, CC0-1.0) or a Creative Commons "
+    "non-commercial one (CC-BY-NC-4.0, CC-BY-NC-SA-4.0). Pick another model "
     "or tier in Settings > Models."
 )
 
@@ -193,6 +203,11 @@ def normalize_license(value: Any) -> Optional[str]:
 
 def license_allowed(value: Any) -> bool:
     return normalize_license(value) in ALLOWED_LICENSES
+
+
+def is_non_commercial(value: Any) -> bool:
+    """True for licenses that forbid commercial use (shown in Settings)."""
+    return normalize_license(value) in NON_COMMERCIAL_LICENSES
 
 
 def is_repo_cached(repo_id: str) -> bool:

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..diagnostics import fallback_reason
+from ..diagnostics import _package_version, fallback_reason
 from ..paths import user_data_dir
 from ..state import get_state, python_version_string
 
@@ -39,7 +39,9 @@ def status():
 
     runtime = state.runtime_status()
     requested = str(state.settings.get("indexing", {}).get("device", "auto"))
-    fallback = fallback_reason(requested, device_backend, {})
+    # Only the cheap metadata lookup (no torch import): without it every CPU
+    # fallback claimed "torch is not installed", even with torch present.
+    fallback = fallback_reason(requested, device_backend, {"version": _package_version("torch")})
     return {
         "ready": not setup_required,
         "setup_required": setup_required,

@@ -108,7 +108,7 @@ export interface VideoSummary {
   fps: number;
   resolution: string;
   scene_count: number;
-  status: 'pending' | 'indexing' | 'completed' | 'failed';
+  status: 'pending' | 'indexing' | 'completed' | 'tags_only' | 'embeddings_only' | 'cancelled' | 'failed';
   group_name: string | null;
   derushed: boolean;
 }
@@ -151,6 +151,10 @@ export interface ProgressEvent {
   output?: string;
   session_id?: string;
   frame_idx?: number;
+  file_index?: number;
+  file_count?: number;
+  failed?: boolean;
+  path?: string;
 }
 
 export interface DerushFolder {
@@ -277,7 +281,7 @@ export interface AppSettings {
 }
 
 export interface TimelineFormat {
-  id: 'fcp7xml' | 'fcpxml' | 'edl' | 'otio';
+  id: 'fcp7xml' | 'fcpxml' | 'edl' | 'otio' | 'vegas' | 'aftereffects';
   extension: string;
   label: string;
   label_fr: string;
@@ -440,6 +444,7 @@ export interface ModelTierModel {
   label: string;
   size_mb: number;
   license: string;
+  non_commercial?: boolean;
   patches?: number;
 }
 

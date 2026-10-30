@@ -66,6 +66,7 @@ export default function FinishModelsSection() {
                     : t('finish.models.notInstalled', { size: formatBytes(m.size) })}
                   {' · '}
                   <a href={m.source} target="_blank" rel="noreferrer" className="hover:text-[#A1A1AA] underline">{t('finish.models.license', { license: m.license })}</a>
+                  {m.non_commercial && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{t('finish.models.nonCommercial')}</span>}
                 </div>
                 {errors[m.id] && <div className="text-[11px] text-red-300 mt-1 break-words">{t('finish.models.error', { message: errors[m.id] })}</div>}
                 {pct !== undefined && (

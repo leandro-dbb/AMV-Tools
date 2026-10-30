@@ -38,7 +38,7 @@ from typing import Callable, Optional
 import numpy as np
 from PIL import Image
 
-from . import cuts
+from . import cuts, shotdetect
 
 log = logging.getLogger(__name__)
 
@@ -141,34 +141,32 @@ def detect_cuts_with_medians(
     cuts_ms: list[int] = [0]
     medians: dict[int, Image.Image] = {}
     buf: deque[tuple[int, np.ndarray]] = deque()   # (ts, rgb) still eligible
-    prev_hist: Optional[np.ndarray] = None
-    prev_group: Optional[np.ndarray] = None     # gray planes of the previous stride
     sample_idx = -1
-    last_detect_ms = 0
-
-    def exact_cut(group_before: np.ndarray, first_after: np.ndarray, sample: int) -> int:
-        """The detector compares frames ``stride`` apart; the shot change is
-        one of the frames in between. Pick the largest consecutive histogram
-        jump among them so the scene starts on its first frame (otherwise
-        the previous scene ends with up to stride-1 frames of the next
-        shot — a flash at the end of every exported clip)."""
-        frames_ = [group_before[:, i * gw:(i + 1) * gw] for i in range(stride)] + [first_after]
-        hists = [cuts._hist_from_plane_bytes(np.ascontiguousarray(f).tobytes(), gw, gh) for f in frames_]
-        jumps = [float(np.abs(hists[i + 1] - hists[i]).sum()) for i in range(stride)]
-        first = (sample - 1) * stride + 1 + int(np.argmax(jumps))
-        return int(first / fps * 1000)
+    detector = shotdetect.ShotDetector(threshold)
+    # a cut is confirmed a few frames after it happened (flash look-ahead)
+    late_ms = int((shotdetect.LOOKAHEAD + stride) * 1000 / fps) + 1
+    n_expected = int(round(duration_ms * fps / 1000.0))
 
     def close_scene(start: int, end: int) -> None:
         if end - start < cuts._MIN_SCENE_MS:
             return
         target = start + (end - start) // 2
-        if buf:
-            pick = min(buf, key=lambda item: abs(item[0] - target))[1]
+        inside = [item for item in buf if start <= item[0] < end] or list(buf)
+        if inside:
+            pick = min(inside, key=lambda item: abs(item[0] - target))[1]
             medians[target] = Image.fromarray(pick)
             if on_median is not None:
                 on_median(target, medians[target])
             if on_scene is not None:
-                on_scene(start, end, list(buf))
+                on_scene(start, end, [item for item in buf if start <= item[0] < end] or list(buf))
+
+    def add(found: list[int]) -> None:
+        nonlocal buf
+        for c in found:
+            cut_ms = max(cuts_ms[-1] + 1, int(c / fps * 1000))
+            close_scene(cuts_ms[-1], cut_ms)
+            cuts_ms.append(cut_ms)
+            buf = deque(item for item in buf if item[0] >= cut_ms)
 
     reached_end = False
     try:
@@ -184,32 +182,28 @@ def detect_cuts_with_medians(
             arr = np.frombuffer(raw, dtype=np.uint8).reshape(_RGB_H + gh, _W, 3)
             group = arr[_RGB_H:, :gw * stride, 0]
             gray = np.ascontiguousarray(group[:, :gw])
-            hist = cuts._hist_from_plane_bytes(gray.tobytes(), gw, gh)
             if frame_sink is not None:
                 frame_sink(ts_ms, gray)
-            if prev_hist is not None:
-                diff = float(np.abs(hist - prev_hist).sum()) * 0.5
-                # gap rule on the sampled instants (same decisions as the
-                # two-pass detector); only the reported position is refined
-                if diff > threshold and ts_ms > last_detect_ms + cuts._MIN_CUT_GAP_MS:
-                    last_detect_ms = ts_ms
-                    cut_ms = max(cuts_ms[-1] + 1, exact_cut(prev_group, gray, sample_idx))
-                    close_scene(cuts_ms[-1], cut_ms)
-                    cuts_ms.append(cut_ms)
-                    buf.clear()
-            prev_hist = hist
-            prev_group = group.copy()
             buf.append((ts_ms, np.ascontiguousarray(arr[:_RGB_H, :_RGB_W])))
+            # every frame of the group goes to the cut detector (the last
+            # group may be padded past the end of the video)
+            for i in range(stride):
+                if sample_idx * stride + i >= max(n_expected, (sample_idx * stride) + 1) and i > 0:
+                    break
+                add(detector.push(group[:, i * gw:(i + 1) * gw]))
             # Drop samples that can no longer be the nearest to the median of
-            # the open scene (that median only moves forward as it grows).
+            # the open scene (that median only moves forward as it grows; the
+            # cut closing it may be confirmed ``late_ms`` after it happened).
             if on_scene is not None:
                 if len(buf) > _MAX_SCENE_SAMPLES:
                     buf = deque(list(buf)[::2])
                 continue
             start = cuts_ms[-1]
-            floor = start + (ts_ms - start) // 2
+            floor = start + max(0, ts_ms - start - late_ms) // 2
             while len(buf) > 2 and buf[1][0] <= floor:
                 buf.popleft()
+        if reached_end:
+            add(detector.finish())
     finally:
         try:
             if proc.stdout:

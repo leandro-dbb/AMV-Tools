@@ -1,0 +1,60 @@
+# Optional end-to-end UI journey (app/e2e/): the built Electron app, the real
+# sidecar and the real models on CPU, driven by Playwright under Xvfb, on
+# short synthetic clips. Manual trigger only: the first run downloads the
+# SigLIP 2 / wd-tagger weights (~3 GB, then cached).
+name: e2e-linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install ffmpeg + Xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg xvfb
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          python-version: '3.12'
+          enable-cache: true
+
+      # The dev launcher runs `.uv/uv run --no-sync` against this venv.
+      - name: Python env (CPU)
+        run: |
+          uv sync --extra cpu
+          mkdir -p .uv && ln -sf "$(command -v uv)" .uv/uv
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Model cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-e2e-siglip2-wd-v3
+
+      - name: Build
+        working-directory: app
+        run: npm ci && npm run build
+
+      - name: E2E journey
+        working-directory: app
+        env:
+          AMV_E2E_CAPTURES: ${{ runner.temp }}/amv-e2e-captures
+        run: npm run e2e
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: e2e-captures
+          path: ${{ runner.temp }}/amv-e2e-captures

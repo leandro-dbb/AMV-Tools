@@ -69,6 +69,7 @@ export interface ApiErrorInfo {
   status: number | null;
   message: string;
   videos_missing: number;
+  code?: string;
 }
 
 export function parseApiError(err: unknown): ApiErrorInfo {
@@ -78,6 +79,7 @@ export function parseApiError(err: unknown): ApiErrorInfo {
   const status = Number(m[1]);
   let message = m[2].trim();
   let videosMissing = 0;
+  let code: string | undefined;
   try {
     const body = JSON.parse(message);
     const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : body;
@@ -87,9 +89,10 @@ export function parseApiError(err: unknown): ApiErrorInfo {
       if (typeof detail.error === 'string') message = detail.error;
       else if (typeof detail.message === 'string') message = detail.message;
       if (typeof detail.videos_missing === 'number') videosMissing = detail.videos_missing;
+      if (typeof detail.code === 'string') code = detail.code;
     }
   } catch { /* plain-text body */ }
-  return { status, message, videos_missing: videosMissing };
+  return code ? { status, message, videos_missing: videosMissing, code } : { status, message, videos_missing: videosMissing };
 }
 
 export function isNotFound(err: unknown): boolean {
