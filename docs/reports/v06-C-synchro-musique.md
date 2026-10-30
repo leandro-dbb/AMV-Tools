@@ -252,9 +252,9 @@ Aperçu MP4 de 3 min 45 : 56 à 90 s.
 | Recherche texte « fight » sur les drops | réel mais sans contrôle de pertinence (2 extraits seulement) |
 | Personnages imposés | testé seulement contre des maquettes (aucun personnage créé) |
 
-Captures et aperçu : `/home/leandro/dev/amv-v06-captures/music/`
+Captures et aperçu (hors dépôt, dossier `music/` des captures v06)
 (`musique-1-import.png` … `musique-6-apercu.png`,
-`apercu-take-the-lead-dbs-blackclover.mp4` (3e passe), mesures
+un aperçu MP4 de la 3e passe, mesures
 `mesures-passe1.json`, `mesures-passe2.json`, `mesures-passe3.json`).
 
 ## 9. Bugs trouvés
@@ -376,7 +376,7 @@ tourner le modèle **sur le CPU de debian-nas** (pas le GPU, sans
 amv-gpu-take), parce que le CPU du VPS sans AVX rendait PyTorch
 inutilisable ; c'est contraire à la consigne « tout sur le VPS ». Ses
 fichiers temporaires là-bas (`/tmp/bt-nas`, 121 Mo) ont été supprimés.
-Données de test (hors dépôt, `~/dev/amv-testdata/`) : les 6 morceaux Kevin
+Données de test (hors dépôt) : les 6 morceaux Kevin
 MacLeod (incompetech, CC-BY 4.0), les morceaux synthétiques, les
 annotations, et une copie H.264 de l'extrait Black Clover existant
-(`amv-data-C/black_clover_s02e04_extract_h264.mp4`, aucun nouvel extrait).
+(aucun nouvel extrait).
