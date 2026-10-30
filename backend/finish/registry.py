@@ -221,6 +221,21 @@ MODELS: dict[str, ModelSpec] = {
                           "3152477ce0d8d6978d76b995120de97cb5b928701fd0f817769f59e249a16b70"),
             ),
         ),
+        # Music tab: bar lines (first beats). Optional; without it the bars
+        # come from a heuristic that was 1-2 beats off on half the real songs.
+        ModelSpec(
+            id="beat-this-small0",
+            kind="music",
+            label="Beat This! small — music bars (first beats)",
+            license="MIT",
+            source="https://github.com/CPJKU/beat_this",
+            files=(ModelFile(
+                "beat_this-small0.ckpt",
+                "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/small0.ckpt",
+                8_451_101,
+                "6074be2c4d490c5f6101fcc374a1ec72ae93456e23bb6019783b849f5dc7d47b",
+            ),),
+        ),
     )
 }
 

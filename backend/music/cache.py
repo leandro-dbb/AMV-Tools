@@ -42,6 +42,11 @@ class AnalysisCache:
             return None
         if data.get("analysis_version") != ANALYSIS_VERSION:
             return None
+        # Beat This! downloaded since: redo the bars with it
+        if data.get("bars_engine") != "beat_this":
+            from .beatthis import available
+            if available():
+                return None
         return data
 
     def put(self, data: dict) -> None:

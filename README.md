@@ -188,6 +188,7 @@ checksum-verified, and can be deleted at any time.
 | Depth Anything V2 **Small** | 99 MB | Apache-2.0 (Base/Large are CC-BY-NC and deliberately not offered) |
 | Video Depth Anything **Small** (temporally stable, code vendored in `backend/finish/archs/vda`) | 116 MB | Apache-2.0 |
 | Video Depth Anything **Large** (same code, *Max quality* tier on NVIDIA) | 1.5 GB | **CC-BY-NC-4.0 — non-commercial use only** |
+| Beat This! `small0` (CPJKU; Music tab bar lines — code vendored in `backend/music/beatthis` with rotary-embedding-torch, both MIT) | 8.5 MB | MIT |
 
 **Non-commercial models.** AMV Tools is a free, non-commercial tool, so it
 also offers models whose license forbids commercial use (marked *non-commercial
