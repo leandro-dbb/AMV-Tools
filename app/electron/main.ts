@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { spawn, ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -100,9 +100,56 @@ function resolvePythonRoot(): { uvExe: string; projectRoot: string } {
 
 type SidecarExitError = Error & { moduleNotFound?: boolean; usedNoSync?: boolean };
 
-async function startSidecar(): Promise<number> {
+// The backend chosen at first run ("cu130", "cpu", …): a sync must keep its
+// extra, or uv swaps the CUDA torch build for the CPU one.
+function installedBackend(): string | null {
   try {
-    return await launchSidecar(false);
+    const b = fs.readFileSync(path.join(app.getPath('userData'), '.setup_complete'), 'utf8').trim();
+    return /^[a-z0-9-]+$/.test(b) ? b : null;
+  } catch {
+    return null;
+  }
+}
+
+// uv.lock of the running app vs the one the venv was last synced to: an
+// update that adds a dependency (librosa for the Music tab in v06) must
+// install it once, since later launches use --no-sync.
+function lockStamp(): { current: string | null; file: string } {
+  const file = path.join(app.getPath('userData'), '.deps-lock-sha1');
+  try {
+    const { projectRoot } = resolvePythonRoot();
+    const lock = fs.readFileSync(path.join(projectRoot, 'uv.lock'));
+    return { current: createHash('sha1').update(lock).digest('hex'), file };
+  } catch {
+    return { current: null, file };
+  }
+}
+
+async function startSidecar(): Promise<number> {
+  const stamp = lockStamp();
+  const synced = (() => { try { return fs.readFileSync(stamp.file, 'utf8').trim(); } catch { return ''; } })();
+  const depsChanged = !isDev && !!stamp.current && synced !== stamp.current
+    && !!installedBackend() && fs.existsSync(venvPath());
+  if (depsChanged) {
+    const msg = '[main] the app was updated — installing new dependencies once';
+    console.log(msg);
+    emitBootstrap({ kind: 'line', line: msg, stream: 'stdout' });
+    try {
+      const port = await launchSidecar(true);
+      try { fs.writeFileSync(stamp.file, stamp.current!); } catch {}
+      return port;
+    } catch (err) {
+      // offline, index down…: start as before, a later launch retries
+      console.warn('[main] dependency update failed, starting without it:', err);
+      await killSidecarTree();
+    }
+  }
+  try {
+    const port = await launchSidecar(false);
+    if (!synced && stamp.current && installedBackend()) {
+      try { fs.writeFileSync(stamp.file, stamp.current); } catch {}
+    }
+    return port;
   } catch (err) {
     // uv creates the .venv directory as soon as the very first sync *starts*,
     // so an interrupted first install (network drop, app closed mid-download)
@@ -151,8 +198,13 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
   const noSync = useUv && !forceSync && fs.existsSync(venvPath()) ? ['--no-sync'] : [];
   // Installed app: a (repair) sync must not pull the dev group (pytest, httpx…).
   const noDev = useUv && !isDev && noSync.length === 0 ? ['--no-dev'] : [];
+  // A (repair / update) sync keeps the chosen backend's extra: without it uv
+  // reinstalled the CPU torch over a working CUDA install.
+  const backend = installedBackend();
+  const extra = useUv && noSync.length === 0 && backend
+    ? ['--extra', backend, ...(backend === 'dml' ? ['--python', '3.12'] : [])] : [];
   const args = useUv
-    ? ['run', ...noSync, ...noDev, '--project', projectRoot, 'python', serverPath, '--port', String(apiPort)]
+    ? ['run', ...noSync, ...noDev, ...extra, '--project', projectRoot, 'python', serverPath, '--port', String(apiPort)]
     : [serverPath, '--port', String(apiPort)];
   const userDataPath = app.getPath('userData');
   const bundledUvRoot = path.dirname(uvExe);

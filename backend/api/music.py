@@ -212,6 +212,14 @@ def propose(body: ProposeBody):
     warnings: list[str] = []
     with schema.get_conn(state.primary_db) as conn:
         shots = library.split_shots(library.load_shots(conn), get_shot_cuts().load())
+        if body.constraints.characters:
+            # matches are rescored lazily: episodes indexed since the last
+            # search / Characters visit would not count otherwise
+            try:
+                from ..searchplus import characters as sp_chars
+                sp_chars.ensure_fresh(conn, state.get_search_index(), list(body.constraints.characters))
+            except Exception as exc:
+                log.warning("music: character matches not refreshed (%s)", exc)
         chars = library.character_scene_ids(conn, body.constraints.characters)
         scores = _query_scores(conn, body.constraints, warnings)
     c = body.constraints

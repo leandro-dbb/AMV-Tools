@@ -17,6 +17,7 @@ import {
   hexToRgba,
   lowerBound,
   msToX,
+  forLibrary,
   parseStoredState,
   progressPercent,
   pxPerMs,
@@ -273,6 +274,16 @@ describe('persistence', () => {
     expect(parseStoredState('{nope')).toBeNull();
     expect(parseStoredState(null)).toBeNull();
     expect(parseStoredState('42')).toBeNull();
-    expect(parseStoredState(JSON.stringify({ hash: 5 }))).toEqual({ hash: null, proposal: null, constraints: undefined });
+    expect(parseStoredState(JSON.stringify({ hash: 5 }))).toEqual({ hash: null, proposal: null, constraints: undefined, library: null });
+  });
+
+  it('drops an edit made on another library (its scene ids point elsewhere)', () => {
+    const c = { groups: ['A'], characters: [3], density: 0.7, avoidReuse: true, query: 'fight', sectionQueries: {} };
+    const saved = { hash: 'h', proposal: { hash: 'h', clips: [] } as any, constraints: c, library: '/a.db' };
+    const moved = forLibrary(saved, '/b.db');
+    expect(moved.proposal).toBeNull();
+    expect(moved.constraints).toEqual({ ...c, groups: [], characters: [] });
+    expect(moved.hash).toBe('h');
+    expect(forLibrary(saved, '/a.db').proposal).not.toBeNull();
   });
 });

@@ -286,6 +286,8 @@ export interface StoredMusicState {
   hash: string | null;
   proposal: EditProposal | null;
   constraints?: StoredConstraints;
+  /** primary library the proposal's scene ids belong to */
+  library?: string | null;
 }
 
 export const DEFAULT_CONSTRAINTS: StoredConstraints = {
@@ -317,10 +319,19 @@ export function parseStoredState(raw: string | null | undefined): StoredMusicSta
         sectionQueries: c.sectionQueries && typeof c.sectionQueries === 'object' ? c.sectionQueries : {},
       };
     }
-    return { hash, proposal, constraints };
+    const library = typeof v.library === 'string' ? v.library : null;
+    return { hash, proposal, constraints, library };
   } catch {
     return null;
   }
+}
+
+/** A saved edit made on another library: its scene ids would point at other
+ * footage there. Keep the song and the generic settings, drop the rest. */
+export function forLibrary(s: StoredMusicState, library: string | null): StoredMusicState {
+  if (!s.library || !library || s.library === library) return { ...s, library: library ?? s.library ?? null };
+  const c = s.constraints ?? DEFAULT_CONSTRAINTS;
+  return { hash: s.hash, proposal: null, constraints: { ...c, groups: [], characters: [] }, library };
 }
 
 export function serializeState(s: StoredMusicState): string {
