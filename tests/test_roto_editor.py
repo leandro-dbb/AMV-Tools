@@ -121,6 +121,8 @@ def test_merge_track_keeps_ai_edge_and_user_changes():
     assert m[48, 50] > 0.99      # body kept
     assert m[3, 3] > 0.9         # addition kept
     assert np.allclose(merge_track(None, track), track)
+    # the tracker lost it: the AI pass stays, the frame is never wiped
+    assert np.allclose(merge_track(ai, np.zeros_like(track)), ai)
 
 
 def test_propagate_flow_respects_locked_frames(project, state):
@@ -380,3 +382,11 @@ def test_propagation_keeps_thin_strands_but_not_thick_chunks():
     m = merge_track(ai, track)
     assert m[47, 110] > 0.9      # the strand stays whole
     assert m[20, 115] < 0.1      # the chunk stays out
+
+
+def test_propagating_an_emptied_frame_changes_nothing(project, state):
+    from backend.roto import engine
+    _ai(project, [_disc(i) for i in range(project.n)])
+    project.apply("main", {3: np.zeros((96, 160), np.float32)}, label="brush", lock=[3])   # hidden by smoke
+    new, method = engine.propagate(project, state, "main", 3, "both", use_sam2=False)
+    assert new == {} and method == "nothing to follow"
