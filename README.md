@@ -137,7 +137,41 @@ pulls, not full timeline editing.
 
 ![Mini editor trim workflow](assets/screenshots/mini-editor.png)
 
-### 8. Alpha Cutouts (Mask Mode, beta, off by default)
+### 8. Roto Editor — The AI Cuts Out, You Finish
+
+Open any shot in the editor and press **Cut out this shot** (*Détourer ce
+plan*). The AI makes the first pass over the whole shot (the Stable Auto
+pipeline below: BiRefNet's soft edge, SAM 3 picks the characters, SAM 2.1
+tracks them, the black ink line kept); you fix what it got wrong in a few
+gestures, the way Roto Brush (After Effects) or Magic Mask (Resolve) work:
+
+- **Brush**: green adds to the character, red removes; `[` `]` size, `E`
+  eraser (puts the AI back), Ctrl+Z / Ctrl+Shift+Z.
+- **Clicks**: click a missing part to add it, Alt-click / right-click a piece
+  of background to remove it (SAM 2.1). The corrected frame updates in about
+  0.1 s on an RTX 3090 (the measured time is shown).
+- **Propagate** (← ↔ →): SAM 2.1's video tracker starts again from your
+  corrected frames and carries the fixes along the shot; frames you corrected
+  or validated (`V`) are never overwritten.
+- **Frames to check**: the timeline marks in red the frames that probably need
+  a look (character lost, sudden jump, specks, object lost, hole, jagged
+  edge); `N` / `Shift+N` jump to the next / previous one.
+- **Edges** (optional): keep the black line, soften / harden, grow / shrink,
+  smoothing over time — applied live to the preview.
+- Views: red overlay, on black / white / checkerboard, original; zoom
+  (wheel), pan (space + drag), full screen (`F`). Several characters as
+  layers. Saved automatically: close it, come back later.
+- **Export**: ProRes 4444 with alpha (clean background, decontaminated edge
+  colours), PNG sequence with alpha and the black-and-white matte, for After
+  Effects, Premiere, Resolve or Vegas; the cut-out shot also goes into your
+  selection and the timeline export places the cut-out clip.
+
+Works on NVIDIA, Apple Silicon and CPU. Without access to SAM 3 (gated on
+Hugging Face) the editor says so and uses SAM 2.1 large; on a CPU, clicks and
+propagation are slower (the wait is shown) and propagation follows the
+corrections by optical flow. Measured results: `docs/reports/v06-roto-editeur.md`.
+
+### 8b. Alpha Cutouts (Mask Mode, beta, off by default)
 
 Mask Mode cuts characters out of a clip and exports them with transparency
 (ProRes 4444 or VP9 alpha) for After Effects. **Still disabled
