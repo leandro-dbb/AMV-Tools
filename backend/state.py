@@ -39,6 +39,7 @@ class AppState:
         self._sam2 = None       # SAM2Model — Manual click engine
         self._birefnet = None   # BiRefNetModel — Auto engine (default for anime)
         self._matanyone = None  # MatAnyoneModel — temporal propagation after BiRefNet seed
+        self._sam3 = None       # Sam3Concept — Auto engine character selector (gated weights)
         self._device = None
         self._sam2_sessions: dict[str, Any] = {}     # session_id → SegmentSession
         self._sam2_sessions_lock = threading.Lock()
@@ -273,6 +274,14 @@ class AppState:
                     try: self._birefnet.offload()
                     except Exception: pass
                 self._birefnet = None
+        if before_models.get("hf_token") != new_models.get("hf_token"):
+            from .models import sam3_concept
+            sam3_concept._ACCESS.clear()   # a new token may open the gated weights
+            with self._models_lock:
+                if self._sam3 is not None:
+                    try: self._sam3.offload()
+                    except Exception: pass
+                self._sam3 = None
         return self._settings
 
     def replace_settings(self, full: dict[str, Any]) -> dict[str, Any]:
@@ -424,46 +433,79 @@ class AppState:
         """Drop every loaded mask engine except ``keep``. Used by ``get_<X>()``
         so only one engine sits in VRAM at a time — fits 8 GB cards once
         SigLIP/tagger are evicted too."""
-        for attr in ("_sam2", "_birefnet", "_matanyone"):
+        from .models.sam3_concept import KEEP_LOADED_GB, total_vram_gb
+        for attr in ("_sam2", "_birefnet", "_matanyone", "_sam3"):
             if attr == keep:
                 continue
+            if attr == "_sam3" and total_vram_gb() >= KEEP_LOADED_GB:
+                continue   # ~2 GB, compiled once: kept between clips on big cards
             m = getattr(self, attr, None)
             if m is not None:
                 try: m.offload()
                 except Exception: pass
                 setattr(self, attr, None)
 
-    def get_sam2(self):
-        """Lazy-load SAM 2 (Manual click engine). Reloading SigLIP/tagger
-        after a mask session is ~2 s — cheaper than running the mask model
-        on a fragmented VRAM heap."""
+    def get_sam2(self, variant: Optional[str] = None):
+        """Lazy-load SAM 2 (Manual click engine, and the tracker of the Auto
+        engine). Reloading SigLIP/tagger after a mask session is ~2 s —
+        cheaper than running the mask model on a fragmented VRAM heap.
+        ``variant`` overrides the setting ("auto" = the memory tier's pick)."""
         from .models import SAM2Model
+        from .models.auto_roto import resolve_mask_variant
+        variant = resolve_mask_variant(self, "tracker", variant or self._settings["models"].get("sam2_variant", "auto"))
         with self._models_lock:
+            if self._sam2 is not None and getattr(self._sam2, "variant", variant) != variant:
+                try: self._sam2.offload()
+                except Exception: pass
+                self._sam2 = None
             if self._sam2 is None:
                 self._offload_others_for_mask()
                 self._offload_other_mask_engines(keep="_sam2")
                 self._sam2 = SAM2Model(
                     self.device,
-                    variant=self._settings["models"].get("sam2_variant", "base_plus"),
+                    variant=variant,
                     idle_offload_seconds=self._settings["models"].get("vram_idle_offload", 30),
                     hf_token=self._settings["models"].get("hf_token") or None,
                 )
             return self._sam2
 
-    def get_birefnet(self):
-        """Lazy-load BiRefNet (Auto engine, default for anime)."""
+    def get_birefnet(self, variant: Optional[str] = None):
+        """Lazy-load the Auto engine's per-frame detector (ToonOut / ISNet
+        anime / BiRefNet). ``variant`` overrides the setting ("auto" = the
+        memory tier's pick)."""
         from .models import BiRefNetModel
+        from .models.auto_roto import resolve_mask_variant
+        variant = resolve_mask_variant(self, "detector", variant or self._settings["models"].get("birefnet_variant", "auto"))
         with self._models_lock:
+            if self._birefnet is not None and getattr(self._birefnet, "variant", variant) != variant:
+                try: self._birefnet.offload()
+                except Exception: pass
+                self._birefnet = None
             if self._birefnet is None:
                 self._offload_others_for_mask()
                 self._offload_other_mask_engines(keep="_birefnet")
                 self._birefnet = BiRefNetModel(
                     self.device,
-                    variant=self._settings["models"].get("birefnet_variant", "general"),
+                    variant=variant,
                     idle_offload_seconds=self._settings["models"].get("vram_idle_offload", 30),
                     hf_token=self._settings["models"].get("hf_token") or None,
                 )
             return self._birefnet
+
+    def get_sam3(self):
+        """Lazy SAM 3 concept segmenter (Auto engine character selector), or
+        None when its gated weights are not accessible with the user's token
+        (then the Auto engine runs as in 0.5)."""
+        from .models.sam3_concept import Sam3Concept, weights_accessible
+        token = self._settings["models"].get("hf_token") or None
+        if not weights_accessible(token):
+            return None
+        with self._models_lock:
+            if self._sam3 is None:
+                self._offload_others_for_mask()
+                self._offload_other_mask_engines(keep="_sam3")
+                self._sam3 = Sam3Concept(self.device, hf_token=token)
+            return self._sam3
 
     def get_matanyone(self):
         """Lazy-load MatAnyone (temporal propagation, seeded by BiRefNet/SAM 2).
@@ -647,7 +689,7 @@ class AppState:
         # Offload mask engines before indexing — they're the heaviest of the
         # bunch and not needed for tag/embed phases.
         with self._models_lock:
-            for attr in ("_sam2", "_birefnet", "_matanyone"):
+            for attr in ("_sam2", "_birefnet", "_matanyone", "_sam3"):
                 m = getattr(self, attr, None)
                 if m is not None:
                     try: m.offload()

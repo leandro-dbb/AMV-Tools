@@ -6,8 +6,18 @@ export const maskStrings: Dict = {
   'mask.badge': { en: 'Mask mode', fr: 'Mode masque' },
   'mask.engine.auto': { en: 'Auto', fr: 'Auto' },
   'mask.engine.autoTitle': {
-    en: 'BiRefNet - automatic, recommended for anime',
-    fr: 'BiRefNet - automatique, recommandé pour l\'anime',
+    en: 'Automatic: finds the character(s) and tracks them through the clip, no click needed',
+    fr: 'Automatique : trouve le ou les personnages et les suit sur tout le plan, sans clic',
+  },
+  'mask.autoTarget.main': { en: 'Main character', fr: 'Personnage principal' },
+  'mask.autoTarget.mainTitle': {
+    en: 'Track only the biggest, most central character',
+    fr: 'Ne suivre que le personnage le plus grand et le plus central',
+  },
+  'mask.autoTarget.all': { en: 'All characters', fr: 'Tous les personnages' },
+  'mask.autoTarget.allTitle': {
+    en: 'Track every character detected in the shot',
+    fr: 'Suivre tous les personnages détectés dans le plan',
   },
   'mask.engine.manual': { en: 'Manual', fr: 'Manuel' },
   'mask.engine.manualTitle': {
@@ -34,16 +44,16 @@ export const maskStrings: Dict = {
     fr: 'Exécution de SAM 2 sur l\'image de référence…',
   },
   'mask.status.previewingBirefnet': {
-    en: 'Running BiRefNet on the reference frame…',
-    fr: 'Exécution de BiRefNet sur l\'image de référence…',
+    en: 'Detecting the characters on the reference frame…',
+    fr: 'Détection des personnages sur l\'image de référence…',
   },
   'mask.status.reviewSam2': {
     en: 'Step 2 - happy with the mask? Track it across the clip. Or click more to refine.',
     fr: 'Étape 2 - satisfait du masque ? Trackez-le sur tout le clip, ou ajoutez des clics pour affiner.',
   },
   'mask.status.reviewBirefnet': {
-    en: 'Step 2 - happy with the mask? Run it across the clip. Or switch to Manual to refine.',
-    fr: 'Étape 2 - satisfait du masque ? Appliquez-le sur tout le clip, ou passez en Manuel pour affiner.',
+    en: 'Step 2 - right character(s)? Track them across the clip. Wrong pick? Switch Main character / All characters, or Manual.',
+    fr: 'Étape 2 - les bons personnages ? Suivez-les sur tout le plan. Mauvais choix ? Basculez Personnage principal / Tous les personnages, ou passez en Manuel.',
   },
   'mask.status.maskingAll': {
     en: 'Masking every frame — {pct}%',
@@ -80,8 +90,8 @@ export const maskStrings: Dict = {
 
   // legend (Auto mode) — BiRefNet / Manual are wrapped in <b> in the JSX
   'mask.auto.body1': {
-    en: 'auto-detects the foreground subject. No clicks needed. If you have several characters and want a specific one, switch to',
-    fr: 'détecte automatiquement le sujet au premier plan. Aucun clic nécessaire. Si vous avez plusieurs personnages et en voulez un en particulier, passez en',
+    en: 'finds the characters and tracks them through the clip (re-detecting them after a cut or if the track drifts). No clicks needed. To pick one specific character, use Main character or switch to',
+    fr: 'trouve les personnages et les suit sur tout le plan (en les re-détectant après une coupe ou si le suivi dérive). Aucun clic nécessaire. Pour un personnage précis, utilisez Personnage principal ou passez en',
   },
   'mask.auto.body2': { en: 'above.', fr: 'ci-dessus.' },
 

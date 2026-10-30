@@ -47,6 +47,8 @@ class TimelineOptionsBody(BaseModel):
     path_mode: Literal["absolute", "relative"] = "absolute"
     title: Optional[str] = None
     otio_use_library: bool = True
+    # Shots cut out in the roto editor go in as their ProRes with alpha.
+    use_cutouts: bool = True
     # Optional: some API clients put the destination here instead of at the
     # top level; both are accepted.
     output_path: Optional[str] = None
@@ -250,6 +252,9 @@ def _resolve_specs(conn: sqlite3.Connection, body: TimelineSelection) -> list[Cl
         specs = _derush_specs(conn, [], selector, body.options)
     if not specs:
         raise HTTPException(400, "nothing to export in this selection")
+    if body.options.use_cutouts:
+        from ..roto.links import link_cutouts
+        link_cutouts(specs)
     return specs
 
 
