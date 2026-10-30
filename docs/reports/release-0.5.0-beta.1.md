@@ -59,7 +59,37 @@ Aucun test désactivé.
 
 ## Fusion, tag, build
 
-Voir la section « Runs sur main » ci-dessous (complétée après la fusion).
+- `main` : merge `--no-ff` de `jarvis/v06` → `5cf4de7` (arbre identique à la
+  branche testée), poussé.
+- Tag annoté `v0.5.0-beta.1` sur `5cf4de7`, poussé.
+
+| Run | Résultat |
+| --- | --- |
+| `ci` sur main | ✅ [40984453806](https://github.com/leandro-dbb/AMV-Tools/actions/runs/40984453806) |
+| `build` sur le tag (3 OS + release) | ✅ [40984695256](https://github.com/leandro-dbb/AMV-Tools/actions/runs/40984695256) |
+| `windows-smoke` sur main (dispatch) | ✅ [40984473637](https://github.com/leandro-dbb/AMV-Tools/actions/runs/40984473637) |
+
+Release **brouillon**, marquée pré-version, titre « AMV Tools 0.5.0-beta.1
+(bêta de test) », notes FR + EN (nouveautés, installation par système,
+RTX 50, configuration, problèmes connus, checklist de test de 30 min). Page :
+<https://github.com/leandro-dbb/AMV-Tools/releases> (l'URL d'un brouillon
+change à chaque modification). `builder-debug.yml` (fichier interne
+d'electron-builder) retiré des fichiers joints.
+
+| Fichier | Taille |
+| --- | --- |
+| `AMV.Tools.Setup.0.5.0-beta.1.exe` (Windows x64, NSIS) | 90,7 Mo |
+| `AMV.Tools-0.5.0-beta.1-arm64.dmg` (macOS Apple Silicon) | 112,6 Mo |
+| `AMV.Tools-0.5.0-beta.1-arm64-mac.zip` (macOS Apple Silicon) | 107,7 Mo |
+| `AMV.Tools-0.5.0-beta.1.AppImage` (Linux x64) | 123,9 Mo |
+| `amv-tools_0.5.0-beta.1_amd64.deb` (Linux x64) | 85,1 Mo |
+
+(+ les `.blockmap` des mises à jour différentielles.)
+
+Contrôle de l'AppImage publiée sur le VPS (Debian 12, Xvfb, profil jetable,
+réseau coupé exprès) : extraction OK (`resources/backend`, `pyproject.toml`,
+`uv.lock`, `.uv/uv` présents), l'appli Electron démarre et tient 40 s ; le
+sidecar s'arrête au provisionnement de Python, comme attendu sans réseau.
 
 ## Ce qui n'a pas été vérifié sur vrai matériel
 
