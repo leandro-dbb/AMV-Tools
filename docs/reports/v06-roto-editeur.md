@@ -4,7 +4,30 @@ Date : 30 octobre 2026, 2 h – 11 h. Branche `jarvis/v06-roto-editor` (jarvis/v
 `jarvis/v05-roto-stable`). Machine de mesure : RTX 3090 (debian-nas) ; interface pilotée dans un
 Chromium à moi sous Xvfb, et l'appli Electron complète sur CPU pour le test de bout en bout.
 
-<!-- RESUME -->
+## Résumé
+
+- **L'éditeur existe et marche partout** : « Détourer ce plan » depuis un plan → passe IA (Stable v5)
+  → corrections au pinceau (vert / rouge, gomme, bords qui se recollent au dessin) et aux clics
+  (SAM 2.1 ; sur CPU la pièce de la passe IA ou la zone de couleur sous le curseur) → propagation
+  ← ↔ → (SAM 2.1 large, les images corrigées ou validées ne sont jamais écrasées) → images à vérifier
+  en rouge sous la vidéo (`N`) → réglages de bord en direct → export ProRes 4444 / PNG / masque, le plan
+  part dans la sélection et la timeline exportée. Sauvegarde automatique, FR / EN.
+- **Correction en direct** sur RTX 3090 : 112 ms côté serveur pour un clic sur une nouvelle image,
+  21 ms sur la même, 6 ms pour un coup de pinceau ; **120 à 180 ms à l'écran** dans l'appli (cible
+  300 ms tenue) ; propagation 0,18 s par image.
+- **« L'IA fait 90 % » : oui pour les gros défauts, non pour la finition au pixel.** Simulation sur
+  8 plans (les 3 exemples + 5 des pires du banc) : après 5 gestes il reste en médiane 39 % des pixels
+  faux de la passe IA, 13 % après 22-32 gestes ; une image perdue, une aura, des rochers, un mauvais
+  personnage ou une image vide partent en 1 à 3 gestes. Mais **aucun des 8 plans n'atteint le
+  « propre » demandé** (encre ≥ 97 %, fond au contour ≤ 3 %, 0 trou…) en 30 gestes : ce qui reste est
+  le bord, que ni le pinceau ni les curseurs globaux ne règlent. Temps : 4 à 7,5 min par plan.
+- **Trouvé et corrigé en route** (grâce à la simulation et à l'œil) : clic droit sur une aura qui
+  emportait le personnage, voile d'alpha pâle laissé par la propagation, mèches fines coupées par la
+  propagation, propagation depuis une image vidée qui effaçait le plan, déchargement de SAM 2 au repos
+  en plein suivi (bug préexistant), premier clic à 16-55 s, clic à 25 s sur CPU.
+- Tests : backend 522 réussis (`pytest -m "not slow"`), front `tsc` + 84 tests vitest + build, E2E
+  Electron de l'éditeur sur un vrai extrait **5/5** (sur CPU). Pas mesuré sur Mac ni Windows.
+
 
 ## 1. Ce que fait l'éditeur
 
@@ -131,7 +154,57 @@ Ce que la simulation ne sait pas faire : regarder. Elle ne voit l'erreur que sur
 référence de chaque plan (un vrai monteur la voit partout, mais ne sait pas la mesurer) ; un geste
 réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps total.
 
-<!-- SIMULATION-RESULTATS -->
+### Résultats (8 plans, simulation finale `sim9`, RTX 3090)
+
+Les 3 plans des exemples (b1 cigarette, s04 quatre personnages, s13 SSJ3) et 5 plans du banc parmi
+les pires (b2 démon noir sur fond sombre, b5 deux personnages dans une arène, s16 fumée devant Goku,
+s17 Goku derrière un mur, s18 Beerus devant une foule dans un couloir sombre).
+
+| plan | images (réf.) | 1er choix | gestes | propagations | IoU IA → fin | erreur restante après 5 / 10 / tous les gestes | encre % IA → fin | fond contour % IA → fin | rugosité % IA → fin (ancien) | trous IA → fin | perdues IA → fin | propre ? (critères manqués) | temps estimé machine calme + 5 s/geste |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| b1 | 84 (11) | all | 30 | 25 | 0.986 → 0.989 | 31 / 28 / 13 % | 94.5 → 96.4 | 3.4 → 2.2 | 3.0 → 1.9 (11.2) | 0 → 0 | 0 → 0 | non (ink) | 3.7 + 2.5 min |
+| b2 | 68 (6) | all | 32 (7 annul.) | 18 | 0.685 → 0.929 | 30 / 27 / 15 % | 58.8 → 65.0 | 24.0 → 20.0 | 14.1 → 10.1 (6.5) | 26 → 19 | 0 → 0 | non (ink, holes, rough, bg) | 2.8 + 2.7 min |
+| b5 | 84 (6) | all | 30 | 25 | 0.979 → 0.981 | 46 / 55 / 64 % | 80.2 → 96.4 | 4.0 → 7.1 | 8.8 → 6.2 (15.2) | 1 → 0 | 0 → 0 | non (ink, bg) | 4.8 + 2.5 min |
+| s04 | 84 (11) | all | 30 (1 annul.) | 28 | 0.960 → 0.980 | 47 / 31 / 13 % | 93.0 → 93.2 | 8.4 → 7.3 | 2.2 → 2.3 (5.0) | 1 → 1 | 0 → 0 | non (ink, holes, bg) | 3.8 + 2.5 min |
+| s13 | 76 (13) | all | 30 (6 annul.) | 18 | 0.769 → 0.933 | 32 / 15 / 9 % | 67.3 → 83.2 | 25.0 → 14.5 | 10.7 → 7.0 (22.9) | 2 → 1 | 4 → 0 | non (ink, holes, bg) | 2.9 + 2.5 min |
+| s16 | 62 (6) | all | 22 | 17 | 0.824 → 0.998 | 0 / 0 / 0 % | 99.7 → 99.2 | 27.8 → 10.0 | 0.4 → 0.5 (0.4) | 0 → 0 | 0 → 0 | non (rough, bg) | 2.4 + 1.8 min |
+| s17 | 56 (6) | all | 32 (8 annul.) | 16 | 0.956 → 0.982 | 64 / 55 / 21 % | 81.8 → 72.5 | 16.3 → 7.8 | 4.7 → 4.4 (8.8) | 0 → 2 | 0 → 0 | non (ink, holes, bg) | 2.2 + 2.7 min |
+| s18 | 69 (6) | click | 30 (1 annul.) | 28 | 0.919 → 0.969 | 49 / 41 / 13 % | 86.7 → 84.8 | 13.6 → 4.9 | 1.8 → 2.9 (3.0) | 1 → 3 | 0 → 0 | non (ink, holes, bg) | 3.4 + 2.5 min |
+
+Lecture : « erreur restante » = pixels faux sur les images de référence (morceaux manquants + en trop,
+au-delà de 2 px), en % de ceux de la passe IA, après 5 gestes, 10 gestes et à la fin ; « encre » et
+« fond contour » : moyennes des images de référence ; « temps estimé » : temps machine sur une carte
+au calme (passe IA 1,1 s / image, propagation 0,18 s / image, geste 0,15 s, les vitesses mesurées
+seules — les simulations tournaient à quatre en même temps, leurs temps mesurés sont gonflés 3 à 4
+fois) + 5 s par geste pour le monteur.
+
+**Ce que ça dit :**
+
+- **Les gros défauts partent en quelques gestes.** s16 : l'IA prend toute l'image dans la fumée —
+  *Vider cette image* (1 geste) retire **100 %** de l'erreur. s13 : 1 clic sur Goku dans le flou ramène
+  les **4 images perdues** (0 ensuite). s18 : choisir *cliquer sur le personnage* au départ (au lieu de
+  *tous*) fait passer l'IoU de la passe IA de 0,34 (la foule comptée) à 0,92, puis trois clics enlèvent
+  69 à 90 % de l'erreur de leur image. s13 : un clic droit sur l'aura enlève 56 % de l'erreur de
+  l'image ; s04 : un clic droit sur l'arche de pierre derrière Kaio, 39 %. Après **5 gestes**, il reste
+  0 à 64 % de l'erreur de la passe IA (médiane **39 %**), après 10 gestes médiane **30 %**, à la fin
+  (22 à 32 gestes) médiane **13 %** (9 % sur s13, 13 % sur b1, s04 et s18).
+- **Le « propre » strict n'est atteint sur aucun des 8 plans en 30 gestes.** Critères tenus à la fin :
+  0 image perdue 8/8 ; objet tenu (cigarette de b1) gardé ; rugosité ≤ l'ancien mode 6/8 (b2 et s16
+  non, s16 à 0,5 contre 0,4) ; 0 trou sur les images de référence 3/8 ; fond le long du contour ≤ 3 %
+  **1/8** (b1, 2,2 %) ; encre ≥ 97 % **1/8** (s16 ; b1 et b5 à 96,4 %).
+- Ce qui reste est **le bord** : 2 à 8 px de fond collés au contour (dégradé de BiRefNet, lueur des
+  auras, décor sombre collé à un personnage sombre) et le trait noir à moitié transparent par endroits.
+  Le monteur simulé s'y épuise en petits coups de pinceau de 1,5 à 2 px qui en ajoutent autant qu'ils en
+  enlèvent (b5 : l'erreur *remonte* de 46 à 64 % à cause de ces retouches de trait) ; les curseurs de
+  bord, essayés une fois par plan, gagnent 1 à 2 points d'encre. Un vrai monteur ne ferait pas mieux au
+  pinceau : il faut un outil de bord (§5).
+- **Temps** : une passe IA et 22 à 32 gestes, c'est **4 à 7,5 minutes par plan** de 2,3 à 3,5 s
+  (machine au calme + 5 s par geste), dont 2 à 5 minutes de machine.
+
+Par rapport à la promesse « l'IA fait 90 %, le monteur finit » : **oui pour les gros défauts** (perdues,
+décor, mauvais personnage, image vide), qui partent en 1 à 5 gestes ; **non pour la finition au pixel**
+demandée (encre ≥ 97 %, fond au contour ≤ 3 %), que ni la passe IA ni 30 gestes n'atteignent.
+
 
 ## 4. L'éditeur en vrai : démo, test de bout en bout, CPU
 
@@ -148,8 +221,11 @@ réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps
   sélection : **5/5 réussis**. Le même parcours tourne aussi contre le sidecar GPU (démo).
 - **Sur CPU c'est lent** : sur cette machine (12 cœurs partagés avec la machine de mesure, qui faisait
   tourner quatre simulations en même temps), passe IA d'un plan de 66 images en 23 min (ISNet anime
-  image par image), clic 25 s (pas de SAM 2 installé ici : la pièce détectée sous le curseur), propagation
-  (flot optique) 25 s, export 1080p 3,6 min. L'interface ne se bloque jamais (barre de progression,
+  image par image), propagation (flot optique) 25 s, export 1080p 3,6 min. Le clic y prenait 25 s (il
+  relançait le détecteur sur l'image) : corrigé après ce test, il reprend maintenant la pièce de la
+  passe IA sous le curseur (clic gauche) ou la zone de même couleur sous le curseur dans le détourage
+  (clic droit) — **12 à 180 ms** mesurés sur le projet de ce test (pas de SAM 2 installé sur cette
+  machine). L'interface ne se bloque jamais (barre de progression,
   Annuler, file de gestes, message « cet ordinateur n'a pas de carte graphique utilisable par l'IA :
   chaque correction peut prendre quelques secondes »). Chiffres pris sous forte charge : à remesurer sur
   une machine calme ; rien n'a été mesuré sur Mac.
@@ -157,7 +233,29 @@ réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps
   `_matte.mov` ProRes 422 HQ ; dossier PNG RGBA ; l'export timeline (6 formats, test unitaire) place le
   `_alpha.mov` à la place de l'épisode pour un plan détouré.
 
-<!-- OEIL -->
+### Vérifié à l'œil (planches ×3 sur blanc et sur rouge, `comparaison.mp4`)
+
+- **03 SSJ3** : image entière, la différence est nette : la passe IA garde l'aura jaune, les rochers,
+  l'éclair bleu et le sol ; après corrections Goku est seul, flou de bougé compris. Restent un petit
+  morceau d'aura détaché près du pied sur quelques images et, en zoom sur les mèches (images 12 et 38),
+  **la bande de lueur sombre autour des cheveux, identique à la passe IA** : aucun geste ne l'a enlevée.
+  Image 63 : pointes propres dans les deux.
+- **01 cigarette** : trait continu autour des cheveux, de la main et de la cigarette dans les deux ; même
+  léger liseré clair autour des doigts sur rouge. **Défaut introduit par la simulation** : la longue
+  mèche fine qui traverse vers la cigarette est coupée sur l'image 42 (et amincie sur la 70). La
+  référence du banc (faite avec SAM 2.1) n'a pas cette mèche : le monteur simulé l'a donc « corrigée »
+  comme du fond. Un vrai monteur la garderait ; c'est la limite d'un correcteur guidé par une référence
+  imparfaite.
+- **02 plan large** : l'arche de pierre blanche que la passe IA collait à Kaio a disparu ; contours de
+  Goku, Kaio, Beerus et Whis nets, oreilles de Beerus avec leur trait, même léger liseré rosé sur rouge
+  que la passe IA. **Autre défaut venu de la référence** : une touffe d'herbe en bas à gauche a été
+  *ajoutée* — la référence du banc contient un petit morceau à cet endroit, le monteur simulé l'a donc
+  rajouté d'un clic (SAM a pris la touffe d'herbe).
+- Bilan visuel : sur les trois plans, l'après-corrections est **plus propre que la passe IA sur les
+  gros morceaux** (aura, rochers, arche) et **identique sur le bord** (lueur, liserés), avec deux
+  erreurs dues au correcteur automatique lui-même (mèche coupée, herbe ajoutée) qu'un monteur réel ne
+  ferait pas.
+
 
 
 ## 5. Ce qui reste pénible
