@@ -506,6 +506,53 @@ def cmd_latency(args):
     (out / f"latency_{args.shot}.json").write_text(json.dumps(res, indent=1))
 
 
+def cmd_table(args):
+    """Markdown table of a simulation folder (one row per shot)."""
+    out = Path(args.out)
+    from backend.roto.project import RotoProject
+    root = Path(args.root)
+    rows = []
+    for f in sorted(out.glob("*.json")):
+        if f.name == "summary.json":
+            continue
+        r = json.loads(f.read_text())
+        # overlap with the reference (IoU) and error pixels, AI pass vs final, from the saved project
+        try:
+            p = RotoProject.load(Path(r["project_dir"]))
+            gts = {int(g.stem): RE.read_alpha(g) > 0.5 for g in sorted((root / "gt" / r["shot"]).glob("*.png"))}
+            for key, get in (("ai", lambda t: p.ai["main"][t] / 255.0), ("final", lambda t: p.matte("main", t))):
+                js, es = [], 0.0
+                for t, g in gts.items():
+                    a = get(t) > 0.5
+                    u = (a | g).sum()
+                    js.append((a & g).sum() / u if u else 1.0)
+                    fn, fp = _error_maps(get(t), g)
+                    es += fn.sum() + fp.sum()
+                r[key]["J"] = float(np.mean(js))
+                r[key]["err"] = float(es)
+        except Exception as exc:   # noqa: BLE001
+            print("no project for", r["shot"], exc, file=sys.stderr)
+        rows.append(r)
+    fm = lambda v, d=1: "–" if v is None or (isinstance(v, float) and not np.isfinite(v)) else f"{v:.{d}f}"   # noqa: E731
+    lines = ["| plan | images (réf.) | 1er choix | gestes | propagations | IoU IA → fin | erreur restante | encre % IA → fin | fond contour % IA → fin | "
+             "rugosité % IA → fin (ancien) | trous IA → fin | perdues IA → fin | propre ? (critères manqués) | "
+             "temps machine | dont passe IA |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        a, z, c = r["ai"], r["final"], r["final_clean"]
+        miss = [k for k, v in c.items() if k != "all" and not v]
+        lines.append(
+            f"| {r['shot']} | {r['frames']} ({r['ref_frames']}) | {r.get('target', 'all')} | {r['gestures']}"
+            f"{' (' + str(r['undos']) + ' annul.)' if r['undos'] else ''} | {r['propagations']} | "
+            f"{fm(a.get('J'), 3)} → {fm(z.get('J'), 3)} | "
+            f"{fm(100 * z['err'] / a['err'] if a.get('err') else None, 0)} % | "
+            f"{fm(a['ink'])} → {fm(z['ink'])} | {fm(a['bg'])} → {fm(z['bg'])} | {fm(a['jag'])} → {fm(z['jag'])} "
+            f"({fm(r['old_jag'])}) | {a['holes']} → {z['holes']} | {a['lost']} → {z['lost']} | "
+            f"{'oui' if c['all'] else 'non (' + ', '.join(miss) + ')'} | {r['machine_s'] / 60:.1f} min | "
+            f"{r['ai_s'] / 60:.1f} min |")
+    print("\n".join(lines))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -521,6 +568,10 @@ def main(argv=None):
     la.add_argument("--out", required=True)
     la.add_argument("--shot", default="b1")
     la.set_defaults(fn=cmd_latency)
+    tb = sub.add_parser("table")
+    tb.add_argument("--out", required=True)
+    tb.add_argument("--root", default="/srv/data/amv-tools/roto-stable/bench")
+    tb.set_defaults(fn=cmd_table)
     args = ap.parse_args(argv)
     args.fn(args)
 

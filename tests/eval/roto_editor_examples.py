@@ -2,7 +2,6 @@
 alone gives, what a few corrections give. Per example folder:
 
   detourage-alpha.mov    ProRes 4444 1080p of the corrected shot (the editor's export)
-  ia-seule-alpha.mov     the same export of the AI pass alone (for the comparison)
   comparaison.mp4        Original / AI alone / after corrections (black) / after
                          corrections (red), then a zoom x3 at half speed
   contour-sur-blanc.png  3 frames, zoom x3 on the outline: original / AI alone /
@@ -110,18 +109,18 @@ def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
     shutil.move(files["prores"], d / "detourage-alpha.mov")
     cur = p.masks["main"]
     p.masks["main"] = p.ai["main"]
-    grow = p.settings.grow_px
-    p.settings.grow_px = 0.0
+    from backend.roto.edges import EdgeSettings
+    saved = p.settings
+    p.settings = EdgeSettings()   # the AI alone: default edge settings
     files = export_project(p, tmp, ["prores"], name="ai")
-    shutil.move(files["prores"], d / "ia-seule-alpha.mov")
+    ai_mov = Path(files["prores"])   # only for the comparison (kept out of the deliverables: size)
     p.masks["main"] = cur
-    p.settings.grow_px = grow
-    shutil.rmtree(tmp, ignore_errors=True)
+    p.settings = saved
 
     def streams():
         orig = reader(["-ss", f"{start / 1000}", "-i", src, "-t", f"{(end - start) / 1000}", "-vf", f"fps={fps}",
                        "-frames:v", str(n)], 3, n)
-        ai = reader(["-i", str(d / "ia-seule-alpha.mov")], 4, n)
+        ai = reader(["-i", str(ai_mov)], 4, n)
         fin = reader(["-i", str(d / "detourage-alpha.mov")], 4, n)
         return zip(orig, ai, fin)
 
@@ -166,6 +165,7 @@ def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
             for q, (img, tt) in enumerate(cells):
                 board[r * CH:(r + 1) * CH, q * CW:(q + 1) * CW] = label(img, tt, 26)
         Image.fromarray(board).save(d / f"contour-sur-{bgname}.png", optimize=True)
+    shutil.rmtree(tmp, ignore_errors=True)
 
     ai, fin = res["ai"], res["final"]
     fmt = lambda v: "n/a" if v is None or (isinstance(v, float) and not np.isfinite(v)) else (  # noqa: E731
@@ -197,8 +197,8 @@ def make_example(sid: str, dname: str, sim: Path, out: Path) -> None:
         f"objet tenu perdu (images)   : {fmt(ai['held_lost']):>8}   {fmt(fin['held_lost']):>8}            0",
         "",
         "Mesures sur les images ayant une référence (" + str(res["ref_frames"]) + "), alpha de l'export à la taille",
-        "de travail ; images perdues et trous sur toutes les images. Fichiers : detourage-alpha.mov (après",
-        "corrections), ia-seule-alpha.mov, comparaison.mp4, contour-sur-blanc.png, contour-sur-rouge.png.",
+        "de travail ; images perdues sur toutes les images. Fichiers : detourage-alpha.mov (après",
+        "corrections), comparaison.mp4, contour-sur-blanc.png, contour-sur-rouge.png.",
     ]
     (d / "chiffres.txt").write_text("\n".join(lines) + "\n")
     print("done", sid, flush=True)
