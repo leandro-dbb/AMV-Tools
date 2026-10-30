@@ -23,7 +23,11 @@ visible même quand Mask Mode est coupé).
     trois régions emboîtées : un clic positif prend la plus sûre, un clic négatif la plus petite sûre
     et seulement le morceau sous le curseur (sinon un Alt+clic sur une flamme d'aura emportait Goku
     avec elle — vu et corrigé pendant le chantier) ;
-  - annuler / rétablir (Ctrl+Z / Ctrl+Shift+Z), « Valider cette image » (`V`).
+  - annuler / rétablir (Ctrl+Z / Ctrl+Shift+Z), « Valider cette image » (`V`), « Vider cette image »
+    (`Suppr` : le personnage n'est pas là, caché par la fumée ou hors champ) ;
+  - les bords d'un coup de pinceau se recollent au dessin (filtre guidé dans une bande de 3 px) : un trait
+    qui s'arrête à 1-3 px d'une ligne s'arrête sur la ligne, anticrénelé comme le dessin, au lieu de
+    laisser le bord rond et en escalier du pinceau.
   - Après chaque geste, l'image courante est recalculée et **le temps mesuré est affiché** (« Image
     corrigée en 134 ms (IA 95 ms) »). Les gestes s'enchaînent dans une file : rien n'est perdu si on
     va plus vite que la machine.
@@ -32,7 +36,11 @@ visible même quand Mask Mode est coupé).
   image verrouillée dans chaque sens et **n'écrit jamais une image corrigée ou validée**. Sur chaque
   image, le résultat garde le bord doux de la passe IA là où il est d'accord avec l'objet suivi (à
   5 px près : ce que l'utilisateur a retiré reste retiré) et prend l'objet suivi là où l'IA n'avait
-  rien (ce qu'il a ajouté, un personnage perdu). Sans GPU : flot optique.
+  rien (ce qu'il a ajouté, un personnage perdu). Les parties fines de la passe IA encore attachées au
+  personnage (mèche, bout de cigarette), que le masque plus grossier de SAM 2 ne suit pas, sont gardées
+  entières ; les probabilités de SAM 2 sont resserrées autour de 0,5 (sans ça, ses zones de faible
+  confiance laissaient un voile d'alpha pâle sur toute une aura — vu et corrigé pendant le chantier).
+  Sans GPU : flot optique.
 - **Images à vérifier** : sous la vidéo, une case par image ; les images corrigées par l'utilisateur
   ont un losange jaune ; les **images suspectes sont en rouge**, calculées avec les métriques du banc
   (perte d'aire > 40 % = personnage perdu, saut d'aire > 25 %, îlots / pixels parasites, morceau de
@@ -125,6 +133,33 @@ réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps
 
 <!-- SIMULATION-RESULTATS -->
 
+## 4. L'éditeur en vrai : démo, test de bout en bout, CPU
+
+- **Démo** (`demo/demo-editeur.mp4`, 1 min 43, enregistrement de l'écran Xvfb, RTX 3090 au calme) :
+  recherche → plan SSJ3 → « Détourer ce plan » → passe IA (79 images en 91 s) → image 1 : deux clics
+  droits sur les rochers que l'IA avait pris → propagation (14 s) → image 41 : trois clics droits sur
+  l'aura et un coup de pinceau rouge → zoom → propagation → image suivante à vérifier → vues sur noir
+  et sur blanc → lecture → export (ProRes 4444 + PNG + masque, 92 s, le plan entre dans la sélection).
+  Les images « à vérifier » passent de 48 après la passe IA à 11 après la première correction propagée.
+- **Test de bout en bout** (`app/e2e/roto.e2e.mjs`, l'appli Electron complète, vrai sidecar, vrais
+  modèles, **sur CPU**, extrait réel de Black Clover de 9,5 s) : indexation → recherche → plan →
+  « Détourer ce plan » → passe IA → deux coups de pinceau et un clic → annuler / rétablir →
+  propager ↔ → export ProRes 4444 → fichiers sur le disque (`_alpha.mov`, `_matte.mov`) et plan dans la
+  sélection : **5/5 réussis**. Le même parcours tourne aussi contre le sidecar GPU (démo).
+- **Sur CPU c'est lent** : sur cette machine (12 cœurs partagés avec la machine de mesure, qui faisait
+  tourner quatre simulations en même temps), passe IA d'un plan de 66 images en 23 min (ISNet anime
+  image par image), clic 25 s (pas de SAM 2 installé ici : la pièce détectée sous le curseur), propagation
+  (flot optique) 25 s, export 1080p 3,6 min. L'interface ne se bloque jamais (barre de progression,
+  Annuler, file de gestes, message « cet ordinateur n'a pas de carte graphique utilisable par l'IA :
+  chaque correction peut prendre quelques secondes »). Chiffres pris sous forte charge : à remesurer sur
+  une machine calme ; rien n'a été mesuré sur Mac.
+- **Export vérifié** sur la démo : `_alpha.mov` ProRes 4444 (yuva444p12le) 1920×1080, 79 images ;
+  `_matte.mov` ProRes 422 HQ ; dossier PNG RGBA ; l'export timeline (6 formats, test unitaire) place le
+  `_alpha.mov` à la place de l'épisode pour un plan détouré.
+
+<!-- OEIL -->
+
+
 ## 5. Ce qui reste pénible
 
 - **Les critères « propre » au pixel près ne sont pas atteints en 30 gestes** (voir §3) : ce qui reste
@@ -159,11 +194,11 @@ réel coûte un coup d'œil et un mouvement de souris, compté 5 s dans le temps
 
 Sur la machine de mesure, `/srv/data/amv-tools/reports/roto/editeur/` :
 
-- `demo/demo-editeur.mp4` : l'éditeur utilisé (enregistrement de l'écran Xvfb, ~2 min ; passe IA,
+- `demo/demo-editeur.mp4` : l'éditeur utilisé (enregistrement de l'écran Xvfb, 1 min 43 ; passe IA,
   propagations et export accélérés, avec leur durée réelle à l'écran) sur le plan SSJ3 : passe IA,
   deux clics droits sur les rochers, propagation, trois clics droits sur l'aura et un coup de pinceau
   rouge, zoom, propagation, image suivante à vérifier, vues sur noir / sur blanc, lecture, export ;
-  `demo/captures/` : 4 captures.
+  `demo/captures/` : 5 captures de la démo et 6 du test de bout en bout sur CPU (`e2e-cpu-*`).
 - Pour chacun des 3 plans des exemples (`01-calme-cigarette-black-clover`,
   `02-quatre-personnages-plan-large`, `03-aura-ssj3-camera-qui-tremble`) : `comparaison.mp4`
   (Original / IA seule / après corrections sur noir / après corrections sur rouge, puis zoom ×3
