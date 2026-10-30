@@ -4,6 +4,27 @@ All notable changes to AMV Tools are documented here.
 
 ## 0.5.0-alpha — unreleased
 
+### Bug-fix pass (v06 fix)
+
+([report](docs/reports/v06-fix.md))
+
+- **Cut detection** sees every frame, in context (motion-compensated
+  difference on the picture area, local activity, flash / impact-frame
+  rejection), one detector shared by the CPU, NVIDIA and Apple paths. On
+  frame-accurate annotations of two real extracts (109 cuts): recall
+  70 % → 81 % and 38 % → 86 % on the exact frame, precision 72 % → 92 % and
+  67 % → 90 %. Apple Silicon's chunked decode is off by default for now.
+- **HEVC froze the whole sidecar**: a PyAV log callback (also set by
+  torchvision on import) deadlocked the HEVC decoder against the GIL.
+  Without hardware decode, indexing now decodes in an ffmpeg subprocess.
+  10-bit HEVC in MKV failed the NVIDIA NVDEC pass (wrong bit depth).
+- **Interrupted indexing**: the episode shows as *incomplete* (not counted,
+  *Resume indexing* button) and resumes where it stopped instead of being
+  redone; a tagger error no longer marks an episode indexed without tags.
+- **Drag and drop**: the Music drop zone works again (Electron 32+); a file
+  dropped outside a zone no longer replaces the app with the file. E2E test.
+- Autotune unit test made deterministic (virtual clock).
+
 ### Windows "works the first time" + timeline export for every editor (v06 A)
 
 ([report](docs/reports/v06-A-windows-timeline.md),
