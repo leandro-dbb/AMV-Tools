@@ -206,3 +206,43 @@ def test_hevc_indexes_on_cpu_without_freezing(tmp_path, db_path, monkeypatch, bi
     assert not err
     v = _video(db_path)
     assert v["status"] == "completed" and v["scenes"] == 4
+
+
+# ── review findings (v06 fix) ───────────────────────────────────────────────
+def test_start_refusal_is_explained(client, state, monkeypatch):
+    import threading
+    gate = threading.Event()
+    t = threading.Thread(target=gate.wait, daemon=True)
+    t.start()
+    monkeypatch.setattr(state, "_index_thread", t)
+    try:
+        assert client.get("/api/index/queue").json()["running"] is True
+        r = client.post("/api/index/start", json={}).json()
+        assert r["started"] is False and r["reason"] == "indexing"
+    finally:
+        gate.set()
+        t.join()
+    assert client.get("/api/index/queue").json()["running"] is False
+
+
+def test_missing_or_empty_queued_folders_are_reported(tmp_path, db_path):
+    schema.init_db(db_path)
+    empty = tmp_path / "vide"
+    empty.mkdir()
+    with schema.get_conn(db_path) as conn:
+        queries.add_to_queue(conn, str(tmp_path / "débranché"), True, True)
+        queries.add_to_queue(conn, str(empty), True, True)
+    events = []
+    pipeline.index_queue(db_path, FakeSigLIP(), FakeTagger(), progress_cb=events.append)
+    failed = {e["path"]: e["message"] for e in events if e.get("failed")}
+    assert "not found" in failed[str(tmp_path / "débranché")]
+    assert "no video" in failed[str(empty)]
+
+
+def test_video_left_indexing_by_a_crash_is_flagged_at_startup(db_path, six_shots, state):
+    schema.init_db(db_path)
+    with schema.get_conn(db_path) as conn:
+        queries.upsert_video(conn, str(six_shots), "six", 6000, 25.0, "320x240", model_version="x", status="indexing")
+    type(state)()   # a new sidecar start on the same data folder
+    with schema.get_conn(db_path) as conn:
+        assert conn.execute("SELECT status FROM videos").fetchone()[0] == "cancelled"
