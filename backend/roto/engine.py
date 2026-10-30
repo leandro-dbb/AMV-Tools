@@ -332,6 +332,7 @@ def _sam2_track(sam2, device, jpgs: List[Path], seq: List[int], prompts: Dict[in
                     f = vseq[local]
                     lg = logits[0, 0].float()
                     out[f] = torch.sigmoid(lg * SOFT_LOGIT_SCALE).cpu().numpy().astype(np.float32)
+                    sam2._touch()   # not idle: the offload watcher must wait
                     tick()
                 vp.reset_state(st)
                 del st

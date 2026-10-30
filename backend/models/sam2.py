@@ -261,6 +261,9 @@ class SAM2Model:
         self._ensure_video_loaded()
         self._touch()
         assert self._video_predictor is not None
+        # a local reference: the idle-offload watcher may drop the attribute
+        # while a long clip is being tracked (it is touched per frame too)
+        vp = self._video_predictor
 
         w, h = frame_size
         n_frames = len(frame_paths)
@@ -291,7 +294,7 @@ class SAM2Model:
             # Long clip: bounded memory (see _track_windowed). The short-clip
             # path below is kept as is — it is what every clip under ~2 s used.
             return self._track_windowed(kfs, video_dir, n_frames, masks_out, soft=soft,
-                                        window=window, progress_cb=progress_cb)
+                                        window=window, progress_cb=progress_cb, vp=vp)
         seen = 0
 
         def emit(frame_idx: int, mask_logits) -> None:
@@ -302,6 +305,7 @@ class SAM2Model:
             else:
                 masks_out[frame_idx] = (logits > 0.0).cpu().numpy()
             seen += 1
+            self._touch()
             if progress_cb is not None:
                 try:
                     progress_cb(min(seen, n_frames), n_frames)
@@ -314,17 +318,17 @@ class SAM2Model:
             cached = self._state_cache
             if cached is not None and cached[0] == (str(video_dir), n_frames):
                 state = cached[1]
-                self._video_predictor.reset_state(state)
+                vp.reset_state(state)
             else:
                 self._state_cache = None
-                state = self._video_predictor.init_state(video_path=str(video_dir))
+                state = vp.init_state(video_path=str(video_dir))
                 self._state_cache = ((str(video_dir), n_frames), state)
             for kf in sorted(kfs, key=lambda k: int(k["frame_idx"])):
                 idx = max(0, min(n_frames - 1, int(kf["frame_idx"])))
                 if kf.get("mask") is not None:
                     m = np.asarray(kf["mask"])
                     m = (m > 0.5) if m.dtype != bool else m
-                    self._video_predictor.add_new_mask(
+                    vp.add_new_mask(
                         inference_state=state, frame_idx=idx, obj_id=1, mask=m,
                     )
                     continue
@@ -335,21 +339,21 @@ class SAM2Model:
                     kwargs["labels"] = labels
                 if kf.get("box") is not None:
                     kwargs["box"] = np.asarray(kf["box"], dtype=np.float32)
-                self._video_predictor.add_new_points_or_box(**kwargs)
+                vp.add_new_points_or_box(**kwargs)
 
             first = min(max(0, min(n_frames - 1, int(k["frame_idx"]))) for k in kfs)
-            for frame_idx, _obj_ids, mask_logits in self._video_predictor.propagate_in_video(
+            for frame_idx, _obj_ids, mask_logits in vp.propagate_in_video(
                 state, start_frame_idx=first,
             ):
                 emit(frame_idx, mask_logits)
             if first > 0:
-                for frame_idx, _obj_ids, mask_logits in self._video_predictor.propagate_in_video(
+                for frame_idx, _obj_ids, mask_logits in vp.propagate_in_video(
                     state, start_frame_idx=first, reverse=True,
                 ):
                     if frame_idx == first:
                         continue  # already emitted by the forward pass
                     emit(frame_idx, mask_logits)
-            self._video_predictor.reset_state(state)
+            vp.reset_state(state)
 
         return masks_out
 
@@ -357,11 +361,12 @@ class SAM2Model:
         """Drop the cached tracking state (decoded frames) of the last clip."""
         self._state_cache = None
 
-    def _add_prompt(self, state, local_idx: int, kf: dict) -> None:
+    def _add_prompt(self, state, local_idx: int, kf: dict, vp=None) -> None:
+        vp = vp or self._video_predictor
         if kf.get("mask") is not None:
             m = np.asarray(kf["mask"])
             m = (m > 0.5) if m.dtype != bool else m
-            self._video_predictor.add_new_mask(inference_state=state, frame_idx=local_idx, obj_id=1, mask=m)
+            vp.add_new_mask(inference_state=state, frame_idx=local_idx, obj_id=1, mask=m)
             return
         coords, labels = _stack_prompts(kf.get("positive") or [], kf.get("negative") or [])
         kwargs = dict(inference_state=state, frame_idx=local_idx, obj_id=1)
@@ -370,11 +375,11 @@ class SAM2Model:
             kwargs["labels"] = labels
         if kf.get("box") is not None:
             kwargs["box"] = np.asarray(kf["box"], dtype=np.float32)
-        self._video_predictor.add_new_points_or_box(**kwargs)
+        vp.add_new_points_or_box(**kwargs)
 
     def _track_windowed(self, kfs: List[dict], video_dir: Path, n_frames: int, masks_out: np.ndarray, *,
                         soft: bool, window: int,
-                        progress_cb: Optional[Callable[[int, int], None]]) -> np.ndarray:
+                        progress_cb: Optional[Callable[[int, int], None]], vp=None) -> np.ndarray:
         """Streaming propagation for long clips, memory bounded by ``window``.
 
         The clip is walked forward from the earliest keyframe, then backward
@@ -391,6 +396,7 @@ class SAM2Model:
 
         import torch
 
+        vp = vp or self._video_predictor
         by_idx: dict[int, dict] = {}
         for kf in kfs:
             idx = max(0, min(n_frames - 1, int(kf["frame_idx"])))
@@ -414,6 +420,7 @@ class SAM2Model:
                 anchors = sorted((k for k in by_idx if k not in in_chunk),
                                  key=lambda k: abs(k - chunk[0]))[:MAX_ANCHORS]
                 seq = list(anchors) + ([carry[0]] if carry is not None else []) + chunk
+                self._touch()
                 tmp = Path(tempfile.mkdtemp(prefix="amv_sam2w_"))
                 try:
                     for j, i in enumerate(seq):
@@ -423,24 +430,24 @@ class SAM2Model:
                         except OSError:
                             shutil.copyfile(jpg(i), dst)
                     with torch.inference_mode(), _autocast(self.device):
-                        state = self._video_predictor.init_state(video_path=str(tmp), offload_video_to_cpu=True)
+                        state = vp.init_state(video_path=str(tmp), offload_video_to_cpu=True)
                         for j, k in enumerate(anchors):
-                            self._add_prompt(state, j, by_idx[k])
+                            self._add_prompt(state, j, by_idx[k], vp)
                         off = len(anchors)
                         if carry is not None:
                             if carry[1].any():
-                                self._add_prompt(state, off, {"mask": carry[1]})
+                                self._add_prompt(state, off, {"mask": carry[1]}, vp)
                             off += 1
                         for j, i in enumerate(chunk):
                             if i in by_idx:
-                                self._add_prompt(state, off + j, by_idx[i])
+                                self._add_prompt(state, off + j, by_idx[i], vp)
                         if not anchors and carry is None and chunk[0] not in by_idx:
                             raise RuntimeError("SAM 2 window without any prompt")
                         has_prompt = bool(anchors) or (carry is not None and carry[1].any()) or any(
                             i in by_idx for i in chunk)
                         last_logits = None
                         if has_prompt:
-                            for local, _ids, logits in self._video_predictor.propagate_in_video(state, start_frame_idx=0):
+                            for local, _ids, logits in vp.propagate_in_video(state, start_frame_idx=0):
                                 if local < off:
                                     continue
                                 i = chunk[local - off]
@@ -451,7 +458,7 @@ class SAM2Model:
                                     masks_out[i] = (lg > 0.0).cpu().numpy()
                                 if i == chunk[-1]:
                                     last_logits = (lg > 0.0).cpu().numpy()
-                        self._video_predictor.reset_state(state)
+                        vp.reset_state(state)
                         del state
                 finally:
                     shutil.rmtree(tmp, ignore_errors=True)
