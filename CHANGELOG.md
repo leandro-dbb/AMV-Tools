@@ -11,7 +11,8 @@ All notable changes to AMV Tools are documented here.
 - New **roto editor**, opened from a shot (*Cut out this shot*): AI first pass
   (Stable v5 pipeline, progress, cancel), corrections with a brush (add /
   remove / eraser) and with clicks (SAM 2.1, positive / negative), live
-  update of the corrected frame (~0.1 s on an RTX 3090), **propagation**
+  update of the corrected frame (0.1-0.2 s on an RTX 3090, brush edges
+  snapped to the drawing), "Empty this frame", **propagation**
   backward / forward / both with SAM 2.1's video tracker from the corrected
   frames — corrected or validated frames are locked, never overwritten —,
   optical flow on CPU.

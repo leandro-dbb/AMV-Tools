@@ -146,10 +146,12 @@ tracks them, the black ink line kept); you fix what it got wrong in a few
 gestures, the way Roto Brush (After Effects) or Magic Mask (Resolve) work:
 
 - **Brush**: green adds to the character, red removes; `[` `]` size, `E`
-  eraser (puts the AI back), Ctrl+Z / Ctrl+Shift+Z.
+  eraser (puts the AI back), Ctrl+Z / Ctrl+Shift+Z. The edge of a stroke
+  snaps to the drawn line next to it.
 - **Clicks**: click a missing part to add it, Alt-click / right-click a piece
-  of background to remove it (SAM 2.1). The corrected frame updates in about
-  0.1 s on an RTX 3090 (the measured time is shown).
+  of background to remove it (SAM 2.1). The corrected frame is on screen
+  0.1 to 0.2 s later on an RTX 3090 (the measured time is shown). `Delete`
+  empties a frame where the character is hidden or off screen.
 - **Propagate** (← ↔ →): SAM 2.1's video tracker starts again from your
   corrected frames and carries the fixes along the shot; frames you corrected
   or validated (`V`) are never overwritten.
