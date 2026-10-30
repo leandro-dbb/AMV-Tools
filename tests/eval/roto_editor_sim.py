@@ -116,8 +116,14 @@ def frame_metrics(rgb, a_exp, gt) -> dict:
 def shot_metrics(project, gts: dict, cuts, held: dict, all_frames: bool = True) -> dict:
     from backend.models.auto_roto import lost_frames
     per = {}
+    err, js = 0.0, []
     for t, gt in gts.items():
         per[t] = frame_metrics(project.rgb(t), exported(project, t), gt)
+        a = project.matte("main", t)
+        fn, fp = _error_maps(a, gt)
+        err += float(fn.sum() + fp.sum())
+        u = ((a > 0.5) | gt).sum()
+        js.append(float(((a > 0.5) & gt).sum() / u) if u else 1.0)
     masks = project.masks["main"]
     lost = lost_frames(masks.astype(np.float32) / 255.0, cuts)
     # holes: only where the reference can tell a missing piece of the
@@ -143,7 +149,7 @@ def shot_metrics(project, gts: dict, cuts, held: dict, all_frames: bool = True) 
     return {"ink": nm("ink"), "ink_min": float(np.nanmin([v["ink"] for v in per.values()])) if per else float("nan"),
             "bg": nm("bg"), "eaten": nm("eaten"), "jag": nm("jag"), "holes_all": holes_all, "holes": holes,
             "hole_frames": hole_frames, "lost": len(lost), "lost_ids": lost, "held_lost": held_lost,
-            "held_min": held_min, "per": per}
+            "held_min": held_min, "err": err, "J": float(np.mean(js)) if js else float("nan"), "per": per}
 
 
 def is_clean(m: dict, old_jag: float) -> dict:
@@ -350,7 +356,7 @@ def simulate_shot(sid: str, root: Path, out: Path, state, *, ai: str = "cached",
             ops.append({"gesture": gestures, "frame": -1,
                         "kind": f"edge sliders: grow {best[1]} px, softness {best[2]}",
                         "ink": round(m["ink"], 2), "bg": round(m["bg"], 2), "jag": round(m["jag"], 2),
-                        "holes": m["holes"], "lost": m["lost"], "clean": c})
+                        "holes": m["holes"], "lost": m["lost"], "err": m["err"], "J": round(m["J"], 4), "clean": c})
             log(f"[{sid}] g{gestures} edge sliders -> grow {best[1]} softness {best[2]} | ink {m['ink']:.1f} "
                 f"bg {m['bg']:.2f} jag {m['jag']:.1f} holes {m['holes']} {c}")
             continue
@@ -390,7 +396,7 @@ def simulate_shot(sid: str, root: Path, out: Path, state, *, ai: str = "cached",
                 strokes, rad = stroke_for(piece, min_r=1.5 if kind_t != "hole" else 2.0)
                 ai_t = p.ai["main"][t].astype(np.float32) / 255.0
                 new = engine.paint(p.matte("main", t), ai_t,
-                                   [{"points": s_, "radius": rad, "mode": mode} for s_ in strokes])
+                                   [{"points": s_, "radius": rad, "mode": mode} for s_ in strokes], rgb=p.rgb(t))
                 p.apply("main", {t: new}, label="brush", lock=[t])
                 brush_ms.append((time.perf_counter() - g1) * 1000)
                 gestures += 1
@@ -414,7 +420,7 @@ def simulate_shot(sid: str, root: Path, out: Path, state, *, ai: str = "cached",
         ops.append({"gesture": gestures, "frame": t, "kind": did, "err_before": before, "err_after": after,
                     "propagated": len(new), "prop_s": round(prop_s[-1], 2), "method": method,
                     "ink": round(m["ink"], 2), "bg": round(m["bg"], 2), "jag": round(m["jag"], 2),
-                    "holes": m["holes"], "lost": m["lost"], "clean": c})
+                    "holes": m["holes"], "lost": m["lost"], "err": m["err"], "J": round(m["J"], 4), "clean": c})
         log(f"[{sid}] g{gestures} f{t} {did}: err {before}->{after}, prop {len(new)} fr {prop_s[-1]:.1f}s | "
             f"ink {m['ink']:.1f} bg {m['bg']:.2f} jag {m['jag']:.1f} holes {m['holes']} lost {m['lost']} {c}")
     machine_s = ai_s + sum(gesture_ms) / 1000 + sum(prop_s)
@@ -506,6 +512,32 @@ def cmd_latency(args):
     (out / f"latency_{args.shot}.json").write_text(json.dumps(res, indent=1))
 
 
+QUIET_AI_S_PER_FRAME = 1.1     # Stable v5 AI pass on a quiet RTX 3090 (chantier roto, part 5 §8)
+QUIET_PROP_S_PER_FRAME = 0.18  # SAM 2.1 large propagation, quiet (latency run)
+QUIET_GESTURE_S = 0.15         # click / brush, quiet
+
+
+def quiet_s(r: dict) -> float:
+    """Machine time of a simulated session on a quiet RTX 3090: the
+    simulations ran four at a time, which inflates their measured times."""
+    props = sum(int(o.get("propagated", 0)) for o in r.get("ops", []))
+    return (r["frames"] * QUIET_AI_S_PER_FRAME + props * QUIET_PROP_S_PER_FRAME
+            + r["gestures"] * QUIET_GESTURE_S)
+
+
+def left(r: dict, a: dict) -> str:
+    """Error left (% of the AI pass's) after 5 / 10 gestures and at the end."""
+    base = a.get("err")
+    if not base:
+        return "–"
+    out = []
+    for k in (5, 10):
+        ops = [o for o in r.get("ops", []) if o.get("err") is not None and o["gesture"] <= k]
+        out.append(f"{100 * ops[-1]['err'] / base:.0f}" if ops else "–")
+    out.append(f"{100 * r['final']['err'] / base:.0f}" if r["final"].get("err") is not None else "–")
+    return " / ".join(out) + " %"
+
+
 def cmd_table(args):
     """Markdown table of a simulation folder (one row per shot)."""
     out = Path(args.out)
@@ -534,10 +566,10 @@ def cmd_table(args):
             print("no project for", r["shot"], exc, file=sys.stderr)
         rows.append(r)
     fm = lambda v, d=1: "–" if v is None or (isinstance(v, float) and not np.isfinite(v)) else f"{v:.{d}f}"   # noqa: E731
-    lines = ["| plan | images (réf.) | 1er choix | gestes | propagations | IoU IA → fin | erreur restante | encre % IA → fin | fond contour % IA → fin | "
+    lines = ["| plan | images (réf.) | 1er choix | gestes | propagations | IoU IA → fin | erreur restante après 5 / 10 / tous les gestes | encre % IA → fin | fond contour % IA → fin | "
              "rugosité % IA → fin (ancien) | trous IA → fin | perdues IA → fin | propre ? (critères manqués) | "
-             "temps machine | dont passe IA |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "temps estimé machine calme + 5 s/geste |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         a, z, c = r["ai"], r["final"], r["final_clean"]
         miss = [k for k, v in c.items() if k != "all" and not v]
@@ -545,11 +577,11 @@ def cmd_table(args):
             f"| {r['shot']} | {r['frames']} ({r['ref_frames']}) | {r.get('target', 'all')} | {r['gestures']}"
             f"{' (' + str(r['undos']) + ' annul.)' if r['undos'] else ''} | {r['propagations']} | "
             f"{fm(a.get('J'), 3)} → {fm(z.get('J'), 3)} | "
-            f"{fm(100 * z['err'] / a['err'] if a.get('err') else None, 0)} % | "
+            f"{left(r, a)} | "
             f"{fm(a['ink'])} → {fm(z['ink'])} | {fm(a['bg'])} → {fm(z['bg'])} | {fm(a['jag'])} → {fm(z['jag'])} "
             f"({fm(r['old_jag'])}) | {a['holes']} → {z['holes']} | {a['lost']} → {z['lost']} | "
-            f"{'oui' if c['all'] else 'non (' + ', '.join(miss) + ')'} | {r['machine_s'] / 60:.1f} min | "
-            f"{r['ai_s'] / 60:.1f} min |")
+            f"{'oui' if c['all'] else 'non (' + ', '.join(miss) + ')'} | {quiet_s(r) / 60:.1f} + "
+            f"{HUMAN_S_PER_GESTURE * r['gestures'] / 60:.1f} min |")
     print("\n".join(lines))
 
 

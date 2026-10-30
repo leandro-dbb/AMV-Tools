@@ -93,7 +93,11 @@ await q.press('Enter');
 const cards = page.locator('div.group.cursor-pointer');
 await cards.first().waitFor({ timeout: 180_000 });
 await pause(1200);
-await clickEl(cards.nth(plan.card || 0));
+const card = plan.sceneId
+  ? cards.filter({ has: page.locator(`img[src*="/api/scene/${plan.sceneId}/thumbnail"]`) }).first()
+  : cards.nth(plan.card || 0);
+await card.scrollIntoViewIfNeeded();
+await clickEl(card);
 await pause(1500);
 await caption('Un plan ouvert : « Détourer ce plan »', 0);
 await clickEl(page.getByTestId('roto-open'));

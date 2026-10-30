@@ -431,7 +431,7 @@ def brush(pid: str, body: BrushBody):
     with p.lock:
         ai = p.ai.get(layer)
         new = engine.paint(p.matte(layer, t), None if ai is None else ai[t].astype(np.float32) / 255.0,
-                           [s.model_dump() for s in body.strokes])
+                           [s.model_dump() for s in body.strokes], rgb=p.rgb(t))
         p.apply(layer, {t: new}, label="brush", lock=[t])
     ms = tm.ms()
     return _edit_response(p, t, ms)
