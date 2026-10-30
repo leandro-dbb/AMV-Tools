@@ -352,9 +352,10 @@ sur « Régénérer ce passage » (seulement sur une nouvelle proposition).
   Hugging Face du NAS (utile à AMV Tools sur ce GPU). Les autres
   téléchargements (Beat This!, torchaudio pour la comparaison) ont été bridés
   à 5 Mo/s.
-- Fichiers de travail sur le NAS : `/srv/data/amv-tools/v06fix/` (extraits,
-  morceaux, bibliothèque de comparaison Beat This!) ; checkpoints Beat This!
-  dans `~/.cache/torch/hub/checkpoints/`.
+- Fichiers de travail sur le NAS (`/srv/data/amv-tools/v06fix/` : extraits,
+  morceaux, paquets de comparaison Beat This!) supprimés à la fin ; restent
+  les checkpoints Beat This! dans `~/.cache/torch/hub/checkpoints/` (90 Mo)
+  et le dossier `repo/` synchronisé sur la branche.
 - **PC de Léandro : aucune connexion** (phase 3 annulée).
 
 ## Tests
@@ -366,7 +367,14 @@ sur « Régénérer ce passage » (seulement sur une nouvelle proposition).
   fichiers sont présents (c'est le cas sur le VPS).
 - `cd app && npx tsc --noEmit && npx vitest run && npm run build` : OK
   (66 tests vitest).
-- E2E : `drop.e2e.mjs` 3/3 ; parcours complet : voir ci-dessous.
+- E2E (`npm run e2e`, appli construite, vrai serveur, vrais modèles CPU,
+  Xvfb à part) : **10/10** sur clips synthétiques (dépôt 3/3 + parcours
+  7/7) ; **parcours sur les vrais extraits** (DBS H.264 + Black Clover
+  HEVC, `AMV_E2E_MEDIA`) : 6/6 (le cas « fichier source supprimé » est
+  volontairement sauté avec de vrais médias) — indexation des deux épisodes
+  par l'interface en 9 min sur le VPS, Bibliothèque « 2 épisodes · 101
+  scènes » (60 + 41 : les plans du nouveau détecteur), recherche, aperçus,
+  panier, exports clips + timelines.
 
 ## Ce qui reste / à vérifier par Léandro
 
