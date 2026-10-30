@@ -187,8 +187,12 @@ _pred_key: dict = {"key": None}
 _det_cache: dict = {}
 
 
-def click_region(project, state, t: int, x: float, y: float) -> tuple[np.ndarray, str]:
-    """Soft region under a click on frame ``t`` and the model that found it."""
+def click_region(project, state, t: int, x: float, y: float, positive: bool = True) -> tuple[np.ndarray, str]:
+    """Soft region under a click on frame ``t`` and the model that found it.
+    SAM proposes 3 nested regions (part, object, whole): a positive click
+    takes the most confident one (not over :data:`CLICK_MAX_FRAC` of the
+    frame); a negative click takes the smallest confident one — an Alt-click
+    on an aura flame must not take the character the aura surrounds."""
     rgb = project.rgb(t)
     h, w = rgb.shape[:2]
     variant = editor_tracker(state)
@@ -207,13 +211,15 @@ def click_region(project, state, t: int, x: float, y: float) -> tuple[np.ndarray
             masks, scores, _ = pred.predict(
                 point_coords=np.array([[float(x), float(y)]], np.float32),
                 point_labels=np.array([1], np.int32), multimask_output=True, return_logits=True)
-        order = np.argsort(-np.asarray(scores))
+        scores = np.asarray(scores, np.float32)
+        areas = np.array([(m > 0).mean() for m in masks])
+        ok = [i for i in range(len(masks)) if 0 < areas[i] <= CLICK_MAX_FRAC]
         best = None
-        for i in order:
-            m = masks[i]
-            if (m > 0).mean() <= CLICK_MAX_FRAC:
-                best = m
-                break
+        if ok and positive:
+            best = masks[max(ok, key=lambda i: scores[i])]
+        elif ok:
+            good = [i for i in ok if scores[i] >= 0.6 * float(scores[ok].max())]
+            best = masks[min(good or ok, key=lambda i: areas[i])]
         if best is None:
             return np.zeros((h, w), np.float32), f"SAM 2.1 {variant}"
         # SAM's logits come from a 256-px grid: their sigmoid is blocky over
@@ -221,7 +227,8 @@ def click_region(project, state, t: int, x: float, y: float) -> tuple[np.ndarray
         # negative click cut). The region is its mask, feathered over ~1 px.
         import cv2
         from ..models.auto_roto import MASK_MODEL_INFO
-        region = cv2.GaussianBlur((best > 0).astype(np.float32), (0, 0), 0.8)
+        hard = _piece_under(best > 0, x, y)
+        region = cv2.GaussianBlur(hard.astype(np.float32), (0, 0), 0.8)
         return region.astype(np.float32), MASK_MODEL_INFO.get(variant, {}).get("label", variant)
     # no SAM 2 here: the detected piece under the click
     from PIL import Image
@@ -236,6 +243,45 @@ def click_region(project, state, t: int, x: float, y: float) -> tuple[np.ndarray
     return (det * sel).astype(np.float32), "BiRefNet"
 
 
+def _piece_under(m: np.ndarray, x: float, y: float) -> np.ndarray:
+    """The connected piece of ``m`` under the click (the nearest one when
+    the click itself fell just outside): SAM's region for a translucent aura
+    also has scattered islands inside the character it surrounds."""
+    import cv2
+    n, lab = cv2.connectedComponents(m.astype(np.uint8), connectivity=8)
+    if n <= 2:
+        return m
+    h, w = m.shape
+    xi, yi = int(np.clip(round(x), 0, w - 1)), int(np.clip(round(y), 0, h - 1))
+    k = int(lab[yi, xi])
+    if k == 0:
+        d, idx = cv2.distanceTransformWithLabels((lab == 0).astype(np.uint8), cv2.DIST_L2, 3,
+                                                 labelType=cv2.DIST_LABEL_PIXEL)
+        ys, xs = np.nonzero(lab > 0)
+        pix = idx[ys, xs]
+        hit = np.nonzero(pix == idx[yi, xi])[0]
+        k = int(lab[ys[hit[0]], xs[hit[0]]]) if len(hit) else int(np.bincount(lab[lab > 0]).argmax())
+    return lab == k
+
+
+def warm_click_model(state) -> None:
+    """Load the click model ahead (in the background, when the editor opens
+    and after the AI pass): the first click otherwise waits for the model to
+    load (5-50 s) instead of ~0.1 s."""
+    try:
+        variant = editor_tracker(state)
+        if variant is not None and getattr(state.device, "backend", "cpu") != "cpu":
+            sam2 = state.get_sam2(variant=variant)
+            sam2._ensure_image_loaded()
+            sam2._touch()
+    except Exception:
+        log.exception("roto: could not preload the click model")
+
+
+def warm_in_background(state) -> None:
+    threading.Thread(target=warm_click_model, args=(state,), name="roto-warm", daemon=True).start()
+
+
 def apply_click(cur: np.ndarray, region: np.ndarray, positive: bool) -> np.ndarray:
     cur = np.clip(np.asarray(cur, np.float32), 0.0, 1.0)
     if positive:
@@ -244,7 +290,7 @@ def apply_click(cur: np.ndarray, region: np.ndarray, positive: bool) -> np.ndarr
 
 
 def click(project, state, layer: str, t: int, x: float, y: float, positive: bool) -> tuple[np.ndarray, str]:
-    region, model = click_region(project, state, t, x, y)
+    region, model = click_region(project, state, t, x, y, positive)
     return apply_click(project.matte(layer, t), region, positive), model
 
 
