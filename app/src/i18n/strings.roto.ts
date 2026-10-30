@@ -271,4 +271,9 @@ export const rotoStrings: Dict = {
   'roto.msg.suspects': { en: 'Looking for frames to check', fr: 'Recherche des images à vérifier' },
   'roto.msg.following': { en: 'Following the corrections along the shot', fr: 'Suivi des corrections le long du plan' },
   'roto.msg.writing': { en: 'Writing the files', fr: 'Écriture des fichiers' },
+  'roto.redoPass': { en: 'Redo the AI pass', fr: 'Refaire la passe IA' },
+  'roto.redoPassTitle': { en: 'Run the AI pass again (another choice of characters); the frames you corrected or validated are kept',
+    fr: 'Relancer la passe IA (autre choix de personnages) ; les images que vous avez corrigées ou validées sont gardées' },
+  'roto.redoPassHint': { en: 'The frames you corrected or validated are kept as they are.',
+    fr: 'Les images que vous avez corrigées ou validées sont gardées telles quelles.' },
 };

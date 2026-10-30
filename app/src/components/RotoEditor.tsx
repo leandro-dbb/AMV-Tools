@@ -532,7 +532,9 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
     deviceLabel,
   ].join(' · ') : '';
   const layerPickLayer = layerPick ? project?.layers.find((l) => l.id === layerPick.layer) : null;
-  const showFirstPass = !!project && !project.has_ai_pass && !jobRunning && !layerPick;
+  const [redoPass, setRedoPass] = useState(false);
+  const showFirstPass = !!project && (!project.has_ai_pass || redoPass) && !jobRunning && !layerPick;
+  useEffect(() => { if (jobRunning) setRedoPass(false); }, [jobRunning]);
 
   const jobTitle = job ? t(`roto.job.${job.kind}`) : '';
 
@@ -562,6 +564,12 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
             </div>
           )}
         </div>
+        {project?.has_ai_pass && !jobRunning && (
+          <button className="text-[11px] px-2.5 py-1 rounded-lg bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] hover:text-[#FAFAFA] whitespace-nowrap"
+                  onClick={() => setRedoPass((r) => !r)} title={t('roto.redoPassTitle')} data-testid="roto-redo-pass">
+            {t('roto.redoPass')}
+          </button>
+        )}
         <div className="flex-1" />
         {pendingCount > 0 && (
           <span className="text-[11px] text-[#C084FC] flex items-center gap-1.5 whitespace-nowrap" data-testid="roto-pending">
@@ -661,7 +669,7 @@ export default function RotoEditor({ sceneId, startMs, endMs, onClose }: RotoEdi
                        data-testid="roto-first-pass">
                     <div>
                       <div className="text-lg font-bold">{t('roto.first.title')}</div>
-                      <div className="text-xs text-[#A1A1AA] mt-1">{t('roto.first.subtitle')}</div>
+                      <div className="text-xs text-[#A1A1AA] mt-1">{t(redoPass ? 'roto.redoPassHint' : 'roto.first.subtitle')}</div>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       {([
