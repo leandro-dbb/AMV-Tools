@@ -4,6 +4,31 @@ All notable changes to AMV Tools are documented here.
 
 ## 0.5.0-alpha — unreleased
 
+### Roto editor: the AI cuts out, you finish (v06 roto editor)
+
+([report](docs/reports/v06-roto-editeur.md))
+
+- New **roto editor**, opened from a shot (*Cut out this shot*): AI first pass
+  (Stable v5 pipeline, progress, cancel), corrections with a brush (add /
+  remove / eraser) and with clicks (SAM 2.1, positive / negative), live
+  update of the corrected frame (~0.1 s on an RTX 3090), **propagation**
+  backward / forward / both with SAM 2.1's video tracker from the corrected
+  frames — corrected or validated frames are locked, never overwritten —,
+  optical flow on CPU.
+- **Frames to check** highlighted on the timeline (lost, jump, specks, object
+  lost, hole, jagged edge), `N` / `Shift+N` to go through them.
+- Edge settings applied live (keep the ink line, soften / harden, grow /
+  shrink, smoothing over time); views (overlay, black, white, checkerboard,
+  original), zoom / pan, full screen; several characters as layers; undo /
+  redo; automatic save and resume; FR / EN.
+- **Export**: ProRes 4444 with alpha, PNG sequence with alpha, black-and-white
+  matte; the shot is added to the selection and the timeline export links the
+  cut-out clip (`use_cutouts`, on by default).
+- Merged the Stable v5 roto pipeline (`jarvis/v05-roto-stable`); Mask Mode Auto
+  stays off by default, the editor is the entry point.
+- Fix: SAM 2's idle offload could drop the video predictor in the middle of a
+  long tracking (`'NoneType' object has no attribute 'reset_state'`).
+
 ### Bug-fix pass (v06 fix)
 
 ([report](docs/reports/v06-fix.md))
