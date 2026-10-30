@@ -1,0 +1,130 @@
+{
+ "query": "super saiyan goku aura",
+ "sceneId": 6,
+ "w": 1080,
+ "h": 608,
+ "target": "all",
+ "steps": [
+  {
+   "caption": "Image 1 : l'IA a pris des rochers. Clic droit (ou Alt+clic) dessus",
+   "frame": 0,
+   "do": "click-",
+   "pts": [
+    [
+     180,
+     260
+    ]
+   ]
+  },
+  {
+   "do": "click-",
+   "pts": [
+    [
+     980,
+     480
+    ]
+   ]
+  },
+  {
+   "caption": "Propager dans les deux sens",
+   "do": "propagate",
+   "dir": "both"
+  },
+  {
+   "caption": "Image 41 : l'aura est collée à Goku. Clic droit sur l'aura",
+   "frame": 40,
+   "do": "click-",
+   "pts": [
+    [
+     330,
+     420
+    ]
+   ]
+  },
+  {
+   "do": "click-",
+   "pts": [
+    [
+     775,
+     120
+    ]
+   ]
+  },
+  {
+   "do": "click-",
+   "pts": [
+    [
+     765,
+     400
+    ]
+   ]
+  },
+  {
+   "caption": "Un coup de pinceau rouge sur la lueur qui reste",
+   "do": "brush-remove",
+   "size": 14,
+   "pts": [
+    [
+     405,
+     95
+    ],
+    [
+     398,
+     200
+    ],
+    [
+     388,
+     330
+    ],
+    [
+     372,
+     450
+    ]
+   ]
+  },
+  {
+   "caption": "Zoom (molette)",
+   "do": "zoom",
+   "pts": [
+    [
+     480,
+     250
+    ]
+   ],
+   "n": 3
+  },
+  {
+   "do": "fit"
+  },
+  {
+   "caption": "Propager",
+   "do": "propagate",
+   "dir": "both"
+  },
+  {
+   "caption": "Image suivante à vérifier : N",
+   "do": "suspect"
+  },
+  {
+   "caption": "Vue « sur noir » (2) puis « sur blanc » (3)",
+   "do": "key",
+   "key": "2",
+   "ms": 1800
+  },
+  {
+   "do": "key",
+   "key": "3",
+   "ms": 1800
+  },
+  {
+   "do": "key",
+   "key": "1",
+   "ms": 600
+  },
+  {
+   "caption": "Lecture",
+   "do": "play",
+   "ms": 3500
+  }
+ ]
+}
