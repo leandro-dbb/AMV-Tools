@@ -320,3 +320,11 @@ def test_api_cancel_and_busy(client, db_path, tmp_path, monkeypatch):
     client.post(f"/api/roto/{pid}/cancel")
     j = _wait(client, pid)
     assert j["cancelled"] and not client.get(f"/api/roto/{pid}").json()["has_ai_pass"]
+
+
+def test_steady_background_pocket_is_not_a_suspect_hole():
+    from backend.roto.suspects import decide, frame_features
+    a = _disc(0, r=34)
+    a[30:44, 40:56] = 0          # a pocket that stays on every frame (between arm and body)
+    feats = [frame_features(a), frame_features(a, a), frame_features(a, a)]
+    assert not any("hole" in x["reasons"] for x in decide(feats))

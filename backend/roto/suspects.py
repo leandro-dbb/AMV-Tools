@@ -7,7 +7,9 @@ roto benchmark's metrics (tests/eval/roto_eval.py, backend/models/auto_roto.py)
 - ``specks``      detached islands / faint pixels away from the matte;
 - ``object_lost`` a sizeable piece the previous frame had is gone here
                   (a held object, an arm), while the frame did not cut;
-- ``hole``        small transparent holes inside the character;
+- ``hole``        pin-holes inside the character, or small holes that come and
+                  go from one frame to the next (a pocket of background that
+                  stays, between an arm and the body, is not suspect);
 - ``rough``       outline much more jagged than the rest of the shot.
 
 Per-frame features are cached by the project (only the frames that changed
@@ -27,6 +29,7 @@ ROUGH_REL = 1.8             # ... and this x the shot median: rough edge
 OBJ_MIN_FRAC = 0.0015       # a piece of the previous frame at least this share of the frame ...
 OBJ_KEPT = 0.15             # ... with less than this share still covered here: object lost
 OBJ_NEAR_FRAC = 0.03        # coverage looked for within this share of the diagonal (motion)
+HOLE_TINY = 0.00015         # holes under this share of the (half-size) frame: pin-holes, always suspect
 SPECK_ORPHANS = 40          # faint isolated pixels (half size) counted as specks from this many
 
 WEIGHTS = {"lost": 5.0, "object_lost": 3.0, "jump": 2.0, "hole": 1.5, "specks": 1.0, "rough": 1.0}
@@ -52,7 +55,7 @@ def frame_features(a: np.ndarray, prev: Optional[np.ndarray] = None) -> dict:
     area = float(m.mean())
     isl, orph = specks(s, orphan_px=2) if m.any() else (0, 0)
     # holes: small transparent pockets enclosed in the matte
-    hole_n = 0
+    hole_n = tiny_n = 0
     if m.any():
         inv = (~m).astype(np.uint8)
         n, lab, st, _ = cv2.connectedComponentsWithStats(inv, connectivity=4)
@@ -63,6 +66,7 @@ def frame_features(a: np.ndarray, prev: Optional[np.ndarray] = None) -> dict:
             small = ~border & (st[:, 4] < max(16.0, 0.001 * hh * ww)) & (st[:, 4] >= 2)
             small[0] = False
             hole_n = int(small.sum())
+            tiny_n = int((small & (st[:, 4] < max(6.0, HOLE_TINY * hh * ww))).sum())
     rough = float("nan")
     if m.sum() >= 100:
         def length(mm):
@@ -85,7 +89,7 @@ def frame_features(a: np.ndarray, prev: Optional[np.ndarray] = None) -> dict:
                 kept = float((comp & near).sum()) / float(st[i, 4])
                 if kept < OBJ_KEPT:
                     obj = max(obj, float(st[i, 4]) / (hh * ww))
-    return {"area": area, "islands": int(isl), "orphans": int(orph), "holes": hole_n,
+    return {"area": area, "islands": int(isl), "orphans": int(orph), "holes": hole_n, "holes_tiny": tiny_n,
             "rough": rough, "obj": obj}
 
 
@@ -118,7 +122,12 @@ def decide(features: List[dict], locked: Iterable[int] = (), shots=None) -> List
                 reasons["object_lost"] = min(1.0, f["obj"] * 100)
             if f.get("islands", 0) > 0 or f.get("orphans", 0) >= SPECK_ORPHANS:
                 reasons["specks"] = min(1.0, 0.3 * f.get("islands", 0) + f.get("orphans", 0) / 400.0)
-            if f.get("holes", 0) > 0:
+            # a pocket of background between an arm and the body is a small
+            # hole too, but it stays from frame to frame: only pin-holes, and
+            # holes that come and go, are suspect
+            nb = [features[u].get("holes", 0) for u in (t - 1, t + 1) if a <= u < b]
+            transient = f.get("holes", 0) > (min(nb) if nb else 0)
+            if f.get("holes_tiny", 0) > 0 or (f.get("holes", 0) > 0 and transient):
                 reasons["hole"] = min(1.0, 0.25 * f["holes"])
             r = f.get("rough", float("nan"))
             if np.isfinite(r) and np.isfinite(med_rough) and r > ROUGH_ABS and r > ROUGH_REL * med_rough:

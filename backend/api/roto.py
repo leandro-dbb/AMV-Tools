@@ -325,6 +325,8 @@ def detect(pid: str, body: DetectBody):
                     p.ai[layer][t] = np.clip(np.rint(masks[t] * 255), 0, 255).astype(np.uint8)
                     p._dirty.add(("ai:" + layer, t))
             p.meta["shots"] = None
+        job.message = "Looking for frames to check"
+        p.suspects()   # computed here, not on the next GET (the UI reloads right away)
         job.message = "Done"
     return _start_job(p, "detect", run)
 
@@ -350,6 +352,7 @@ def propagate(pid: str, body: PropagateBody):
             new = {u: m for u, m in new.items() if u not in p.locked[layer]}
             if new:
                 p.apply(layer, new, label="propagate")
+        p.suspects()
         job.result = {"frames": len(new), "method": method}
         job.message = f"{len(new)} frames updated ({method})"
     return _start_job(p, "propagate", run)
