@@ -194,7 +194,7 @@ def click_region(project, state, t: int, x: float, y: float) -> tuple[np.ndarray
     variant = editor_tracker(state)
     if variant is not None:
         import torch
-        from ..models.sam2 import SOFT_LOGIT_SCALE, _autocast
+        from ..models.sam2 import _autocast
         sam2 = state.get_sam2(variant=variant)
         sam2._ensure_image_loaded()
         sam2._touch()
@@ -216,9 +216,13 @@ def click_region(project, state, t: int, x: float, y: float) -> tuple[np.ndarray
                 break
         if best is None:
             return np.zeros((h, w), np.float32), f"SAM 2.1 {variant}"
-        lg = best.astype(np.float32) * SOFT_LOGIT_SCALE
+        # SAM's logits come from a 256-px grid: their sigmoid is blocky over
+        # wide low-confidence areas (a checkered half-alpha patch where a
+        # negative click cut). The region is its mask, feathered over ~1 px.
+        import cv2
         from ..models.auto_roto import MASK_MODEL_INFO
-        return (1.0 / (1.0 + np.exp(-lg))).astype(np.float32), MASK_MODEL_INFO.get(variant, {}).get("label", variant)
+        region = cv2.GaussianBlur((best > 0).astype(np.float32), (0, 0), 0.8)
+        return region.astype(np.float32), MASK_MODEL_INFO.get(variant, {}).get("label", variant)
     # no SAM 2 here: the detected piece under the click
     from PIL import Image
     from ..models.auto_roto import clicked_targets
