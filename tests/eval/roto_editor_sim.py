@@ -45,6 +45,7 @@ INK_MIN = 97.0
 BG_MAX = 3.0
 CLICK_MIN_PX = 600       # pieces at least this big ...
 CLICK_MIN_R = 7.0        # ... and this thick (px) are clicked; smaller ones painted
+CLEAR_FRAC = 0.4         # a wrong piece over this share of the frame: "Empty this frame"
 CLICK_MIN_GAIN = 0.25    # a click that fixes less than this share of the piece is undone, then painted
 MIN_PIECE = 15           # error pieces under this many pixels are not worth a gesture
 INK_MIN_PX = 30          # stretches of ink line shorter than this are not worth a stroke
@@ -391,7 +392,17 @@ def simulate_shot(sid: str, root: Path, out: Path, state, *, ai: str = "cached",
             mode, piece = target[2], target[3]
             area = int(piece.sum())
             x, y, r = click_point(piece)
-            if kind_t == "piece" and area >= CLICK_MIN_PX and r >= CLICK_MIN_R:
+            if kind_t == "piece" and mode == "remove" and area > CLEAR_FRAC * piece.size:
+                # the AI took (almost) the whole frame, the character is not
+                # there (smoke): "Empty this frame", one gesture
+                h_, w_ = piece.shape
+                new = engine.paint(p.matte("main", t), None, [{
+                    "points": [(0, 0), (w_, 0), (w_, h_), (0, h_), (0, 0), (w_, h_)],
+                    "radius": min(512, max(w_, h_) / 2), "mode": "remove"}], rgb=p.rgb(t))
+                p.apply("main", {t: new}, label="brush", lock=[t])
+                gestures += 1
+                did = "empty frame"
+            elif kind_t == "piece" and area >= CLICK_MIN_PX and r >= CLICK_MIN_R:
                 region, _mod = engine.click_region(p, state, t, x, y, mode == "add")
                 new = engine.apply_click(p.matte("main", t), region, mode == "add")
                 p.apply("main", {t: new}, label="click", lock=[t])

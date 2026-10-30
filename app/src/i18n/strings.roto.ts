@@ -276,4 +276,7 @@ export const rotoStrings: Dict = {
     fr: 'Relancer la passe IA (autre choix de personnages) ; les images que vous avez corrigées ou validées sont gardées' },
   'roto.redoPassHint': { en: 'The frames you corrected or validated are kept as they are.',
     fr: 'Les images que vous avez corrigées ou validées sont gardées telles quelles.' },
+  'roto.clearFrame': { en: 'Empty this frame', fr: 'Vider cette image' },
+  'roto.clearFrameTitle': { en: 'The character is not on this frame (hidden by smoke, off screen): remove everything, the frame is locked empty',
+    fr: 'Le personnage n\'est pas sur cette image (caché par la fumée, hors champ) : tout retirer, l\'image est verrouillée vide' },
 };

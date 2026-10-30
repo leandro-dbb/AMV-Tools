@@ -77,7 +77,7 @@ export function ToolsSection(p: {
 // ── propagate / validate ───────────────────────────────────────────────────
 export function PropagateSection(p: {
   onPropagate: (dir: 'forward' | 'backward' | 'both') => void;
-  locked: boolean; onToggleLock: () => void; disabled: boolean;
+  locked: boolean; onToggleLock: () => void; disabled: boolean; onClearFrame?: () => void;
 }) {
   const t = useT();
   const pbtn = 'flex-1 px-2 py-2 rounded-lg bg-gradient-to-r from-[#A855F7]/80 to-[#EC4899]/80 hover:from-[#A855F7] hover:to-[#EC4899] text-white text-xs font-semibold flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
@@ -106,6 +106,14 @@ export function PropagateSection(p: {
       >
         <CheckCircle2 size={14} />{p.locked ? t('roto.validated') : t('roto.validate')} <span className="text-[#71717A] font-mono">V</span>
       </button>
+      {p.onClearFrame && (
+        <button
+          className="w-full px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 bg-[#27272A] hover:bg-[#3F3F46] text-[#A1A1AA] hover:text-[#FAFAFA] disabled:opacity-40"
+          onClick={p.onClearFrame} disabled={p.disabled} title={t('roto.clearFrameTitle')} data-testid="roto-clear-frame"
+        >
+          {t('roto.clearFrame')} <span className="text-[#71717A] font-mono">Suppr</span>
+        </button>
+      )}
     </div>
   );
 }
