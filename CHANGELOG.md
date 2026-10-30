@@ -160,6 +160,195 @@ non-commercial license were measured with the same protocol
 - Finishing registry: a model file can be a member of a checksum-verified zip
   archive (only that member is kept on disk).
 
+### Mask Mode — "Stable" Auto: nothing disappears (roto stable)
+
+- **New default Auto mode, "Stable"** (NVIDIA 8 GB and up with SAM 3; the
+  night's "max quality" made a cigarette vanish from a character's hand,
+  ate outlines and dropped Goku on the 8 blurred frames of a shaking-camera
+  shot). BiRefNet's matte is the floor: every piece of it that touches a
+  character (SAM 3, the SAM 2 track or a held object) is kept, solid pixels
+  (ink, hair, props) whole; SAM 3 no longer hugs the outline, it only drops
+  scenery detached from the characters and oversized extras sticking out of
+  them (aura flares, a wall fused with a shoulder), with a decision that
+  does not blink from one frame to the next. Its own mask is added where
+  BiRefNet loses a blurred character. A frame whose matte collapses next to
+  its neighbours is refilled from them by optical flow, only where BiRefNet
+  or SAM 3 still see something (a character that went behind a wall is not
+  drawn back). Background specks (small detached islands, faint pixels away
+  from the matte) are cleaned after the temporal stabilisation, decided with
+  the previous frame. Held objects are on in this mode; the SAM 3 character
+  and object concepts share one batched encoder pass.
+- **The outer ink line stays in the cutout** (export and Stable matte): the
+  mattes stopped at the boundary between the fill and the black outline, and
+  the max-quality export thinned what was left — composited, characters lost
+  their contour even on calm shots. The dark pixels connected to the matte's
+  edge (darker than the local background, a few pixels wide) are now taken
+  in, opaque, with their antialiasing; the export never makes them
+  transparent or recolours them. Nothing changes where the background is as
+  dark as the ink.
+- **v5 — BiRefNet's soft edge is the base again** (verdict on v4: stacking
+  fixes on SAM 3's low-resolution outline does not hold — staircase, grey
+  fringes, holes at the SSJ3 tips): every BiRefNet piece touching a
+  character is kept as it is, with its antialiased gradient, only pieces
+  detached from the characters are dropped, and SAM 3 is a backup that
+  fills where BiRefNet loses the character or most of one (blur, dark
+  characters), with a soft join, never on BiRefNet's own edge. The export
+  ("soft" edge mode) scales the matte up with a guided filter as the old
+  mode did, adds the outer ink line without ever lowering alpha (only
+  inside BiRefNet's own gradient, as one smooth coverage, not pixel by
+  pixel, so the edge stays as smooth as the old mode's; never on the black
+  background between aura flames), closes
+  tiny holes and decontaminates the edge colours. The temporal guard, held
+  objects and the speck cleanup stay.
+- **Smooth, complete outline at export** (the v3 examples had staircase
+  edges, background fringes at the hair tips and holes in them): the alpha
+  of the outline band is re-solved at the source resolution from the local
+  colours (a matte computed at 1080x608 is no longer just scaled up; tips
+  the matte stopped short of come back, never half-alpha glow or scenery of
+  another colour), the ink line is absorbed at full resolution only, with
+  the drawing's own antialiasing just beyond it and the light background
+  there set to 0 (no fringe), the max-quality colour re-solve no longer
+  touches the outline, the outline band gets a light 0.8 px antialiasing,
+  and the holes the export opens are closed. New benchmark measures: outline
+  roughness and small enclosed holes per frame.
+- Measured on the rebuilt benchmark (27 shots, 2 058 frames, the app's chain
+  end to end), old 0.4 -> night max quality -> Stable: lost frames 30 -> 28
+  -> 10 (all checked by eye: smoke hiding the character, pure speed-blur
+  frames, a character entering the frame), jumps 60 -> 33 -> 18,
+  character eaten along the outline 10.5 -> 12.7 -> 3.1-4.4 %, contour ink
+  kept 62 -> 64 -> 95 % (20 of 27 shots over 97 %; the examples' ProRes:
+  99.2 and 98.5 %, and 60.4 % on the SSJ3 shot where dark ground around the
+  aura counts as ink), cigarette of b1 kept on all 84 frames (worst
+  frame 98.6 / 11 / 99.0 %); background along the outline 17.2 -> 5.8 ->
+  10.1-11.0 % (median 14.5 -> 1.5 -> 6.8-9.6 %): more background than the
+  night's tight outline, the price of cutting nothing. About 1.1-1.2 s per
+  frame on an RTX 3090 with the ProRes 1080p export.
+- *Settings > Models > Cutout mode*: Stable (default) / Max quality (tight
+  outline) / Standard.
+- Benchmark rebuilt for stability: every frame of every shot is checked
+  (lost frames: matte area under 60 % of the shot's rolling median; jumps:
+  area change over 25 % between neighbours; background specks per frame),
+  the eaten character weighs as much as the background kept ("contour" =
+  background along the outline + eaten), the cigarette of b1 is referenced on
+  all 84 frames, extra verified references on the blurred frames of s13 and
+  on b1 / s04. Report: `docs/reports/chantier-roto.md`, part 5.
+
+### Mask Mode — held objects stay in the cutout (roto held)
+
+- **Max quality keeps what the characters hold or wear**: the SAM 3 pass that
+  finds the characters also looks for a few objects (weapon, sword, staff,
+  halo, bowl, hammer, cup; the image encoder is shared). An object is put back
+  — with BiRefNet's own outline — when it touches a character, BiRefNet sees
+  it as foreground, it is not bigger than twice the character, it does not
+  glow (energy beams and ki flames are effects, not props) and it is found on
+  a neighbouring frame too. Whis's staff and halo, Beerus's bowl, a hammer, a
+  katana at the hip, a cigarette are no longer cut. On the 7 benchmark shots
+  with a held object: held object kept 22.7 % -> 95.2 %, J 0.839 ->
+  0.928, failures 2 -> 1 of 35; on all 27 shots J 0.902 -> 0.926,
+  character eaten 11.7 -> 7.3 %, action shots unchanged; the SAM 3 pass is
+  44 % slower (+0.1 GB of VRAM). On by default
+  with max quality; *Settings > Models > Keep held objects*.
+- Benchmark: 5 new shots with held objects (27 scored shots, 132 key frames),
+  references of s05/s19 completed with their staff, halo and bowl, new metric
+  "held object kept". Measured and not kept: a flow-warped fill of SAM 3's
+  mask on motion-blurred frames (35 frames of 2058 touched, no change on the
+  scores), giving back characters SAM 3 sees but the tracker dropped (worse),
+  filling the object's interior (no change). Report:
+  `docs/reports/chantier-roto-held.md`.
+
+### Mask Mode — background out of the hair (roto 2)
+
+- **New benchmark metric, "background in the matte"**: background kept along
+  the outline (hair gaps, halo; 2 to 8 px outside the reference), background
+  kept inside the silhouette's envelope (between the arms, under the chin),
+  character eaten along the outline, and colour contamination of the
+  semi-transparent edge pixels of the *exported* cutout. Zoomed hair boards
+  (`roto_eval.py zoom`).
+- **The halo came from the export**: the guided-filter upscale used since 0.4
+  painted a ring of the old background around hair and ate the ink line
+  (simple shots: background along the outline 3.6 % -> 8.9 %, character
+  eaten 1.6 % -> 6.5 %). The export now keeps the matte as computed and
+  decontaminates the edge colours with foreground estimation (blur fusion,
+  Germer et al. 2021): ProRes 4444, VP9 and PNG. *Settings > Models > Clean
+  edge colours at export* (on; off = the 0.5 export).
+- **SAM 3 picks the characters** (NVIDIA 8 GB and up, gated weights fetched
+  with the user's own Hugging Face token, SAM License): BiRefNet still draws
+  the outline, SAM 3 (concept "anime character") says where the character
+  is — before tracking (auras, a tractor, a pillar, dark scenery are cut) and
+  after it (the matte is hugged to SAM 3's outline at 0.8 % of the diagonal:
+  background between the arms, under the chin, between hair spikes is cut). A
+  frame where SAM 3 sees nobody keeps BiRefNet's matte; no access / an error
+  = the 0.5 pipeline. Auto on 22 real shots: J 0.853 -> 0.920, failures 7 ->
+  1 of 107, flicker 4.2 -> 2.8 %, background enclosed by the silhouette
+  24.8 -> 7.8 %; Manual: J 0.828 -> 0.879, failures 10 -> 5. Twice as slow
+  (225 -> 435 ms per frame on an RTX 3090). Known loss: objects held by a
+  character (a staff, a bowl) are cut. *Settings > Models > Character pick
+  with SAM 3*.
+- **Max quality cutout** (default where SAM 3 runs, standard pipeline as the
+  automatic fallback): SAM 3 runs a second, zoomed pass on each character;
+  after tracking the matte hugs SAM 3's outline at 0.4 % of the diagonal and
+  gives back the opaque tips SAM 3 misses (hair spikes) but not glows or
+  pockets between the arms; loose fragments (bits of a halo ring) are
+  dropped; at export the outline band is re-solved from the local colours
+  with the ink line protected, unmixed against the nearest background, then
+  foreground estimation. On the 22 shots vs the first 0.6 pipeline:
+  background along the outline 10.6 -> 6.1 %, enclosed 7.8 -> 5.1 %, edge
+  colour contamination 30.9 -> 19.1 % (old estimate, see below), flicker 2.8 -> 2.5 %, J 0.920 ->
+  0.924, failures 1/107; simple shots: 2.7 -> 1.7 % and 3.0 -> 2.5 %.
+  0.65 s per frame on an RTX 3090 (0.44 s standard), same VRAM.
+  Measured and refused on the zoomed boards: a 0.4 % hug without tips (clips
+  hair spikes), colour-solved alpha without ink protection (dotted ink
+  line), a detector ensemble (half-transparent "ghost" wings), prompt
+  unions, temporal votes, SAM 3 video as selector. *Settings > Models > Max
+  quality cutout*.
+- **Edge colour contamination measured against ground truth**: the old
+  estimate guessed the character colour and counted correct ink pixels as
+  background (a perfect answer scored 26 %). Key frames are now
+  recomposited with known colours and the export is measured exactly. The
+  max-quality export unmixes the edge colours against the local visible
+  background after the ink-protected colour solve: colour contamination on
+  the 22 shots 13.5 % (standard export) -> 2.6 % (median 2.7 %, worst shot
+  4.6 %). Background along the outline / enclosed stay at 6.1 % / 5.1 %
+  on average (medians 1.9 % / 0.5 %), pulled up by two night shots.
+- **Faster max quality**: SAM 3 batched with cached text features and a
+  compiled vision encoder (16 GB+ cards, kept loaded between clips), BiRefNet
+  batched, export work restricted to the outline band: 775 -> 539 ms per frame
+  for the mattes, 1.20 -> 0.70 s with the 1080p export (RTX 3090, 22 shots,
+  1 638 frames), same quality within 0.1 point.
+- Measured and rejected: SAM 3 alone (image or video: stair-step edges that
+  drop the ink line, losses in the dark), the deepghs anime person detector,
+  BiRefNet HR (2048), ViTMatte on the outline band, colour-solved alpha over a
+  wide band (it ate the ink line; the max-quality export protects it).
+
+- **Measured on real anime, not synthetic clips**: `tests/eval/roto_eval.py`
+  scores Mask Mode on 23 shots from real episodes (calm, dialogue, crowds,
+  hair, motion-blurred action, auras/particles, occlusion, night, a cluttered
+  background, an 11 s shot) against 135 reference masks checked by eye — J,
+  boundary F, edge error, flow-compensated flicker, failures, speed, memory.
+  The 0.4 numbers did not survive: ISNet anime (the engine the docs
+  recommended) J 0.75 with 21 failures out of 107 scored key frames, SAM 2.1
+  tiny from a click J 0.60 with 41 failures. Full report:
+  `docs/reports/chantier-roto.md`.
+- **Auto = detect, then track**: BiRefNet finds the characters on every frame
+  (best detector measured: J 0.85; ISNet anime 0.75, ToonOut 0.72), the main / all characters are picked
+  automatically, SAM 2.1 tracks them from that mask, re-seeds itself after a
+  hard cut or when it drifts, and the detector's outline is kept inside the
+  tracked region. New *Main character / All characters* switch. Brush
+  corrections are keyframes for the tracker. The Cutout finishing job uses the
+  same pipeline.
+- **Manual: a click picks the whole character** (carried across cuts and
+  flashes): J 0.60 -> 0.83, failures 41 -> 10 (a box still goes straight to
+  SAM 2).
+- **No more ~4 s ceiling**: shots longer than 96 frames are tracked window by
+  window with the user keyframes carried along (11 s shot: 9.0 -> 2.1 GB of
+  VRAM, 4.6 -> 3.2 GB of RAM).
+- **Models per memory tier**, shown with their licenses in
+  `Settings > Models`: BiRefNet general + SAM 2.1 tiny (8 GB), base+ (12/16
+  GB), large (24 GB); ISNet anime without tracking on CPU. ToonOut (BiRefNet
+  fine-tuned on anime, MIT) is available as a detector variant. Both mask
+  model settings now default to *Auto*.
+- Mask Mode stays **off by default** (see the report's verdict).
+
 ## 0.4.0-alpha — 2026-10-25
 
 Four tracks land together: a tested and diagnosable app (Reliability), timeline

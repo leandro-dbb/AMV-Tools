@@ -74,13 +74,14 @@ DEFAULT_SETTINGS = {
         #     heavy clips. Slower (~3× track time) and pulls a 500 MB model on
         #     first use.
         "mask_engine": "birefnet",
-        # Auto-engine checkpoint. "general"/"hr"/"portrait" are BiRefNet
-        # weights; "anime" is SkyTNT's ISNet trained on anime characters
-        # (ONNX, ~170 MB) — usually the best pick on cel-shaded footage.
-        "birefnet_variant": "general",
-        # SAM 2.1 variant — base_plus is the qual/VRAM sweet spot on 8 GB GPUs
-        # once SigLIP/tagger have been offloaded by the model rotation.
-        "sam2_variant": "base_plus",
+        # Auto-engine detector. "auto" (0.5) = the memory tier's pick
+        # (backend/models/auto_roto.py: ToonOut on GPUs). "general"/"hr"/
+        # "portrait" are BiRefNet weights; "anime" is SkyTNT's ISNet (ONNX,
+        # ~170 MB); "toonout" is BiRefNet fine-tuned on anime (885 MB).
+        "birefnet_variant": "auto",
+        # SAM 2.1 variant (Manual engine, and the Auto engine's tracker).
+        # "auto" (0.5) = the memory tier's pick.
+        "sam2_variant": "auto",
         # Max side used when extracting frames for roto. Hair detail is often
         # only a few pixels wide; 1080 is slower than 720 but much less likely
         # to erase anime hair gaps before the model sees them.
@@ -117,6 +118,28 @@ DEFAULT_SETTINGS = {
         # background aura" around the character. Skips pixels where FG and BG
         # colours are too close to solve safely; keep on.
         "mask_bg_aware_cleanup_enabled": True,
+        # 0.6 export edges ("auto": "max" with the max-quality pipeline, "fg"
+        # otherwise): "fg" = the matte is upscaled as is and the colour
+        # of semi-transparent pixels is decontaminated (foreground
+        # estimation); the guided filter / bg-aware cleanup above only apply
+        # in "legacy" mode (they added background along hair, see
+        # docs/reports/chantier-roto.md).
+        "mask_edge_mode": "auto",
+        # Auto engine quality: "auto" = the memory tier's pick ("stable" on
+        # NVIDIA 8 GB+ with SAM 3: BiRefNet's outline kept wherever it
+        # touches a character, temporal guard, speck cleanup), "stable",
+        # "max" (tips-aware SAM 3 hug + colour-solved export edges), or
+        # "standard" (the first 0.6 pipeline).
+        "mask_quality": "auto",
+        # Auto engine: SAM 3 ("anime character") picks what is a character
+        # before the detector's matte is used, when the tier has it and the
+        # gated weights are accessible.
+        "mask_selector_enabled": True,
+        # Max quality: give back the objects the characters hold or wear
+        # (staff, halo, bowl, weapons: SAM 3 object prompts that touch a
+        # character and that BiRefNet sees as foreground). "auto" = on/off
+        # per the benchmark (backend/models/auto_roto.HELD_DEFAULT).
+        "mask_keep_held": "auto",
         # Bidirectional EMA over per-frame (Auto engine) mattes — removes the
         # silhouette flicker of frame-independent inference. Hard cuts and
         # teleport-fast motion reset the history automatically.
