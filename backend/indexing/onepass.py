@@ -181,23 +181,19 @@ def _nv12_to_rgb(buf: bytes, matrix: str = "bt601", full_range: bool = False) ->
 _GPU_RGB = None   # cached (torch, device) or False
 
 
-def _small_rgb(frame: np.ndarray, matrix: str = "bt601", full_range: bool = False) -> np.ndarray:
-    """160×90 RGB (90×160×3 uint8) of the 512×288 part of a stacked frame,
-    area-downscaled before the YUV→RGB conversion: the cut network's colour
-    input, cheap enough for every frame."""
-    import cv2
+def _small_rgb(frame: np.ndarray, gray: np.ndarray, matrix: str = "bt601", full_range: bool = False) -> np.ndarray:
+    """The cut network's 27×48 RGB frame: luma from the detector's 160×90
+    gray plane (already full range), chroma from the 512×288 part of the
+    stacked frame, both area-downscaled (matrix products: cheap enough for
+    every frame)."""
+    from . import cutnet
+    w, h = cutnet.IN_W, cutnet.IN_H
     plane = frame.reshape(STACK_H * 3 // 2, FRAME_W)
-    y = cv2.resize(plane[:FRAME_H], (GRAY_W, GRAY_H), interpolation=cv2.INTER_AREA).astype(np.float32)
-    uv = plane[STACK_H:STACK_H + FRAME_H // 2].reshape(FRAME_H // 2, FRAME_W // 2, 2)
-    uv = cv2.resize(uv, (GRAY_W, GRAY_H), interpolation=cv2.INTER_AREA).astype(np.float32) - 128.0
+    yy = shotdetect.area_resize(gray, w, h)
+    uv = shotdetect.area_resize(plane[STACK_H:STACK_H + FRAME_H // 2].reshape(FRAME_H // 2, FRAME_W // 2, 2), w, h) - 128.0
     kr, kb = _MATRICES.get(matrix, _MATRICES["bt601"])
     kg = 1.0 - kr - kb
-    if full_range:
-        cy, cc = 1.0, 1.0
-    else:
-        y = y - 16.0
-        cy, cc = 255.0 / 219.0, 255.0 / 224.0
-    yy = y * cy
+    cc = 1.0 if full_range else 255.0 / 224.0
     u, v = uv[..., 0] * cc, uv[..., 1] * cc
     r = yy + 2.0 * (1.0 - kr) * v
     b = yy + 2.0 * (1.0 - kb) * u
@@ -434,7 +430,7 @@ class _Scanner:
             gray = _gray_of(self.frame(idx), self.gray_lut)
             if self.frame_sink is not None and idx % stride == 0:
                 self.frame_sink(self.ts(idx), gray)
-            rgb = _small_rgb(self.frame(idx), *self.color_info) if self.color_info else None
+            rgb = _small_rgb(self.frame(idx), gray, *self.color_info) if self.color_info else None
             self._cuts(self.detector.push(gray, rgb))
             if idx % stride == 0:
                 self._advance_floor(idx)

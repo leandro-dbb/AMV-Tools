@@ -330,6 +330,13 @@ CC-BY-NC-4.0 / CC-BY-NC-SA-4.0, flagged in Settings).
 | Mask Mode tracker: SAM 2.1 tiny / base+ / large (Meta) | 156 / 324 / 898 MB | Apache-2.0 |
 | Mask Mode character pick: SAM 3 (Meta, gated, your own Hugging Face token) | 3.4 GB | SAM License (use and redistribution allowed, military/ITAR uses forbidden) |
 | Mask Mode alternatives: ISNet anime-seg (SkyTNT) / ToonOut (joelseytre) | 176 / 885 MB | Apache-2.0 / MIT (dataset CC-BY-4.0) |
+| Cut detection network (optional, `Settings > Models`): TransNetV2 (Souček & Lokoč; PyTorch weights Sn4kehead/TransNetV2) | 30 MB | MIT architecture, Apache-2.0 weights |
+
+**Cut detection.** Every frame goes through the hand-made detector; once
+TransNetV2 is downloaded (`Settings > Models`, 30 MB) it is combined with
+it, on the GPU when there is one (CPU otherwise, Macs included). Measured
+at the exact frame on hand-annotated extracts: see
+[docs/reports/coupes.md](docs/reports/coupes.md).
 
 SAM 3 is the one model outside the allow-list: it is not downloaded by AMV
 Tools' license-checked downloader but fetched by Hugging Face with *your*

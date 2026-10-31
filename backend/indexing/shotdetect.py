@@ -230,26 +230,34 @@ def detect(grays, threshold: Optional[float] = None, colors=None, net="auto") ->
 # the gray picture on its three channels). Fitted on the tuning extracts
 # (DBS Beerus 01 x2, Black Clover S02E04 x2), see docs/reports/coupes.md.
 NET_MODELS = {
-    "color": {"w": np.array([2.748, 2.6948, 0.429, 0.2985, 2.0838, 1.3263, 0.5494, 2.0345, -0.3099, 0.5012, 0.5664, 3.6323]), "b": -7.719, "thr": 0.2},
+    "color": {"w": np.array([2.7373, 2.6882, 0.4245, 0.3045, 2.072, 1.3218, 0.5524, 2.0204, -0.2918, 0.5052, 0.5684, 3.6413]), "b": -7.7736, "thr": 0.2},
     "gray": {"w": np.array([2.7881, 2.5212, 0.4396, 0.3714, 2.2534, 2.2336, 0.5617, 4.0514, -0.6872, 0.3698, 0.8062]), "b": -7.0442, "thr": 0.5},
 }
 
 
 def color_hist(rgb: np.ndarray) -> np.ndarray:
     """64-bin (4×4×4) RGB histogram, L1-normalised."""
-    q = (np.asarray(rgb).reshape(-1, 3) >> 6).astype(np.int32)
-    h = np.bincount(q[:, 0] * 16 + q[:, 1] * 4 + q[:, 2], minlength=64).astype(np.float32)
+    q = np.asarray(rgb, dtype=np.uint8).reshape(-1, 3) >> 6
+    h = np.bincount((q[:, 0] << 4) | (q[:, 1] << 2) | q[:, 2], minlength=64).astype(np.float32)
     return h / max(float(h.sum()), 1.0)
+
+
+def area_resize(img: np.ndarray, w: int, h: int) -> np.ndarray:
+    """float32 area (box) downscale of an (H, W) or (H, W, C) array to
+    (h, w[, C])."""
+    import cv2
+    return cv2.resize(np.asarray(img, dtype=np.float32), (w, h), interpolation=cv2.INTER_AREA)
 
 
 def net_input(gray, color) -> np.ndarray:
     """The network's 27×48×3 frame: the colour picture (or the gray one on
-    three channels) area-resized."""
+    three channels) area-downscaled; a 27×48×3 colour frame is taken as is."""
+    src = color if color is not None else np.asarray(gray).reshape(H, W)
+    src = np.asarray(src)
+    if src.shape[:2] == (cutnet.IN_H, cutnet.IN_W) and src.ndim == 3:
+        return src.astype(np.uint8, copy=False)
     import cv2
-    src = np.asarray(color if color is not None else gray, dtype=np.uint8)
-    if src.ndim == 2:
-        src = src.reshape(H, W)
-    small = cv2.resize(src, (cutnet.IN_W, cutnet.IN_H), interpolation=cv2.INTER_AREA)
+    small = cv2.resize(src.astype(np.uint8, copy=False), (cutnet.IN_W, cutnet.IN_H), interpolation=cv2.INTER_AREA)
     return small if small.ndim == 3 else np.repeat(small[..., None], 3, axis=2)
 
 
@@ -324,11 +332,13 @@ class _NetDecision:
         f = _small(gray)
         self.d.append(motion_diff(self.frames[self.n - 1], f) if self.n else 0.0)
         self.frames[self.n] = f
+        x = net_input(gray, color if self.color else None)
         if self.color:
-            h = color_hist(color)
+            # colour-histogram distance, on the network's 27×48 frame
+            h = color_hist(x)
             self.chd.append(0.5 * float(np.abs(h - self.prev_hist).sum()) if self.prev_hist is not None else 0.0)
             self.prev_hist = h
-        self.stream.push(net_input(gray, color if self.color else None))
+        self.stream.push(x)
         self.n += 1
         self.frames.n = self.n
         return self._decide(final=False)
