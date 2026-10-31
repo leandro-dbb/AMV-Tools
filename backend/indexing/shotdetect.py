@@ -253,25 +253,39 @@ def net_input(gray, color) -> np.ndarray:
     return small if small.ndim == 3 else np.repeat(small[..., None], 3, axis=2)
 
 
-def net_features(frames, d, single, many, chd, t: int, with_color: bool) -> np.ndarray:
+# feature columns 8-10 (flash look-ahead / look-back, hand-made rule) need
+# the costly shifted comparisons: ``net_features(cheap=True)`` fills them
+# with the values that maximise the score instead, so a frame that cannot
+# reach the threshold even then is settled without them
+_COSTLY = slice(8, 11)
+_BEST = {"pos": (3.0, 3.0, 1.0), "neg": (0.0, 0.0, 0.0)}
+
+
+def net_features(frames, d, single, many, chd, t: int, with_color: bool,
+                 best: Optional[np.ndarray] = None) -> np.ndarray:
     """Feature row of frame t (first frame of a would-be new shot).
     ``frames``/``d`` as in :func:`strength_at` (frames indexable by global
     index), ``single``/``many`` the network's per-frame probabilities,
-    ``chd[t]`` the colour-histogram distance between t-1 and t."""
+    ``chd[t]`` the colour-histogram distance between t-1 and t. With
+    ``best`` (3 values) the costly columns are not computed but set to it;
+    a 4th value stands for the gray-histogram distance."""
     n = len(d)
     get = lambda a, i: float(a[i]) if 0 <= i < len(a) else 0.0
     s1, s2, s0 = get(single, t - 1), get(single, t - 2), get(single, t)
     dt = d[t]
     nb = sorted(d[j] for j in range(max(1, t - _CTX), min(n, t + _CTX + 1)) if j != t)
     ratio = dt / ((nb[-2] if len(nb) > 1 else 0.0) + 0.02)
-    hist = hist_diff(frames[t - 1], frames[t])
-    if dt > 0.03:
+    hist = hist_diff(frames[t - 1], frames[t]) if best is None or len(best) < 4 else best[3]
+    if best is not None:
+        back, seen, strength = best[:3]
+    elif dt > 0.03:
         back = min([motion_diff(frames[t - 1], frames[j]) for j in range(t + 1, min(n, t + _FLASH + 1))] or [1.0])
         seen = min([motion_diff(frames[i], frames[t]) for i in range(max(0, t - _BACK), t - 1)] or [1.0])
         back, seen = back / max(dt, 1e-3), seen / max(dt, 1e-3)
+        strength = strength_at(frames, d, t) > 0
     else:
         back = seen = 1.0
-    strength = strength_at(frames, d, t) > 0
+        strength = strength_at(frames, d, t) > 0
     row = [s1, get(many, t - 1), s2, s0, max(s1 - max(s2, s0), 0.0),
            dt, min(ratio, 10.0), hist, min(back, 3.0), min(seen, 3.0), float(strength)]
     if with_color:
@@ -332,8 +346,17 @@ class _NetDecision:
         if t < 1 or t >= self.n:
             return 0.0
         m = NET_MODELS["color" if self.color else "gray"]
-        x = net_features(self.frames, self.d, self.stream.single, self.stream.many, self.chd, t, bool(self.color))
-        z = float(np.dot(m["w"], x) + m["b"])
+        args = (self.frames, self.d, self.stream.single, self.stream.many, self.chd, t, bool(self.color))
+        # A frame whose best possible score stays under the threshold cannot
+        # be a cut, and as a neighbour it only has to compare lower than one
+        # that is above it: 0 then gives the same decisions.
+        best = np.where(m["w"][_COSTLY] > 0, _BEST["pos"], _BEST["neg"])
+        for bound in (np.r_[best, 1.0 if m["w"][7] > 0 else 0.0], best):
+            z = float(np.dot(m["w"], net_features(*args, best=bound)) + m["b"])
+            if 1.0 / (1.0 + np.exp(-z)) <= self.thr:
+                self.p[t] = 0.0
+                return 0.0
+        z = float(np.dot(m["w"], net_features(*args)) + m["b"])
         p = 1.0 / (1.0 + np.exp(-z))
         self.p[t] = p
         return p
@@ -341,7 +364,7 @@ class _NetDecision:
     def _decide(self, final: bool) -> list[int]:
         out: list[int] = []
         m = NET_MODELS["color" if self.color else "gray"]
-        thr = min(0.95, m["thr"] * self.scale)
+        self.thr = thr = min(0.95, m["thr"] * self.scale)
         while self.next < self.n and self._ready(self.next + 1, final):
             t = self.next
             p, pn, pp = self._prob(t), self._prob(t + 1), self.p.get(t - 1, 0.0)

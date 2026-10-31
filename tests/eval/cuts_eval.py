@@ -28,6 +28,7 @@ import numpy as np
 
 GT_DIR = Path(__file__).resolve().parents[1] / "data" / "cuts_gt"
 ORIGINAL = {"dbs_beerus_01_extract.json", "black_clover_s02e04_extract.json"}
+ORIGINAL_STEMS = {n[:-5] for n in ORIGINAL}
 
 
 def ground_truths() -> dict[str, dict]:

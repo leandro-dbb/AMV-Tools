@@ -1,68 +1,73 @@
-"""Cut detection (v06 fix): every frame, context, flash rejection.
+"""Cut detection: every frame, context, flash rejection; optional TransNetV2.
 
-The real-footage test scores the indexing paths against frame-accurate
-annotations (tests/data/cuts_gt, made frame by frame and checked on contact
-sheets); it runs when the extracts are present (``AMV_CUTS_MEDIA`` or
-~/dev/amv-testdata/Séries test)."""
+The real-footage tests score the indexing paths against frame-accurate
+annotations (tests/data/cuts_gt: 7 extracts, made frame by frame and checked
+on contact sheets, scored at the exact frame on the app's cfr frame grid by
+tests/eval/cuts_eval.py); they run when the extracts are present
+(``AMV_CUTS_MEDIA``, ``os.pathsep``-separated folders, default
+~/dev/amv-testdata/Séries test and ~/dev/amv-testdata/cuts-new)."""
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from backend.indexing import cuts, shotdetect, single_pass
+from backend.indexing import cuts, cutnet, shotdetect
 
-GT_DIR = Path(__file__).parent / "data" / "cuts_gt"
-MEDIA = Path(os.environ.get("AMV_CUTS_MEDIA", Path.home() / "dev/amv-testdata/Séries test"))
-EXTRACTS = {
-    "dbs_beerus_01_extract.json": "DBS Beerus 01 - extrait.mkv",
-    "black_clover_s02e04_extract.json": "Black Clover S02E04 - extrait.mkv",
+from tests.eval import cuts_eval
+
+_HOME = Path.home() / "dev/amv-testdata"
+MEDIA = [Path(p) for p in os.environ.get(
+    "AMV_CUTS_MEDIA", os.pathsep.join([str(_HOME / "Séries test"), str(_HOME / "cuts-new")])).split(os.pathsep)]
+GTS = cuts_eval.ground_truths()
+# hand-made rule alone (no network), CPU ffmpeg path, measured on
+# 2026-10-31 (docs/reports/coupes.md): recall, precision, minus a margin
+FLOOR_RULE = {
+    "dbs_beerus_01_extract": (0.80, 0.92), "black_clover_s02e04_extract": (0.85, 0.88),
+    "dbs_beerus_01_b": (0.95, 0.99), "black_clover_s02e04_c": (0.82, 0.99),
+    "dbs_beerus_02_a": (0.84, 0.94), "dbs_beerus_02_b": (0.57, 0.90), "black_clover_s02e04_b": (0.91, 0.99),
 }
-# measured at the fix (docs/reports/v06-fix.md); the old detector: recall
-# 0.69 / 0.38, precision 0.69 / 0.67
-FLOOR = {"dbs_beerus_01_extract.json": (0.80, 0.91), "black_clover_s02e04_extract.json": (0.85, 0.88)}
+# with the TransNetV2 network (weights downloaded), same path
+FLOOR_NET = {
+    "dbs_beerus_01_extract": (0.90, 0.90), "black_clover_s02e04_extract": (0.90, 0.87),
+    "dbs_beerus_01_b": (0.97, 0.99), "black_clover_s02e04_c": (0.91, 0.98),
+    "dbs_beerus_02_a": (0.97, 0.93), "dbs_beerus_02_b": (0.79, 0.90), "black_clover_s02e04_b": (0.95, 0.99),
+}
 
 
-def _score(gt: dict, det: list[int]) -> tuple[float, float, list, list]:
-    cuts_ = [c["frame"] for c in gt["hard_cuts"]]
-    dont_care: set[int] = set()
-    for a in gt["ambiguous"]:
-        dont_care.update(range(a["frame"], a.get("end", a["frame"]) + 1))
-    for x in gt["dissolves"]:
-        dont_care.update(range(x["start"] - 1, x["end"] + 2))
-    det_s, cs = set(det), set(cuts_)
-    exact = [c for c in cuts_ if c in det_s]
-    wrong = [d for d in det_s if d not in cs and d not in dont_care]
-    return len(exact) / len(cuts_), len(exact) / max(1, len(exact) + len(wrong)), \
-        [c for c in cuts_ if c not in det_s], wrong
-
-
-def _frames(gt_name: str, path: Path, scenes) -> list[int]:
-    fps = cuts.probe_video(str(path))["fps"]
-    return [round(s * fps / 1000) for s, _e in scenes[1:]]
-
-
-@pytest.mark.parametrize("gt_name", sorted(EXTRACTS))
-@pytest.mark.parametrize("decode", ["sw", "pyav", "single_pass"])
-def test_real_extracts_meet_the_measured_floor(gt_name, decode, monkeypatch):
-    path = MEDIA / EXTRACTS[gt_name]
-    if not path.exists():
-        pytest.skip(f"real extract not present: {path}")
-    gt = json.loads((GT_DIR / gt_name).read_text())
+def _measure(stem: str, decode: str, monkeypatch) -> dict:
+    gtd = GTS[stem]
+    path = cuts_eval.find_media(gtd, MEDIA)
+    if path is None:
+        pytest.skip(f"real extract not present: {gtd['video']}")
     monkeypatch.setattr(cuts, "_ffmpeg_hw_profile", lambda: None)
-    if decode == "single_pass":
-        monkeypatch.setenv("AMV_DECODE", "sw")
-        scenes, medians = single_pass.detect_cuts_with_medians(str(path), threshold=0.40)
-        assert len(medians) == len(scenes)
-    else:
-        monkeypatch.setenv("AMV_DECODE", decode)
-        scenes = cuts.detect_cuts(str(path), threshold=0.40)
-    recall, precision, missed, wrong = _score(gt, _frames(gt_name, path, scenes))
-    lo_r, lo_p = FLOOR[gt_name]
-    assert recall >= lo_r and precision >= lo_p, (recall, precision, missed, wrong)
+    cuts_, dc = cuts_eval.gt(gtd, path)
+    return cuts_eval.score(cuts_, dc, cuts_eval.run_path(decode, path))
+
+
+@pytest.mark.parametrize("stem", sorted(FLOOR_RULE))
+@pytest.mark.parametrize("decode", ["sw", "pyav", "single_pass"])
+def test_real_extracts_rule_meets_the_measured_floor(stem, decode, monkeypatch):
+    if decode != "sw" and stem not in cuts_eval.ORIGINAL_STEMS:
+        pytest.skip("other paths: measured on the two original extracts")
+    monkeypatch.setenv("AMV_CUTNET", "0")
+    r = _measure(stem, decode, monkeypatch)
+    lo_r, lo_p = FLOOR_RULE[stem]
+    assert r["recall"] >= lo_r and r["precision"] >= lo_p, r
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("stem", sorted(FLOOR_NET))
+def test_real_extracts_with_the_network_meet_the_measured_floor(stem, monkeypatch):
+    from backend.indexing import cutnet
+    if cutnet.weights_path() is None:
+        pytest.skip("TransNetV2 weights not downloaded")
+    monkeypatch.setenv("AMV_CUTNET", "1")
+    r = _measure(stem, "sw", monkeypatch)
+    lo_r, lo_p = FLOOR_NET[stem]
+    assert r["recall"] >= lo_r and r["precision"] >= lo_p, r
 
 
 # ── synthetic: what the rules are for ───────────────────────────────────────
@@ -107,3 +112,50 @@ def test_streaming_equals_batch():
     for f in frames:
         got += det.push(f)
     assert got + det.finish() == shotdetect.detect(frames, net=None) == [25, 28]
+
+
+# ── the optional network ────────────────────────────────────────────────────
+def test_without_weights_the_detector_keeps_the_hand_made_rule(monkeypatch):
+    monkeypatch.setattr(cutnet, "weights_path", lambda: None)
+    det = shotdetect.ShotDetector()
+    assert det.wants_color is False and det.lookahead == shotdetect.LOOKAHEAD
+    frames = _shot(1, 30, dx=1) + _shot(2, 30, dx=1)
+    assert shotdetect.detect(frames) == [30]
+
+
+def _random_net():
+    torch = pytest.importorskip("torch")
+    torch.manual_seed(0)
+    return cutnet._build(torch).eval(), "cpu"
+
+
+def test_streamed_network_equals_one_window_per_50_frames():
+    torch = pytest.importorskip("torch")
+    model, dev = _random_net()
+    rng = np.random.default_rng(0)
+    frames = rng.integers(0, 256, (87, cutnet.IN_H, cutnet.IN_W, 3), dtype=np.uint8)
+    single, many = cutnet.predict(frames, (model, dev))
+    assert len(single) == len(many) == 87
+    # reference: pad 25 / 25 + up to a multiple of 50, windows of 100 every 50
+    pad_end = 25 + 50 - (87 % 50)
+    padded = np.concatenate([np.repeat(frames[:1], 25, 0), frames, np.repeat(frames[-1:], pad_end, 0)])
+    ref = []
+    with torch.inference_mode():
+        for s in range(0, len(padded) - 99, 50):
+            out, _ = model(torch.from_numpy(padded[None, s:s + 100]))
+            ref += torch.sigmoid(out[0, 25:75, 0]).tolist()
+    np.testing.assert_allclose(single, ref[:87], atol=1e-5)
+
+
+def test_combined_detector_streaming_equals_batch_and_finds_a_plain_cut():
+    model = _random_net()
+    frames = _shot(1, 40, dx=1) + _shot(2, 40, dx=1)
+    colors = [np.repeat(f[..., None], 3, axis=2) for f in frames]
+    det = shotdetect.ShotDetector(net=model)
+    assert det.wants_color and det.lookahead > shotdetect.LOOKAHEAD
+    got = []
+    for f, c in zip(frames, colors):
+        got += det.push(f, c)
+    got += det.finish()
+    assert got == shotdetect.detect(frames, colors=colors, net=model)
+    assert all(0 < t < len(frames) for t in got)
