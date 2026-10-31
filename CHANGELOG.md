@@ -2,6 +2,24 @@
 
 All notable changes to AMV Tools are documented here.
 
+## Unreleased
+
+### Détection de coupes : réseau TransNetV2 (optionnel)
+
+- **Plus de coupes trouvées à l'image près.** Une fois TransNetV2 téléchargé
+  (Paramètres › Modèles, 30 Mo), chaque image passe par le réseau et par le
+  détecteur actuel, combinés ; sur les extraits de test (DBS : un épisode
+  jamais vu au réglage ; Black Clover : un autre passage), rappel 68 → 85 %
+  (DBS, combats compris), 91 → 96 % (Black Clover), précision 91-100 %. Sur un épisode entier, 399 → 497 plans.
+  Coût : +11 % sur l'indexation d'un épisode (RTX 3090). Sans le réseau,
+  rien ne change. [Rapport](docs/reports/coupes.md).
+- Cut detection: optional TransNetV2 network (MIT architecture, Apache-2.0
+  weights, downloaded on demand) combined with the hand-made detector by a
+  logistic decision fitted on 4 annotated extracts and measured on 3 others;
+  every decode path hands the detector the 160x90 colour picture when the
+  network is on. 5 new frame-accurate annotated extracts
+  (`tests/data/cuts_gt`), real-path evaluation `tests/eval/cuts_eval.py`.
+
 ## 0.5.0-beta.2 — 2026-10-30
 
 Second **beta**: everything from 0.5.0-beta.1, plus the **roto editor**
