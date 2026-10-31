@@ -22,6 +22,10 @@ os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
 # The sidecar only serves Host 127.0.0.1/localhost (backend/security.py);
 # TestClient sends Host: testserver.
 os.environ.setdefault("AMV_ALLOWED_HOSTS", "testserver")
+# The optional cut network (TransNetV2) is used whenever its weights are in
+# the Hugging Face cache: keep the suite independent of what this machine
+# has downloaded (tests/test_shotdetect.py turns it on where it is tested).
+os.environ.setdefault("AMV_CUTNET", "0")
 
 
 def ffmpeg_exe() -> str:

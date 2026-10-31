@@ -116,6 +116,7 @@ def test_streaming_equals_batch():
 
 # ── the optional network ────────────────────────────────────────────────────
 def test_without_weights_the_detector_keeps_the_hand_made_rule(monkeypatch):
+    monkeypatch.setenv("AMV_CUTNET", "1")
     monkeypatch.setattr(cutnet, "weights_path", lambda: None)
     det = shotdetect.ShotDetector()
     assert det.wants_color is False and det.lookahead == shotdetect.LOOKAHEAD
