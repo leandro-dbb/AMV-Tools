@@ -38,7 +38,7 @@ def test_diagnostics_contains_versions_models_disk_and_logs(client, data_dir):
     assert body["data_dir"]["free_gb"] >= 0
 
     models = {m["key"]: m for m in body["models"]}
-    assert set(models) == {"siglip", "wd_tagger", "birefnet", "sam2"}
+    assert set(models) == {"siglip", "wd_tagger", "birefnet", "sam2", "transnetv2"}
     for model in models.values():
         assert {"present", "size_bytes", "loaded", "error"} <= model.keys()
 
@@ -79,7 +79,7 @@ def test_anonymize_handles_windows_paths_and_user_name(monkeypatch):
 
 def test_models_status_endpoint(client):
     body = client.get("/api/models/status").json()
-    assert {m["key"] for m in body["models"]} == {"siglip", "wd_tagger", "birefnet", "sam2"}
+    assert {m["key"] for m in body["models"]} == {"siglip", "wd_tagger", "birefnet", "sam2", "transnetv2"}
 
 
 def test_models_download_unknown_key(client):

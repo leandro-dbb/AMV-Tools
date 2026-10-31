@@ -58,9 +58,6 @@ MODEL_INFO: dict[str, dict[str, Any]] = {
         "label": "wd-tagger v3 ViT-Large", "size_mb": 1260, "license": "apache-2.0", "kind": "tagger"},
     "SmilingWolf/wd-eva02-large-tagger-v3": {
         "label": "wd-tagger v3 EVA02-Large", "size_mb": 1260, "license": "apache-2.0", "kind": "tagger"},
-    # cut detection network (indexing/cutnet.py; architecture MIT)
-    "Sn4kehead/TransNetV2": {
-        "label": "TransNetV2 (shot cuts)", "size_mb": 30, "license": "apache-2.0", "kind": "cuts"},
     # finishing (backend/finish/registry.py ids)
     "realesr-animevideov3": {
         "label": "Real-ESRGAN AnimeVideo v3", "size_mb": 2.5, "license": "bsd-3-clause", "kind": "upscale"},
