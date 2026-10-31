@@ -7,7 +7,35 @@ l'application (`-fps_mode cfr`).
 
 ## En bref
 
-@@BREF@@
+**Objectif 98 % / 98 % : non atteint.** Chiffres atteints sur le **jeu de
+test** (extraits jamais utilisés pour régler), à l'image exacte, avec le
+réseau TransNetV2 téléchargé :
+
+| Série (test) | Avant : rappel / précision | Après (NVIDIA) | Après (CPU, = Mac) |
+|---|---|---|---|
+| Dragon Ball Super, épisode 02 (2 extraits, 107 coupes) | 68,2 % / 93,6 % | **85,0 % / 91,0 %** | **85,0 % / 91,9 %** |
+| Black Clover S02E04 (45 coupes) | 91,1 % / 100 % | **95,6 % / 100 %** | **95,6 % / 100 %** |
+
+Le meilleur extrait de test atteint 95,5 % de rappel (DBS 02, dialogues et
+préparation de combat) ; l'extrait de combat pur (`dbs_beerus_02_b`) reste à
+77,8 % : plans de 2 images, gros plans de même palette, coupes vers du noir
+ou du blanc. Raison prouvée sur planches au § 3 : les coupes restantes ne se
+distinguent pas, image contre image, d'un mouvement d'anime (et les fausses
+coupes sont des flashs et des mains dans l'objectif) ; les combineurs plus
+souples apprennent par cœur nos 4 extraits de réglage (§ 4).
+
+- **Comment** : TransNetV2 (réseau de référence, sur GPU quand il y en a un)
+  combiné au détecteur actuel et à la couleur, décision réglée sur 4 extraits
+  annotés et mesurée sur 3 autres ; **5 nouveaux extraits annotés image par
+  image** (251 coupes).
+- **Coût** : +11,4 % sur l'indexation complète d'un épisode sur RTX 3090
+  (limite 15 %). Sur CPU (6 cœurs), la passe de coupes passe de 328 à 64
+  images/s (2,6× le temps réel) : ~7 min de plus par épisode de 23 min.
+- **Optionnel** : sans les poids (30 Mo, Paramètres › Modèles), le
+  détecteur actuel tourne comme avant, au bit près.
+- **Recherche / synchro** : sur le test, les plans qui cachent une vraie
+  coupe passent de 16,4 % à 9,6 % ; 88 % des vrais plans (contre 75 %)
+  deviennent un plan à part entière (§ 6).
 
 ## 1. Plus de vérité terrain
 
@@ -91,15 +119,64 @@ CPU : décodage logiciel ou VideoToolbox, même empilement couleur, même
 décision) ; le réseau y tourne **sur le CPU** : le portage de référence
 prévient que les opérations de TransNetV2 retombent sur le CPU de façon
 incohérente avec MPS (résultats différents), donc mêmes calculs que le
-chemin CPU. Débit non mesuré (pas de Mac ici) ; à l'échelle du CPU du NAS
-(voir § 5), un M1 Pro (8 cœurs performance) devrait être du même ordre.
+chemin CPU. Débit non mesuré (pas de Mac ici) : il faut s'attendre au même
+ordre de surcoût que sur le CPU du NAS (§ 5), à confirmer sur le M1 Pro.
 
-@@RESULTATS@@
+## 2 bis. Résultats par chemin (jeu de test)
+
+Évaluation finale lancée à 14 h 45 (chemins NVIDIA) et relancée à 15 h 23
+pour les chemins CPU après une correction (couleur des chemins CPU, voir
+plus bas ; le chemin NVIDIA `hw`, qui partage ce code, a été remesuré après
+la correction : mêmes chiffres), code final ; `tests/eval/cuts_eval.py`,
+médias sur le NAS.
+
+| Chemin | Série (test) | Avant | Après |
+|---|---|---|---|
+| NVIDIA `nvc_pass` (défaut) | DBS 02 (107 coupes) | 68,2 / 93,6 | 85,0 / 91,0 |
+| NVIDIA `nvc_pass` (défaut) | Black Clover (45) | 91,1 / 100 | 95,6 / 100 |
+| NVIDIA `onepass` | DBS 02 | 68,2 / 93,6 | 85,0 / 91,0 |
+| NVIDIA `onepass` | Black Clover | 91,1 / 100 | 95,6 / 100 |
+| NVIDIA ffmpeg CUDA (`hw`) | DBS 02 | 68,2 / 93,6 | 85,0 / 91,0 |
+| NVIDIA ffmpeg CUDA (`hw`) | Black Clover | 91,1 / 100 | 95,6 / 100 |
+| CPU ffmpeg (Linux / Windows sans GPU) | DBS 02 | 68,2 / 93,6 | 85,0 / 91,9 |
+| CPU ffmpeg | Black Clover | 91,1 / 100 | 95,6 / 100 |
+| CPU `single_pass` (= Mac) | DBS 02 | 68,2 / 93,6 | 85,0 / 91,9 |
+| CPU `single_pass` (= Mac) | Black Clover | 91,1 / 100 | 95,6 / 100 |
+| CPU PyAV (secours) | DBS 02 | 67,3 / 93,5 | 85,0 / 91,9 |
+| CPU PyAV (secours) | Black Clover | 91,1 / 100 | 95,6 / 100 |
+
+(rappel / précision en %, les deux extraits DBS 02 cumulés.) La seule
+différence entre chemins : sur `dbs_beerus_02_a`, les chemins NVIDIA font
+une fausse coupe de plus (leur image couleur est tirée de l'image 512×288,
+celle des chemins CPU de l'image pleine taille).
+
+Par extrait (`nvc` pour NVIDIA, `sw` pour CPU ; « avant » est identique sur
+tous les chemins sauf PyAV, une coupe de moins sur `dbs_beerus_02_a`) :
+
+| Extrait | Jeu | Avant | Après NVIDIA | Après CPU |
+|---|---|---|---|---|
+| `dbs_beerus_02_a` | test | 84,1 / 94,9 | 95,5 / 91,3 | 95,5 / 93,3 |
+| `dbs_beerus_02_b` | test | 57,1 / 92,3 | 77,8 / 90,7 | 77,8 / 90,7 |
+| `black_clover_s02e04_b` | test | 91,1 / 100 | 95,6 / 100 | 95,6 / 100 |
+| `dbs_beerus_01_extract` | réglage | 80,6 / 93,1 | 89,6 / 92,3 | 89,6 / 93,8 |
+| `dbs_beerus_01_b` | réglage | 95,1 / 100 | 97,6 / 100 | 97,6 / 100 |
+| `black_clover_s02e04_extract` | réglage | 85,7 / 90,0 | 88,1 / 88,1 | 88,1 / 88,1 |
+| `black_clover_s02e04_c` | réglage | 82,8 / 100 | 91,4 / 100 | 91,4 / 100 |
+
+**Correction en cours de mesure (honnêteté).** La première évaluation CPU
+donnait sur `dbs_beerus_02_a` 84,1 / 94,9 au lieu de 95,5 : le chemin CPU
+convertissait en couleur *après* la réduction à 160×90 (chrominance 80×45),
+alors que la décision a été apprise sur une conversion directe depuis
+l'image pleine taille. Corrigé pour que l'entrée soit identique au bit près
+à celle de l'apprentissage (vérifié), sans toucher ni coefficients ni seuil ;
+c'est un défaut de chaîne, pas un réglage sur le test.
 
 ## 3. Ce qui reste raté, par catégorie
 
 Toutes les erreurs restantes (chemin NVIDIA, réseau actif, les 7 extraits :
-36 ratés, 19 fausses coupes) ont été regardées sur planches n-2 | n-1 | n |
+36 ratés, 19 fausses coupes ; mesure de 14 h 15, juste avant la dernière
+optimisation de débit, qui déplace une fausse coupe sur deux extraits) ont
+été regardées sur planches n-2 | n-1 | n |
 n+1 (`docs/reports/coupes/*.jpg` : trois exemples). **Aucune n'est une
 erreur d'annotation** ; 2 sont des détections à une image près, 4 sont
 discutables (dernier palier d'un zoom par paliers noté coupe, main lancée
@@ -167,7 +244,36 @@ l'application ; les chiffres des vrais chemins sont au § 2.)
 - **Décoder ou analyser moins d'images** : interdit et non fait ; toutes les
   images passent par le réseau et par les mesures.
 
-@@DEBIT@@
+## 5. Débit
+
+**RTX 3090 (debian-nas, Ryzen 9 5900X 6 vCPU), indexation complète d'un
+épisode** (DBS Beerus 01, 23 min, 33 512 images ; `tests/bench_pipeline.py
+--sections season` : coupes, mouvement, images médianes, tags, embeddings,
+miniatures, proxys), deux passages alternés de chaque, cache disque chaud :
+
+| | passage 1 | passage 2 | décodage + coupes + mouvement | plans |
+|---|---|---|---|---|
+| Sans réseau | 70,6 s | 71,3 s | 60,1 / 60,7 s | 399 |
+| Avec réseau | 79,4 s | 78,7 s | 67,0 / 66,9 s | 497 |
+
+**+11,4 %** sur l'indexation (limite : 15 %). Le réseau lui-même tient
+5 000 images/s sur la 3090 ; le surcoût vient surtout du travail par image
+côté CPU (image couleur 48×27, histogramme, décision). Deux optimisations
+ont été nécessaires pour passer sous 15 % (premier essai : +37 %) : les
+mesures coûteuses ne sont calculées que si le score peut encore franchir le
+seuil (décisions identiques, vérifié), et l'image du réseau est construite
+directement en 48×27 (un `cv2.resize` par petite image coûtait ~0,2 ms
+sous charge).
+
+**CPU.** TransNetV2 en PyTorch sur les 6 vCPU du NAS : **74 images/s**
+(ONNX Runtime : 67). Passe de coupes seule, CPU uniquement
+(`CUDA_VISIBLE_DEVICES=`), extrait `dbs_beerus_02_a` (3 638 images, 2 min
+32 s), machine au calme : **11,1 s sans réseau, 57,3 s avec** (328 → 64
+images/s, 2,6× le temps réel). Soit environ **+7 min pour un épisode de
+23 min** sur 6 cœurs. Utilisable, mais c'est un choix : sans GPU, mieux vaut
+ne télécharger TransNetV2 que si la précision des coupes compte plus que
+le temps d'indexation. Mac : même code que le CPU (le réseau y tourne sur
+le CPU), débit non mesuré faute de Mac.
 
 ## 6. Synchro musique et recherche
 
@@ -176,7 +282,19 @@ indexée) et un clip pour la synchro musique. Une coupe ratée cache un
 deuxième plan dans le premier : ce plan-là n'est jamais un résultat à lui
 seul et la synchro peut montrer un saut au milieu d'un clip.
 
-@@SYNCHRO@@
+Mesuré sur le jeu de test (chemin NVIDIA, 155 vrais plans) :
+
+| | Avant | Après |
+|---|---|---|
+| Plans détectés qui cachent une vraie coupe | 20 sur 122 (16,4 %) | 14 sur 146 (9,6 %) |
+| Vrais plans qui commencent un plan détecté (donc trouvables seuls en recherche, utilisables seuls en synchro) | 117 / 155 (75,5 %) | 137 / 155 (88,4 %) |
+| Sur l'épisode DBS 01 entier : plans | 399 | 497 |
+
+La synchro musique propose des coupes calées sur les plans détectés : avec
+moins de plans « doubles », un clip calé sur un temps fort ne montre plus de
+saut au milieu ; la recherche indexe une image par plan : 20 vrais plans de
+plus sur 155 deviennent des résultats à part entière. (Mesure faite sur les
+plans, pas par un test d'écoute ou de pertinence de recherche.)
 
 ## 7. Tests et reproductibilité
 

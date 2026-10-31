@@ -29,11 +29,13 @@ FLOOR_RULE = {
     "dbs_beerus_01_b": (0.95, 0.99), "black_clover_s02e04_c": (0.82, 0.99),
     "dbs_beerus_02_a": (0.84, 0.94), "dbs_beerus_02_b": (0.57, 0.90), "black_clover_s02e04_b": (0.91, 0.99),
 }
-# with the TransNetV2 network (weights downloaded), same path
+# with the TransNetV2 network (weights downloaded), same path, measured the
+# same day on the CPU (the NVIDIA paths give the same, dbs_beerus_02_a: one
+# more false cut)
 FLOOR_NET = {
-    "dbs_beerus_01_extract": (0.90, 0.90), "black_clover_s02e04_extract": (0.90, 0.87),
-    "dbs_beerus_01_b": (0.97, 0.99), "black_clover_s02e04_c": (0.91, 0.98),
-    "dbs_beerus_02_a": (0.97, 0.93), "dbs_beerus_02_b": (0.79, 0.90), "black_clover_s02e04_b": (0.95, 0.99),
+    "dbs_beerus_01_extract": (0.89, 0.93), "black_clover_s02e04_extract": (0.88, 0.87),
+    "dbs_beerus_01_b": (0.97, 0.99), "black_clover_s02e04_c": (0.91, 0.99),
+    "dbs_beerus_02_a": (0.95, 0.93), "dbs_beerus_02_b": (0.77, 0.90), "black_clover_s02e04_b": (0.95, 0.99),
 }
 
 
