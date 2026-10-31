@@ -379,13 +379,15 @@ def _detect_cuts_via_ffmpeg_hw(
     detector = shotdetect.ShotDetector(threshold)
     # With the cut network the detector also takes the colour picture: the
     # gray plane (same filters as without, then gray→rgb24 which copies it
-    # to the three channels) is stacked over the rgb24 picture.
+    # to the three channels) is stacked over the rgb24 picture. The colour
+    # branch is scaled from the full picture (one conversion, full chroma),
+    # like the frames the network's decision was fitted on.
     color = detector.wants_color
     frame_bytes = w * h * (6 if color else 1)
-    vf = profile["scale_vf"].format(w=w, h=h) + ",format=gray"
+    scale = profile["scale_vf"].format(w=w, h=h)
+    vf = scale + ",format=gray"
     if color:
-        vf = (profile["scale_vf"].format(w=w, h=h) +
-              ",split[g][c];[g]format=gray,format=rgb24[g2];[c]format=rgb24[c2];[g2][c2]vstack")
+        vf = f"split[g][c];[g]{scale},format=gray,format=rgb24[g2];[c]{scale},format=rgb24[c2];[g2][c2]vstack"
 
     # The profile's scale_vf resizes (on-device when the build allows it),
     # `format=gray` discards chroma. -an / -sn skip audio + subs (anime MKVs

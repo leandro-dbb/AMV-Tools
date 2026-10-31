@@ -62,9 +62,10 @@ def _command(path: str, fps: float, profile: dict, proxy_out=None, color: bool =
     # same way, stacked under the gray row (the gray plane is unchanged)
     tiles = f"[a]{gray},tile=layout={k}x1,format=rgb24,pad={_W}:{gh}[g];"
     if color:
-        tiles = (f"[a]{profile['scale_vf'].format(w=gw, h=gh)},split[a1][a2];"
-                 f"[a1]format=gray,tile=layout={k}x1,format=rgb24,pad={_W}:{gh}[g];"
-                 f"[a2]format=rgb24,tile=layout={k}x1,pad={_W}:{gh}[gc];")
+        tiles = (f"[a]split[a1][a2];"
+                 f"[a1]{gray},tile=layout={k}x1,format=rgb24,pad={_W}:{gh}[g];"
+                 f"[a2]{profile['scale_vf'].format(w=gw, h=gh)},format=rgb24,"
+                 f"tile=layout={k}x1,pad={_W}:{gh}[gc];")
     rgb = profile.get("scale_vf_rgb", profile["scale_vf"]).format(w=_RGB_W, h=_RGB_H) + ",format=rgb24"
     proxy_graph, proxy_args = "", []
     if proxy_out is not None:
