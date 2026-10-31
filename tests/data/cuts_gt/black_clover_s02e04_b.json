@@ -1,0 +1,237 @@
+{
+ "video": "bc_b.mkv",
+ "source": "Black.Clover.S02E04.Day.of.Atonement.1080p.BILI.WEB-DL.JPN.AAC2.0.H.265.MSubs-ToonsHub.mkv, from 500 s (stream copy, starts on a keyframe)",
+ "split": "test",
+ "fps": "24000/1001",
+ "n_frames": 3703,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 57,
+   "t_ms": 2377
+  },
+  {
+   "frame": 123,
+   "t_ms": 5130
+  },
+  {
+   "frame": 192,
+   "t_ms": 8008
+  },
+  {
+   "frame": 234,
+   "t_ms": 9760,
+   "note": "wide shot is covered by a dark cloak passing in front of camera (224-233, almost black); new shot (robes, tilt up to man in white) starts at 234"
+  },
+  {
+   "frame": 282,
+   "t_ms": 11762
+  },
+  {
+   "frame": 408,
+   "t_ms": 17017
+  },
+  {
+   "frame": 489,
+   "t_ms": 20395
+  },
+  {
+   "frame": 555,
+   "t_ms": 23148
+  },
+  {
+   "frame": 723,
+   "t_ms": 30155
+  },
+  {
+   "frame": 765,
+   "t_ms": 31907
+  },
+  {
+   "frame": 835,
+   "t_ms": 34826
+  },
+  {
+   "frame": 883,
+   "t_ms": 36828
+  },
+  {
+   "frame": 997,
+   "t_ms": 41583
+  },
+  {
+   "frame": 1069,
+   "t_ms": 44586
+  },
+  {
+   "frame": 1127,
+   "t_ms": 47005
+  },
+  {
+   "frame": 1157,
+   "t_ms": 48257
+  },
+  {
+   "frame": 1253,
+   "t_ms": 52261
+  },
+  {
+   "frame": 1307,
+   "t_ms": 54513
+  },
+  {
+   "frame": 1385,
+   "t_ms": 57766
+  },
+  {
+   "frame": 1481,
+   "t_ms": 61770
+  },
+  {
+   "frame": 1559,
+   "t_ms": 65023
+  },
+  {
+   "frame": 1649,
+   "t_ms": 68777
+  },
+  {
+   "frame": 1721,
+   "t_ms": 71780
+  },
+  {
+   "frame": 1781,
+   "t_ms": 74283
+  },
+  {
+   "frame": 1829,
+   "t_ms": 76285
+  },
+  {
+   "frame": 1889,
+   "t_ms": 78787
+  },
+  {
+   "frame": 1941,
+   "t_ms": 80956
+  },
+  {
+   "frame": 2061,
+   "t_ms": 85961
+  },
+  {
+   "frame": 2091,
+   "t_ms": 87212,
+   "note": "new shot (man in light burst) starts on a near-white flash frame that fades over 2091-2096"
+  },
+  {
+   "frame": 2145,
+   "t_ms": 89464
+  },
+  {
+   "frame": 2179,
+   "t_ms": 90882
+  },
+  {
+   "frame": 2257,
+   "t_ms": 94136
+  },
+  {
+   "frame": 2323,
+   "t_ms": 96888
+  },
+  {
+   "frame": 2347,
+   "t_ms": 97889
+  },
+  {
+   "frame": 2381,
+   "t_ms": 99308
+  },
+  {
+   "frame": 2481,
+   "t_ms": 103478,
+   "note": "abrupt cut from full white (end of fade-to-white 2456-2468, white hold to 2480) to dark room"
+  },
+  {
+   "frame": 2741,
+   "t_ms": 114323
+  },
+  {
+   "frame": 2799,
+   "t_ms": 116742
+  },
+  {
+   "frame": 2877,
+   "t_ms": 119995
+  },
+  {
+   "frame": 2949,
+   "t_ms": 122998
+  },
+  {
+   "frame": 3141,
+   "t_ms": 131006
+  },
+  {
+   "frame": 3285,
+   "t_ms": 137012
+  },
+  {
+   "frame": 3450,
+   "t_ms": 143894
+  },
+  {
+   "frame": 3552,
+   "t_ms": 148148
+  },
+  {
+   "frame": 3636,
+   "t_ms": 151652
+  }
+ ],
+ "dissolves": [
+  {
+   "start": 1189,
+   "end": 1196,
+   "note": "cross-fade from dark swirl/streak shot to symmetric figure/emblem shot"
+  },
+  {
+   "start": 2456,
+   "end": 2468,
+   "note": "jewel close-up flares/fades to full white (white hold 2468-2480, then hard cut 2481)"
+  },
+  {
+   "start": 2541,
+   "end": 2557,
+   "note": "room shot fades to full white (white hold 2557-2589)"
+  },
+  {
+   "start": 2590,
+   "end": 2608,
+   "note": "fade-in from white to gloved hand / jewel shot"
+  },
+  {
+   "start": 3356,
+   "end": 3367,
+   "note": "fast post-production transition through white (letterbox bars also go white): 3356 is a single half-blend of the old shot with white, 3357-3358 full white, new shot fades in from white 3359-3367"
+  }
+ ],
+ "ambiguous": [
+  {
+   "frame": 2088,
+   "end": 2090,
+   "why": "hand close-up (2061-2087) abruptly darkens to near-black while a dark hair/cloak silhouette sweeps in from the right; faint palm creases stay visible at the same place, so most likely the same shot occluded/darkened rather than a new setup. The real new shot starts at the hard cut 2091."
+  },
+  {
+   "frame": 2790,
+   "end": 2798,
+   "why": "man collapses forward, animated on threes (holds at 2790, 2793, 2796): framing content changes a lot each step (back of head, then arm of blond man, then blond hair), but the belt buckles stay at the same screen position, so probably one continuous shot (2741-2798) rather than cuts."
+  }
+ ],
+ "method": "All 38 filmstrips (frames 0-3702) viewed in order; every candidate shot change and every busy passage zoomed frame-by-frame at 320 px with frames.py (220-241, 878-897, 1008-1031, 1040-1063, 1154-1203, 1606-1629, 1660-1683, 1715-1738, 2080-2099, 2450-2473, 2536-2559, 2584-2607, 2786-2809, 3352-3371); every hard cut verified on triplets.py sheets (n-2, n-1, n, n+1) with n-1 in the old shot and n in the new one. Metric candidates used only as hints. Done by eye, independent of any detector.",
+ "notable_non_cuts": "13-56 mouth animation (many metric candidates); 57-122 slow tilt from hair to eye; 224-233 dark cloak passes in front of the lens before the cut at 234; 883-889 fast tilt/pull-back from belt to face inside one shot; 955-980 blue light floods the same shot (colour change, no cut); 1000-1068 continuous crane/rotating move (feet -> body -> hair, with dark shadow shapes 1046-1068); 1157-1188 swirling dark streak effect (many candidates); 1612-1615 woman lifts her head and raises a hand in the same setup (big pose change, same wall background), then dark smoke covers her 1616-1648; 1650-1720 pan across robed figures with purple smoke; 1721-1780 slow pan on robes/floor; 2088-2090 hand darkens under a silhouette (see ambiguous); 2091-2096 white flash fading inside the new shot; 2145-2178 glow flicker on the two faces; 2600-2700 slow move on the gloved hand with lighting change; 2741-2798 man coughs blood and collapses (see ambiguous 2790); 2799-2876 pan from silhouette to pillar; 3400-3449 blond hair enters the foreground of the same shot; 3450-3551 tilt up from hands to blond face; 3552-3635 hair blowing in wind (many small candidates).",
+ "annotator": "Claude agent, by eye on contact sheets (2026-10-31); independent of any detector"
+}

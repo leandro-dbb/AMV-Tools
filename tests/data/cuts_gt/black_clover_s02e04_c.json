@@ -1,0 +1,297 @@
+{
+ "video": "bc_c.mkv",
+ "source": "Black.Clover.S02E04.Day.of.Atonement.1080p.BILI.WEB-DL.JPN.AAC2.0.H.265.MSubs-ToonsHub.mkv, from 1000 s (stream copy, starts on a keyframe)",
+ "split": "tune",
+ "fps": "24000/1001",
+ "n_frames": 3644,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 32,
+   "t_ms": 1335
+  },
+  {
+   "frame": 72,
+   "t_ms": 3003
+  },
+  {
+   "frame": 112,
+   "t_ms": 4671
+  },
+  {
+   "frame": 150,
+   "t_ms": 6256
+  },
+  {
+   "frame": 190,
+   "t_ms": 7925
+  },
+  {
+   "frame": 224,
+   "t_ms": 9343
+  },
+  {
+   "frame": 264,
+   "t_ms": 11011
+  },
+  {
+   "frame": 360,
+   "t_ms": 15015
+  },
+  {
+   "frame": 483,
+   "t_ms": 20145
+  },
+  {
+   "frame": 561,
+   "t_ms": 23398
+  },
+  {
+   "frame": 601,
+   "t_ms": 25067
+  },
+  {
+   "frame": 637,
+   "t_ms": 26568
+  },
+  {
+   "frame": 681,
+   "t_ms": 28403
+  },
+  {
+   "frame": 749,
+   "t_ms": 31240
+  },
+  {
+   "frame": 797,
+   "t_ms": 33242
+  },
+  {
+   "frame": 866,
+   "t_ms": 36119
+  },
+  {
+   "frame": 946,
+   "t_ms": 39456,
+   "note": "cut to black (black 946-1051, then fade-in, see dissolves)"
+  },
+  {
+   "frame": 1142,
+   "t_ms": 47631
+  },
+  {
+   "frame": 1204,
+   "t_ms": 50217,
+   "note": "first of a very fast 2-frame-stepped camera pull-back 1204-1211 (see ambiguous 1208)"
+  },
+  {
+   "frame": 1212,
+   "t_ms": 50550,
+   "note": "new wide framing of Asta after the stepped move 1204-1211"
+  },
+  {
+   "frame": 1282,
+   "t_ms": 53470
+  },
+  {
+   "frame": 1332,
+   "t_ms": 55556
+  },
+  {
+   "frame": 1374,
+   "t_ms": 57307,
+   "note": "blade sweeps over the camera 1368-1373 (dark frames, same shot as 1332); new shot at 1374"
+  },
+  {
+   "frame": 1418,
+   "t_ms": 59142
+  },
+  {
+   "frame": 1462,
+   "t_ms": 60978
+  },
+  {
+   "frame": 1522,
+   "t_ms": 63480
+  },
+  {
+   "frame": 1579,
+   "t_ms": 65857,
+   "note": "fast camera move 1579-1586 inside the new shot"
+  },
+  {
+   "frame": 1654,
+   "t_ms": 68986
+  },
+  {
+   "frame": 1726,
+   "t_ms": 71989,
+   "note": "fast pan 1726-1740 follows the black creature to the woman: one shot"
+  },
+  {
+   "frame": 1957,
+   "t_ms": 81623
+  },
+  {
+   "frame": 2058,
+   "t_ms": 85836
+  },
+  {
+   "frame": 2124,
+   "t_ms": 88588
+  },
+  {
+   "frame": 2148,
+   "t_ms": 89590,
+   "note": "start of a long rotating shot on Asta's sword 2148-2195 (blade passes camera 2194-2195)"
+  },
+  {
+   "frame": 2196,
+   "t_ms": 91592,
+   "note": "new shot right after the dark blade-pass frames 2194-2195"
+  },
+  {
+   "frame": 2232,
+   "t_ms": 93093
+  },
+  {
+   "frame": 2300,
+   "t_ms": 95929
+  },
+  {
+   "frame": 2390,
+   "t_ms": 99683
+  },
+  {
+   "frame": 2426,
+   "t_ms": 101184
+  },
+  {
+   "frame": 2472,
+   "t_ms": 103103
+  },
+  {
+   "frame": 2496,
+   "t_ms": 104104,
+   "note": "hard cut to white (2496-2497 pure white), then fade-from-white, see dissolves"
+  },
+  {
+   "frame": 2604,
+   "t_ms": 108608
+  },
+  {
+   "frame": 2781,
+   "t_ms": 115991
+  },
+  {
+   "frame": 2871,
+   "t_ms": 119745
+  },
+  {
+   "frame": 2961,
+   "t_ms": 123498
+  },
+  {
+   "frame": 3067,
+   "t_ms": 127919
+  },
+  {
+   "frame": 3181,
+   "t_ms": 132674
+  },
+  {
+   "frame": 3200,
+   "t_ms": 133467
+  },
+  {
+   "frame": 3218,
+   "t_ms": 134217,
+   "note": "start of a long stepped zoom-out 3218-3283 (2-frame holds) on the two devils"
+  },
+  {
+   "frame": 3284,
+   "t_ms": 136970,
+   "note": "wide shot of the ice creature; camera pulls back fast 3284-3286"
+  },
+  {
+   "frame": 3312,
+   "t_ms": 138138
+  },
+  {
+   "frame": 3338,
+   "t_ms": 139222,
+   "note": "ground-level shot; Asta's foot lands then pink blast fills the frame 3346-3349 (same shot)"
+  },
+  {
+   "frame": 3350,
+   "t_ms": 139723,
+   "note": "tracking shot along the crystal field; first frame is empty field, Asta enters at 3351"
+  },
+  {
+   "frame": 3408,
+   "t_ms": 142142,
+   "note": "from the tracking shot (grey ice wall rising 3405-3407) to a grey/blue view of the ice wall with floating blocks; no motion continuity, judged a cut"
+  },
+  {
+   "frame": 3416,
+   "t_ms": 142476,
+   "note": "chaotic impact view; stepped pull-back 3416-3421 to the wide shot held from 3422"
+  },
+  {
+   "frame": 3452,
+   "t_ms": 143977
+  },
+  {
+   "frame": 3488,
+   "t_ms": 145479
+  },
+  {
+   "frame": 3524,
+   "t_ms": 146980,
+   "note": "after the pink blast fills the frame 3515-3523 (same shot as 3488), wide shot of the woman"
+  },
+  {
+   "frame": 3596,
+   "t_ms": 149983,
+   "note": "tilted shot of the pink energy flow with red streaks/sparks; 3596-3643 one flickering shot"
+  }
+ ],
+ "dissolves": [
+  {
+   "start": 1052,
+   "end": 1069,
+   "note": "fade-in from black (black 946-1051) to blurred pink shot; brightness ramps 1052->1069 in steps"
+  },
+  {
+   "start": 2498,
+   "end": 2503,
+   "note": "fade from white (white 2496-2497) to the bright figure shot"
+  },
+  {
+   "start": 2530,
+   "end": 2551,
+   "note": "cross-dissolve from the bright figure (back view) to wide shot of Asta with wings; mixing ratio ~0 at 2530, ~1 at 2552"
+  }
+ ],
+ "ambiguous": [
+  {
+   "frame": 1208,
+   "end": 1211,
+   "why": "1204-1211 is a very fast camera pull-back with 2-frame holds (orb close-up -> Asta + woman -> Asta close). Asta's hair is already visible at 1206-1207 so 1208 looks continuous, but the framing jumps at 1208 and 1210 are large enough to be read as cuts"
+  },
+  {
+   "frame": 2160,
+   "why": "inside the long rotating sword shot 2148-2195: framing jumps abruptly (pommel goes from bottom to top of frame, crystals much larger) but same objects; probably a whip/rotation of the 3D camera, not a cut"
+  },
+  {
+   "frame": 3463,
+   "end": 3466,
+   "why": "4 impact frames (black frame with white cross 3463, inverted white frames 3464-3465, white/pink 3466) between 3462 and 3467, which show the same ice-devil shot with only slightly changed framing; flash inside a shot, possibly read as cut in + cut out"
+  }
+ ],
+ "method": "",
+ "notable_non_cuts": "264-310 rotating camera on the woman with the ice spikes (m up to 51); 944 small brightness change before the cut to black; 1364-1373 Asta's sword swings and blade covers the lens; 1436-1461 dark tail slides into frame; 1726-1740 fast pan; 2148-2195 rotating sword shot (big jumps at 2151, 2154, 2157, 2160, 2189, 2191); 2496-2551 white flash/fade then dissolve; mouth open/close 2995-3066 (same shot); 3218-3283 stepped zoom-out with 2-frame holds; 3328-3337 Asta dashes out leaving smear; 3346-3349 and 3361-3369 pink blasts fill frame; 3350-3407 long tracking shot with ice beams passing; 3416-3421 stepped pull-back; 3455-3462 stepped camera move; 3463-3466 impact frames; 3500-3523 pink blast engulfs the frame; 3596-3643 flickering energy shot with black streaks/cross flash (high metrics every frame)",
+ "annotator": "Claude agent, by eye on contact sheets (2026-10-31); independent of any detector"
+}
