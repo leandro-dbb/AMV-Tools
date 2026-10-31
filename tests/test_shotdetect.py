@@ -85,25 +85,25 @@ def _shot(seed: int, n: int, *, dx: int = 0, letterbox: int = 0) -> list[np.ndar
 
 def test_cut_lands_on_the_first_frame_of_the_new_shot():
     frames = _shot(1, 30, dx=1) + _shot(2, 30, dx=1) + _shot(3, 30)
-    assert shotdetect.detect(frames) == [30, 60]
+    assert shotdetect.detect(frames, net=None) == [30, 60]
 
 
 def test_a_flash_or_impact_frame_is_not_a_cut():
     a = _shot(1, 40, dx=1)
     a[20] = np.full((90, 160), 250, np.uint8)            # one white frame
     a[30] = np.asarray(_shot(9, 1)[0])                   # one unrelated impact frame
-    assert shotdetect.detect(a) == []
+    assert shotdetect.detect(a, net=None) == []
 
 
 def test_pans_are_not_cuts_but_letterboxed_cuts_are_found():
     frames = _shot(4, 40, dx=2, letterbox=22) + _shot(5, 40, dx=2, letterbox=22)
-    assert shotdetect.detect(frames) == [40]
+    assert shotdetect.detect(frames, net=None) == [40]
 
 
 def test_streaming_equals_batch():
     frames = _shot(1, 25) + _shot(2, 3) + _shot(3, 25)
-    det = shotdetect.ShotDetector()
+    det = shotdetect.ShotDetector(net=None)
     got = []
     for f in frames:
         got += det.push(f)
-    assert got + det.finish() == shotdetect.detect(frames) == [25, 28]
+    assert got + det.finish() == shotdetect.detect(frames, net=None) == [25, 28]

@@ -29,6 +29,14 @@ Decisions come ``LOOKAHEAD`` frames late (the flash test looks ahead): feed
 frames with :meth:`ShotDetector.push`, which returns the frame indices
 (0-based, first frame of the new shot) confirmed so far; call
 :meth:`ShotDetector.finish` at the end of the stream.
+
+With the TransNetV2 network (:mod:`cutnet`, weights downloaded on demand)
+the decision is a logistic combination of the network's probabilities, the
+measures above and, when the decode path hands over the 160×90 colour
+picture, a colour-histogram distance. Its weights were fitted on four
+annotated extracts and measured on three others (other episodes / other
+passages; docs/reports/coupes.md). Decisions then come
+``ShotDetector.lookahead`` frames late (the network's 100-frame windows).
 """
 from __future__ import annotations
 
@@ -36,6 +44,8 @@ from collections import deque
 from typing import Optional
 
 import numpy as np
+
+from . import cutnet
 
 W, H = 160, 90            # input planes (``cuts._DIFF_W/_DIFF_H``)
 _SW, _SH = 80, 45         # working size
@@ -134,9 +144,15 @@ def strength_at(frames: list, d: list, t: int, min_change: float = MIN_CHANGE) -
 class ShotDetector:
     """Streaming hard-cut detector. ``push`` every decoded frame in order."""
 
-    def __init__(self, threshold: Optional[float] = None):
+    def __init__(self, threshold: Optional[float] = None, net="auto"):
         scale = (threshold / DEFAULT_THRESHOLD) if threshold and threshold > 0 else 1.0
         self.min_change = MIN_CHANGE * scale
+        md = cutnet.load() if net == "auto" else net
+        self._net = _NetDecision(md, scale) if md else None
+        self.lookahead = self._net.lookahead if self._net else LOOKAHEAD
+        # the decode paths hand over the 160×90 colour picture only when it
+        # is used (it costs a conversion and 3× the pipe bytes)
+        self.wants_color = self._net is not None
         self._frames: deque = deque()     # working-size frames, oldest first
         self._d: deque = deque()          # d[i] aligned with _frames
         self._base = 0                    # global index of _frames[0]
@@ -144,7 +160,12 @@ class ShotDetector:
         self._n = 0                       # frames pushed
         self._probs: dict[int, float] = {}
 
-    def push(self, gray) -> list[int]:
+    def push(self, gray, color=None) -> list[int]:
+        """``gray``: 160×90 uint8; ``color``: the same picture as 90×160×3
+        RGB uint8 when the decode path has it (better decisions with the
+        network)."""
+        if self._net is not None:
+            return self._net.push(gray, color)
         f = _small(gray)
         if self._frames:
             self._d.append(motion_diff(self._frames[-1], f))
@@ -155,6 +176,8 @@ class ShotDetector:
         return self._decide(final=False)
 
     def finish(self) -> list[int]:
+        if self._net is not None:
+            return self._net.finish()
         return self._decide(final=True)
 
     def _decide(self, final: bool) -> list[int]:
@@ -190,10 +213,144 @@ class ShotDetector:
         return p
 
 
-def detect(grays, threshold: Optional[float] = None) -> list[int]:
-    """All cut frame indices of a sequence of 160×90 gray frames."""
-    det = ShotDetector(threshold)
+def detect(grays, threshold: Optional[float] = None, colors=None, net="auto") -> list[int]:
+    """All cut frame indices of a sequence of 160×90 gray frames (and their
+    90×160×3 colour pictures, optional)."""
+    det = ShotDetector(threshold, net=net)
     out: list[int] = []
-    for g in grays:
-        out += det.push(g)
+    for i, g in enumerate(grays):
+        out += det.push(g, None if colors is None else colors[i])
     return out + det.finish()
+
+
+# ── combined decision (TransNetV2 + the measures above) ────────────────────
+
+# Logistic weights over ``net_features`` — "color" when the decode path
+# hands over the colour picture, "gray" otherwise (the network then sees
+# the gray picture on its three channels). Fitted on the tuning extracts
+# (DBS Beerus 01 x2, Black Clover S02E04 x2), see docs/reports/coupes.md.
+NET_MODELS = {
+    "color": {"w": np.array([2.748, 2.6948, 0.429, 0.2985, 2.0838, 1.3263, 0.5494, 2.0345, -0.3099, 0.5012, 0.5664, 3.6323]), "b": -7.719, "thr": 0.2},
+    "gray": {"w": np.array([2.7881, 2.5212, 0.4396, 0.3714, 2.2534, 2.2336, 0.5617, 4.0514, -0.6872, 0.3698, 0.8062]), "b": -7.0442, "thr": 0.5},
+}
+
+
+def color_hist(rgb: np.ndarray) -> np.ndarray:
+    """64-bin (4×4×4) RGB histogram, L1-normalised."""
+    q = (np.asarray(rgb).reshape(-1, 3) >> 6).astype(np.int32)
+    h = np.bincount(q[:, 0] * 16 + q[:, 1] * 4 + q[:, 2], minlength=64).astype(np.float32)
+    return h / max(float(h.sum()), 1.0)
+
+
+def net_input(gray, color) -> np.ndarray:
+    """The network's 27×48×3 frame: the colour picture (or the gray one on
+    three channels) area-resized."""
+    import cv2
+    src = np.asarray(color if color is not None else gray, dtype=np.uint8)
+    if src.ndim == 2:
+        src = src.reshape(H, W)
+    small = cv2.resize(src, (cutnet.IN_W, cutnet.IN_H), interpolation=cv2.INTER_AREA)
+    return small if small.ndim == 3 else np.repeat(small[..., None], 3, axis=2)
+
+
+def net_features(frames, d, single, many, chd, t: int, with_color: bool) -> np.ndarray:
+    """Feature row of frame t (first frame of a would-be new shot).
+    ``frames``/``d`` as in :func:`strength_at` (frames indexable by global
+    index), ``single``/``many`` the network's per-frame probabilities,
+    ``chd[t]`` the colour-histogram distance between t-1 and t."""
+    n = len(d)
+    get = lambda a, i: float(a[i]) if 0 <= i < len(a) else 0.0
+    s1, s2, s0 = get(single, t - 1), get(single, t - 2), get(single, t)
+    dt = d[t]
+    nb = sorted(d[j] for j in range(max(1, t - _CTX), min(n, t + _CTX + 1)) if j != t)
+    ratio = dt / ((nb[-2] if len(nb) > 1 else 0.0) + 0.02)
+    hist = hist_diff(frames[t - 1], frames[t])
+    if dt > 0.03:
+        back = min([motion_diff(frames[t - 1], frames[j]) for j in range(t + 1, min(n, t + _FLASH + 1))] or [1.0])
+        seen = min([motion_diff(frames[i], frames[t]) for i in range(max(0, t - _BACK), t - 1)] or [1.0])
+        back, seen = back / max(dt, 1e-3), seen / max(dt, 1e-3)
+    else:
+        back = seen = 1.0
+    strength = strength_at(frames, d, t) > 0
+    row = [s1, get(many, t - 1), s2, s0, max(s1 - max(s2, s0), 0.0),
+           dt, min(ratio, 10.0), hist, min(back, 3.0), min(seen, 3.0), float(strength)]
+    if with_color:
+        row.append(float(chd[t]))
+    return np.array(row, dtype=np.float32)
+
+
+class _Window(dict):
+    """Working frames by global index (``strength_at`` indexes them)."""
+
+    def __len__(self):
+        return self.n
+
+    n = 0
+
+
+class _NetDecision:
+    """Streaming combined decision (see ``NET_MODELS``)."""
+
+    def __init__(self, model_dev, scale: float):
+        self.stream = cutnet.Stream(model_dev)
+        self.scale = scale
+        self.frames = _Window()
+        self.d: list[float] = []
+        self.chd: list[float] = []
+        self.prev_hist = None
+        self.color: Optional[bool] = None
+        self.p: dict[int, float] = {}
+        self.next = 1
+        self.n = 0
+        self.lookahead = cutnet.BATCH.get(self.stream.dev, 1) * cutnet.STEP + cutnet.PAD + _FLASH + 3
+
+    def push(self, gray, color) -> list[int]:
+        if self.color is None:
+            self.color = color is not None
+        f = _small(gray)
+        self.d.append(motion_diff(self.frames[self.n - 1], f) if self.n else 0.0)
+        self.frames[self.n] = f
+        if self.color:
+            h = color_hist(color)
+            self.chd.append(0.5 * float(np.abs(h - self.prev_hist).sum()) if self.prev_hist is not None else 0.0)
+            self.prev_hist = h
+        self.stream.push(net_input(gray, color if self.color else None))
+        self.n += 1
+        self.frames.n = self.n
+        return self._decide(final=False)
+
+    def finish(self) -> list[int]:
+        self.stream.finish()
+        return self._decide(final=True)
+
+    def _ready(self, t: int, final: bool) -> bool:
+        return final or (len(self.stream.single) > t + 2 and t + 1 + _FLASH + 1 < self.n)
+
+    def _prob(self, t: int) -> float:
+        if t in self.p:
+            return self.p[t]
+        if t < 1 or t >= self.n:
+            return 0.0
+        m = NET_MODELS["color" if self.color else "gray"]
+        x = net_features(self.frames, self.d, self.stream.single, self.stream.many, self.chd, t, bool(self.color))
+        z = float(np.dot(m["w"], x) + m["b"])
+        p = 1.0 / (1.0 + np.exp(-z))
+        self.p[t] = p
+        return p
+
+    def _decide(self, final: bool) -> list[int]:
+        out: list[int] = []
+        m = NET_MODELS["color" if self.color else "gray"]
+        thr = min(0.95, m["thr"] * self.scale)
+        while self.next < self.n and self._ready(self.next + 1, final):
+            t = self.next
+            p, pn, pp = self._prob(t), self._prob(t + 1), self.p.get(t - 1, 0.0)
+            if p > thr and p >= pp and p > pn:
+                out.append(t)
+            self.next += 1
+        # forget what no later decision needs
+        for i in [i for i in self.frames if i < self.next - _BACK - _CTX - 2]:
+            del self.frames[i]
+        for i in [i for i in self.p if i < self.next - 2]:
+            del self.p[i]
+        return out

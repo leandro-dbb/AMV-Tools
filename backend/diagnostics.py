@@ -313,7 +313,22 @@ def _model_specs(state) -> list[dict[str, Any]]:
             "enabled": mask_enabled,
             "loaded": state._sam2 is not None,
         },
+        _cutnet_spec(),
     ]
+
+
+def _cutnet_spec() -> dict[str, Any]:
+    """TransNetV2, the optional cut-detection network (indexing/cutnet.py):
+    used as soon as its weights are downloaded."""
+    from .indexing import cutnet
+    return {
+        "key": "transnetv2",
+        "label": "TransNetV2",
+        "repo_id": cutnet.REPO_ID,
+        "files": [cutnet.WEIGHTS],
+        "enabled": True,
+        "loaded": bool(cutnet._cache.get("model")),
+    }
 
 
 def _last_error_for(repo_id: str, errors: list[dict[str, Any]]) -> Optional[str]:

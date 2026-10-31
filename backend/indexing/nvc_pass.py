@@ -248,7 +248,8 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
     matrix, full_range = onepass._color_info(path)
     gray_lut = None if full_range else onepass._TV_TO_PC
     sc = onepass._Scanner(fps, threshold, frame_sink,
-                          lambda b: onepass._nv12_to_rgb_gpu(b, matrix, full_range), cancelled, gray_lut)
+                          lambda b: onepass._nv12_to_rgb_gpu(b, matrix, full_range), cancelled, gray_lut,
+                          (matrix, full_range))
 
     proxy = _ProxyWriter(path, pxw, onepass.PROXY_SOURCE_H)
     # two decode buffers: the decode loop fills one while a worker thread

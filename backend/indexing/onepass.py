@@ -181,6 +181,30 @@ def _nv12_to_rgb(buf: bytes, matrix: str = "bt601", full_range: bool = False) ->
 _GPU_RGB = None   # cached (torch, device) or False
 
 
+def _small_rgb(frame: np.ndarray, matrix: str = "bt601", full_range: bool = False) -> np.ndarray:
+    """160×90 RGB (90×160×3 uint8) of the 512×288 part of a stacked frame,
+    area-downscaled before the YUV→RGB conversion: the cut network's colour
+    input, cheap enough for every frame."""
+    import cv2
+    plane = frame.reshape(STACK_H * 3 // 2, FRAME_W)
+    y = cv2.resize(plane[:FRAME_H], (GRAY_W, GRAY_H), interpolation=cv2.INTER_AREA).astype(np.float32)
+    uv = plane[STACK_H:STACK_H + FRAME_H // 2].reshape(FRAME_H // 2, FRAME_W // 2, 2)
+    uv = cv2.resize(uv, (GRAY_W, GRAY_H), interpolation=cv2.INTER_AREA).astype(np.float32) - 128.0
+    kr, kb = _MATRICES.get(matrix, _MATRICES["bt601"])
+    kg = 1.0 - kr - kb
+    if full_range:
+        cy, cc = 1.0, 1.0
+    else:
+        y = y - 16.0
+        cy, cc = 255.0 / 219.0, 255.0 / 224.0
+    yy = y * cy
+    u, v = uv[..., 0] * cc, uv[..., 1] * cc
+    r = yy + 2.0 * (1.0 - kr) * v
+    b = yy + 2.0 * (1.0 - kb) * u
+    g = yy - (2.0 * kb * (1.0 - kb) * u + 2.0 * kr * (1.0 - kr) * v) / kg
+    return np.clip(np.dstack([r, g, b]).round(), 0, 255).astype(np.uint8)
+
+
 def _nv12_to_rgb_gpu(buf: bytes, matrix: str = "bt601", full_range: bool = False) -> Image.Image:
     """:func:`_nv12_to_rgb` on the CUDA device (same float maths), the
     numpy version if torch/CUDA is unavailable."""
@@ -305,7 +329,8 @@ def detect_cuts_and_medians(
         assert proc.stdout is not None
         cuts_ms, medians, n_frames = scan_stream(getattr(proc.stdout, "raw", proc.stdout), fps, duration_ms, threshold, frame_sink,
                                                  to_rgb=lambda b: _nv12_to_rgb_gpu(b, matrix, full_range),
-                                                 cancelled=cancelled, gray_lut=gray_lut)
+                                                 cancelled=cancelled, gray_lut=gray_lut,
+                                                 color_info=(matrix, full_range))
     finally:
         try:
             if proc.stdout:
@@ -342,7 +367,8 @@ class _Scanner:
     it replaces: the ring of median candidates is the index range
     ``[keep, n)``."""
 
-    def __init__(self, fps: float, threshold: float, frame_sink, to_rgb, cancelled, gray_lut):
+    def __init__(self, fps: float, threshold: float, frame_sink, to_rgb, cancelled, gray_lut,
+                 color_info=None):
         self.fps = fps if fps > 0 else 30.0
         self.threshold = threshold
         self.frame_sink = frame_sink
@@ -358,8 +384,11 @@ class _Scanner:
         self.cuts_ms: list[int] = [0]
         self.medians: dict[int, Image.Image] = {}
         self.detector = shotdetect.ShotDetector(threshold)
-        # a cut is confirmed this late (the detector's flash look-ahead)
-        self.stride_ms = int((shotdetect.LOOKAHEAD + 1) * 1000 / self.fps) + 1
+        # the cut network's colour input: (matrix, full_range) of the stream
+        self.color_info = (color_info or ("bt601", False)) if self.detector.wants_color else None
+        # a cut is confirmed this late (the detector's flash look-ahead, the
+        # cut network's windows)
+        self.stride_ms = int((self.detector.lookahead + 1) * 1000 / self.fps) + 1
 
     # frame index <-> timestamp, exactly as the pipeline computes it
     def ts(self, idx: int) -> int:
@@ -405,7 +434,8 @@ class _Scanner:
             gray = _gray_of(self.frame(idx), self.gray_lut)
             if self.frame_sink is not None and idx % stride == 0:
                 self.frame_sink(self.ts(idx), gray)
-            self._cuts(self.detector.push(gray))
+            rgb = _small_rgb(self.frame(idx), *self.color_info) if self.color_info else None
+            self._cuts(self.detector.push(gray, rgb))
             if idx % stride == 0:
                 self._advance_floor(idx)
         self._advance_floor(end - 1)
@@ -441,9 +471,9 @@ _BLOCK = 32   # frames per pipe read
 
 
 def scan_stream(raw, fps: float, duration_ms: int, threshold: float, frame_sink=None, to_rgb=None,
-                cancelled=None, gray_lut=None) -> tuple[list[int], dict[int, Image.Image], int]:
+                cancelled=None, gray_lut=None, color_info=None) -> tuple[list[int], dict[int, Image.Image], int]:
     """:func:`scan` reading an unbuffered pipe straight into the buffer."""
-    sc = _Scanner(fps, threshold, frame_sink, to_rgb, cancelled, gray_lut)
+    sc = _Scanner(fps, threshold, frame_sink, to_rgb, cancelled, gray_lut, color_info)
     fb = FRAME_BYTES
     eof = False
     while not eof:
