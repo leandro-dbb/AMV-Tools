@@ -162,3 +162,127 @@ def test_combined_detector_streaming_equals_batch_and_finds_a_plain_cut():
     got += det.finish()
     assert got == shotdetect.detect(frames, colors=colors, net=model)
     assert all(0 < t < len(frames) for t in got)
+
+
+# ── performance paths: same decisions ───────────────────────────────────────
+def _colour_clip():
+    rng = np.random.default_rng(3)
+    frames, colors = [], []
+    for k, n in enumerate((37, 5, 60, 2, 44, 70)):
+        for f in _shot(10 + k, n, dx=2):
+            frames.append(f)
+            tint = rng.integers(0, 40, 3)
+            colors.append(np.clip(f[..., None].astype(int) + tint, 0, 255).astype(np.uint8))
+    return frames, colors
+
+
+def test_batched_decision_equals_every_frame_scored_in_full():
+    """The decision scores frames in blocks and settles hopeless ones by a
+    bound: same cuts as scoring every frame with all its measures."""
+    model = _random_net()
+    frames, colors = _colour_clip()
+    got = shotdetect.detect(frames, colors=colors, net=model)
+    x = np.stack([shotdetect.net_input(f, c) for f, c in zip(frames, colors)])
+    single, many = cutnet.predict(x, model)
+    small = {i: shotdetect._small(f) for i, f in enumerate(frames)}
+    win = shotdetect._Window(small)
+    win.n = len(frames)
+    d = [0.0] + [shotdetect.motion_diff(small[i - 1], small[i]) for i in range(1, len(frames))]
+    hists = [shotdetect.color_hist(f) for f in x]
+    chd = [0.0] + [0.5 * float(np.abs(hists[i] - hists[i - 1]).sum()) for i in range(1, len(frames))]
+    m = shotdetect.NET_MODELS["color"]
+    p = [0.0] + [1.0 / (1.0 + np.exp(-(float(np.dot(m["w"], shotdetect.net_features(
+        win, d, single, many, chd, t, True))) + m["b"]))) for t in range(1, len(frames))] + [0.0]
+    want = [t for t in range(1, len(frames)) if p[t] > m["thr"] and p[t] >= p[t - 1] and p[t] > p[t + 1]]
+    assert got == want
+
+
+def test_frames_handed_over_in_blocks_give_the_same_cuts():
+    """NVIDIA: the network's frames and colour histograms come per batch
+    (``push_net``), the gray planes per frame."""
+    model = _random_net()
+    frames, colors = _colour_clip()
+    want = shotdetect.detect(frames, colors=colors, net=model)
+    x = np.stack([shotdetect.net_input(f, c) for f, c in zip(frames, colors)])
+    counts = np.stack([np.bincount(((q[..., 0] << 4) | (q[..., 1] << 2) | q[..., 2]).ravel(), minlength=64)
+                       for q in (x.astype(np.int64) >> 6)]).astype(np.int32)
+    det = shotdetect.ShotDetector(net=model)
+    got = []
+    for i, f in enumerate(frames):
+        if i % 32 == 0:
+            det.push_net(x[i:i + 32], counts[i:i + 32])
+        got += det.push(f)
+    assert got + det.finish() == want
+
+
+def test_asynchronous_network_gives_the_same_probabilities():
+    model = _random_net()
+    rng = np.random.default_rng(1)
+    frames = np.repeat(rng.integers(0, 256, (30, cutnet.IN_H, cutnet.IN_W, 3), dtype=np.uint8), 9, axis=0)
+    a = cutnet.predict(frames, model)
+    st = cutnet.Stream(model, asynchronous=True)
+    for i in range(0, len(frames), 7):
+        st.push_many(frames[i:i + 7])
+    st.finish()
+    assert np.array_equal(a[0], st.single) and np.array_equal(a[1], st.many)
+
+
+def test_2d_formulation_matches_the_network():
+    torch = pytest.importorskip("torch")
+    model, _ = _random_net()
+    rng = np.random.default_rng(2)
+    x = torch.from_numpy(rng.integers(0, 256, (2, 100, cutnet.IN_H, cutnet.IN_W, 3), dtype=np.uint8))
+    with torch.inference_mode():
+        a, b = model(x)
+        a2, b2 = cutnet.forward_2d(model, x)
+    np.testing.assert_allclose(torch.sigmoid(a2).numpy(), torch.sigmoid(a).numpy(), atol=1e-5)
+    np.testing.assert_allclose(torch.sigmoid(b2).numpy(), torch.sigmoid(b).numpy(), atol=1e-5)
+
+
+def test_batched_colour_frames_match_the_per_frame_ones():
+    """``onepass.SmallRgbGpu`` (run here on the CPU) against ``_small_rgb``
+    and ``color_hist``: area weights as matrices, same conversion."""
+    torch = pytest.importorskip("torch")
+    from backend.indexing import onepass
+    rng = np.random.default_rng(4)
+    n = 6
+    st = np.zeros((n, onepass.STACK_H * 3 // 2, onepass.FRAME_W), dtype=np.uint8)
+    st[:, :onepass.STACK_H] = rng.integers(16, 236, (n, onepass.STACK_H, onepass.FRAME_W))
+    st[:, onepass.STACK_H:] = rng.integers(16, 240, (n, onepass.STACK_H // 2, onepass.FRAME_W))
+    st[:, onepass.FRAME_H:onepass.STACK_H, :onepass.GRAY_W] = np.repeat(rng.integers(16, 236, (n, 18, 32)), 5, 1).repeat(5, 2)
+    make = onepass.SmallRgbGpu(torch, "cpu", "bt709", False, onepass._TV_TO_PC)
+    rgb, counts = make(torch.from_numpy(st))
+    for i in range(n):
+        gray = onepass._gray_of(st[i].tobytes(), onepass._TV_TO_PC)
+        ref = onepass._small_rgb(st[i].reshape(-1), gray, "bt709", False)
+        diff = np.abs(rgb[i].numpy().astype(int) - ref.astype(int))
+        assert diff.max() <= 1 and (diff > 0).mean() < 0.01
+        np.testing.assert_allclose(counts[i].numpy() / counts[i].sum().item(), shotdetect.color_hist(rgb[i].numpy()))
+
+
+def test_area_matrix_is_cv2_inter_area():
+    cv2 = pytest.importorskip("cv2")
+    from backend.indexing import onepass
+    img = np.random.default_rng(5).random((90, 160)).astype(np.float32) * 255
+    m = onepass.area_matrix(90, 27).astype(np.float32) @ img @ onepass.area_matrix(160, 48).astype(np.float32).T
+    np.testing.assert_allclose(m, cv2.resize(img, (48, 27), interpolation=cv2.INTER_AREA), atol=1e-3)
+
+
+# ── when the network runs by itself ─────────────────────────────────────────
+@pytest.mark.parametrize("measured, setting, cuda, want", [
+    ("auto", False, False, True), ("manual", False, True, False), ("manual", True, False, True),
+    (None, False, True, True), (None, False, False, False), (None, True, False, True),
+])
+def test_network_runs_by_itself_only_where_it_is_cheap(monkeypatch, measured, setting, cuda, want):
+    from types import SimpleNamespace
+
+    from backend import autotune, state
+    torch = pytest.importorskip("torch")
+    monkeypatch.delenv("AMV_CUTNET", raising=False)
+    monkeypatch.setattr(cutnet, "weights_path", lambda: "/w.pth")
+    monkeypatch.setattr(autotune, "value", lambda name, default: measured if name == "cutnet" else default)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
+    monkeypatch.setattr(state, "get_state", lambda: SimpleNamespace(settings={"indexing": {"precise_cuts": setting}}))
+    assert cutnet.enabled() is want
+    monkeypatch.setenv("AMV_CUTNET", "0")
+    assert cutnet.enabled() is False

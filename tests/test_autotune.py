@@ -146,9 +146,18 @@ def test_batch_candidates_respect_the_memory_tier():
 
 
 def test_plan_per_platform():
-    assert autotune.plan("nvidia") == ["parallel_decodes", "tensorrt", "batch_size"]
-    assert autotune.plan("mac") == ["chunk_workers", "tagger_engine", "batch_size"]
-    assert autotune.plan("cpu") == []
+    assert autotune.plan("nvidia") == ["parallel_decodes", "tensorrt", "batch_size", "cutnet"]
+    assert autotune.plan("mac") == ["chunk_workers", "tagger_engine", "batch_size", "cutnet_device", "cutnet"]
+    assert autotune.plan("cpu") == ["cutnet"]
+
+
+def test_cut_network_measured_again_once_downloaded(monkeypatch):
+    from backend.indexing import cutnet
+    entry = {"source": "library", "settings": {}, "skipped": {"cutnet": "TransNetV2 not downloaded"}}
+    monkeypatch.setattr(cutnet, "weights_path", lambda: None)
+    assert not autotune.needs_run(entry)
+    monkeypatch.setattr(cutnet, "weights_path", lambda: "/w.pth")
+    assert autotune.needs_run(entry)
 
 
 # ── fingerprint ─────────────────────────────────────────────────────────────
