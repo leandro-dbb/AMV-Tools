@@ -200,7 +200,7 @@ def sample_frames(workdir: Path, source: Optional[str], n: int) -> list:
 
 
 # ── cut network (TransNetV2): device, and whether it runs by itself ────────
-CUTNET_LOOPS = 3
+CUTNET_LOOPS = (2, 6)      # 20 s and 60 s clips (see measure_cutnet)
 
 
 def measure_cutnet_device(cancelled: Callable[[], bool]) -> dict:
@@ -243,16 +243,19 @@ def measure_cutnet_device(cancelled: Callable[[], bool]) -> dict:
 
 def measure_cutnet(workdir: Path, source: Optional[str], cancelled: Callable[[], bool]) -> dict:
     """What the network costs on this machine's indexing decode (decode +
-    cut detection, the pass it lives in), on a 30 s clip: "auto" (it runs
-    by itself) when that is at most ``cutnet.AUTO_MAX_OVERHEAD``, else
-    "manual" (Settings > Indexing "Precise cuts", off by default). The
-    extra time per 24-min episode is shown next to that setting."""
+    cut detection, the pass it lives in): "auto" (it runs by itself) when
+    that is at most ``cutnet.AUTO_MAX_OVERHEAD``, else "manual" (Settings >
+    Indexing "Precise cuts", off by default). The marginal cost per second
+    of video is taken between a 20 s and a 60 s clip (the fixed cost at the
+    end of a file — last windows, the pass in flight — would weigh far more
+    on a short clip than on an episode); a clearly too slow network (> 3x
+    the limit on the 20 s clip, a CPU) stops there. The extra time per
+    24-min episode is shown next to the setting."""
     from ..indexing import cuts, cutnet, onepass, pipeline, shotdetect
     if cutnet.weights_path() is None:
         raise Skip("TransNetV2 not downloaded")
-    clip, origin = make_clip(workdir, source, CUTNET_LOOPS)
 
-    def one(net: str) -> float:
+    def one(clip: Path, net: str) -> float:
         old = os.environ.get("AMV_CUTNET")
         os.environ["AMV_CUTNET"] = net
         try:
@@ -268,21 +271,39 @@ def measure_cutnet(workdir: Path, source: Optional[str], cancelled: Callable[[],
             else:
                 os.environ["AMV_CUTNET"] = old
 
-    one("0")                                  # warm-up: page cache, kernels
-    one("1")
+    def pair(clip: Path, rounds: int) -> tuple[float, float]:
+        off, on = [], []
+        for _ in range(rounds):
+            if cancelled():
+                raise Skip("cancelled")
+            off.append(one(clip, "0"))
+            on.append(one(clip, "1"))
+        return min(off), min(on)
+
+    short, origin = make_clip(workdir, source, CUTNET_LOOPS[0])
+    one(short, "0")                           # warm-up: page cache, kernels
+    one(short, "1")
     if not cutnet._cache.get("model"):
         raise Skip("TransNetV2 does not load")
-    off, on = [], []
-    for _ in range(2):
-        if cancelled():
-            raise Skip("cancelled")
-        off.append(one("0"))
-        on.append(one("1"))
-    t_off, t_on = min(off), min(on)
-    overhead = max(0.0, t_on - t_off) / max(t_off, 1e-6)
-    clip_s = CLIP_S * CUTNET_LOOPS
-    measures = {"off_s": round(t_off, 2), "on_s": round(t_on, 2), "overhead": round(overhead, 3),
-                "extra_s_per_episode": round(max(0.0, t_on - t_off) * 1440.0 / clip_s, 1)}
+    off_a, on_a = pair(short, 2)
+    clip_a = CLIP_S * CUTNET_LOOPS[0]
+    over_a = max(0.0, on_a - off_a) / max(off_a, 1e-6)
+    measures = {"off_s": round(off_a, 2), "on_s": round(on_a, 2)}
+    if over_a > 3 * cutnet.AUTO_MAX_OVERHEAD:
+        overhead, extra_per_s = over_a, max(0.0, on_a - off_a) / clip_a
+        clip_s = clip_a
+    else:
+        long_clip = workdir / "cutnet-long.mkv"
+        _ffmpeg(["-stream_loop", str(CUTNET_LOOPS[1] // CUTNET_LOOPS[0] - 1), "-i", str(short), "-c", "copy",
+                 str(long_clip)])
+        off_b, on_b = pair(long_clip, 1)
+        span = CLIP_S * (CUTNET_LOOPS[1] - CUTNET_LOOPS[0])
+        d_off, d_on = max(off_b - off_a, 1e-6), on_b - on_a
+        overhead = max(0.0, d_on - d_off) / d_off
+        extra_per_s = max(0.0, d_on - d_off) / span
+        measures.update(long_off_s=round(off_b, 2), long_on_s=round(on_b, 2))
+        clip_s = CLIP_S * CUTNET_LOOPS[1]
+    measures.update(overhead=round(overhead, 3), extra_s_per_episode=round(extra_per_s * 1440.0, 1))
     value = "auto" if overhead <= cutnet.AUTO_MAX_OVERHEAD else "manual"
     return {"value": value, "default": "manual", "unit": "", "measures": measures,
             "note": _clip_note(origin, clip_s)}
