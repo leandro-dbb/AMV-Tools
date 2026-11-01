@@ -201,6 +201,61 @@ def _small_rgb(frame: np.ndarray, gray: np.ndarray, matrix: str = "bt601", full_
     return np.clip(np.dstack([r, g, b]).round(), 0, 255).astype(np.uint8)
 
 
+def area_matrix(n_in: int, n_out: int) -> np.ndarray:
+    """(n_out, n_in) weights of an area (box) downscale along one axis — the
+    coverage weights ``cv2.INTER_AREA`` uses."""
+    m = np.zeros((n_out, n_in), dtype=np.float64)
+    sc = n_in / n_out
+    for i in range(n_out):
+        a, b = i * sc, (i + 1) * sc
+        for j in range(int(np.floor(a)), min(n_in, int(np.ceil(b)))):
+            m[i, j] = (min(b, j + 1) - max(a, j)) / sc
+    return m
+
+
+class SmallRgbGpu:
+    """:func:`_small_rgb` and the 64-bin colour histograms for a whole batch
+    of stacked frames still on the CUDA device (separable area downscales
+    as matrix products, float32): the cut network's frames never leave the
+    GPU, only the histogram counts come back (256 bytes a frame)."""
+
+    def __init__(self, torch, device, matrix: str, full_range: bool, gray_lut=None):
+        from . import cutnet
+        f32 = lambda a: torch.tensor(a, dtype=torch.float32, device=device)
+        w, h = cutnet.IN_W, cutnet.IN_H
+        self.torch = torch
+        self.gy, self.gx = f32(area_matrix(GRAY_H, h)), f32(area_matrix(GRAY_W, w).T)
+        self.cy, self.cx = f32(area_matrix(FRAME_H // 2, h)), f32(area_matrix(FRAME_W // 2, w).T)
+        self.lut = None if gray_lut is None else torch.tensor(gray_lut, dtype=torch.uint8, device=device)
+        kr, kb = _MATRICES.get(matrix, _MATRICES["bt601"])
+        self.k = (kr, kb, 1.0 - kr - kb, 1.0 if full_range else 255.0 / 224.0)
+
+    def __call__(self, st):
+        """``st``: (n, STACK_H * 3 / 2, FRAME_W) uint8 stacked frames →
+        ((n, 27, 48, 3) uint8, (n, 64) int32 histogram counts), both on the
+        device (queued work: synchronise before reading the counts)."""
+        torch = self.torch
+        n = st.shape[0]
+        gray = st[:, FRAME_H:STACK_H, :GRAY_W]
+        if self.lut is not None:
+            gray = self.lut[gray.long()]
+        yy = self.gy @ gray.float() @ self.gx
+        uv = st[:, STACK_H:STACK_H + FRAME_H // 2].reshape(n, FRAME_H // 2, FRAME_W // 2, 2).float()
+        u = (self.cy @ uv[..., 0] @ self.cx - 128.0)
+        v = (self.cy @ uv[..., 1] @ self.cx - 128.0)
+        kr, kb, kg, cc = self.k
+        u, v = u * cc, v * cc
+        r = yy + 2.0 * (1.0 - kr) * v
+        b = yy + 2.0 * (1.0 - kb) * u
+        g = yy - (2.0 * kb * (1.0 - kb) * u + 2.0 * kr * (1.0 - kr) * v) / kg
+        rgb = torch.stack([r, g, b], dim=-1).round_().clamp_(0, 255).to(torch.uint8)
+        q = (rgb >> 6).long()
+        bins = (q[..., 0] << 4) | (q[..., 1] << 2) | q[..., 2]
+        bins = (bins.reshape(n, -1) + (torch.arange(n, device=st.device) * 64)[:, None]).reshape(-1)
+        counts = torch.bincount(bins, minlength=n * 64).reshape(n, 64).to(torch.int32)
+        return rgb, counts
+
+
 def _nv12_to_rgb_gpu(buf: bytes, matrix: str = "bt601", full_range: bool = False) -> Image.Image:
     """:func:`_nv12_to_rgb` on the CUDA device (same float maths), the
     numpy version if torch/CUDA is unavailable."""

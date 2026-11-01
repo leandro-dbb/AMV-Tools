@@ -228,7 +228,9 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         ctx, _stream = _torch_cuda_handles(torch)
         # the decoder (and the copies out of its surfaces) get their own
         # stream: its synchronisations must not wait behind the downsizing
-        dec_stream = torch.cuda.Stream()
+        # (high priority: the cut network's passes, on a low-priority stream,
+        # must not hold up the decode -> downsize -> scan chain)
+        dec_stream = torch.cuda.Stream(priority=-1)
         dec = nvc.CreateDecoder(gpuid=0, codec=dmx.GetNvCodecId(), cudacontext=ctx,
                                 cudastream=int(dec_stream.cuda_stream), usedevicememory=True)
     except Exception as exc:
@@ -250,6 +252,13 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
     sc = onepass._Scanner(fps, threshold, frame_sink,
                           lambda b: onepass._nv12_to_rgb_gpu(b, matrix, full_range), cancelled, gray_lut,
                           (matrix, full_range))
+
+    # the cut network's frames and colour histograms: made on the GPU for
+    # the whole batch (no per-frame work on the CPU, the frames stay there)
+    net_rgb = None
+    if sc.color_info is not None:
+        net_rgb = onepass.SmallRgbGpu(torch, dev, matrix, full_range, gray_lut)
+        sc.color_info = None
 
     proxy = _ProxyWriter(path, pxw, onepass.PROXY_SOURCE_H)
     # two decode buffers: the decode loop fills one while a worker thread
@@ -275,12 +284,15 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         st[:, :fh] = s_big(y)
         st[:, fh:sh, :gw] = s_gray(y)
         st[:, sh:sh + fh // 2] = s_uv(uv).reshape(n, fh // 2, fw)
+        net = net_rgb(st) if net_rgb is not None else None
         # wait for the GPU on a blocking event (the thread sleeps) instead of
         # the copy's own synchronisation, which spins a core while it waits
         ev = torch.cuda.Event(blocking=True)
         ev.record(torch.cuda.current_stream())
         ev.synchronize()
         staging[:n].copy_(st.reshape(n, -1))
+        if net is not None:
+            sc.detector.push_net(net[0], net[1].cpu().numpy())
         host = staging_np[:n]
         done = 0
         while done < n:
@@ -305,7 +317,7 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
             puv = s_puv(sel[:, H:].view(len(picks), H // 2, W // 2, 2)).reshape(len(picks), -1, pxw)
             proxy.write(torch.cat([py, puv], 1))
 
-    work_stream = torch.cuda.Stream()
+    work_stream = torch.cuda.Stream(priority=-1)
 
     def worker():
         while True:

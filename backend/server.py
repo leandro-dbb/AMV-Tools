@@ -72,6 +72,8 @@ async def _lifespan(app: FastAPI):
     get_state().start_search_warmup()
     from backend import autotune
     autotune.start_background()
+    from backend.indexing import cutnet
+    cutnet.prewarm()
     log.info("AMV Tools sidecar ready")
     yield
 
