@@ -14,7 +14,9 @@ Readers call ``value(name, default)``: the measured value, or ``default``
 setting. Environment variables keep priority at each call site.
 
 Settings: ``parallel_decodes`` (NVIDIA), ``chunk_workers`` (macOS),
-``tagger_engine`` (macOS: "coreml" | "mps"), ``batch_size`` (CUDA / MPS).
+``tagger_engine`` (macOS: "coreml" | "mps"), ``batch_size`` (CUDA / MPS),
+``cutnet_device`` (macOS: "mps" | "cpu") and ``cutnet`` ("auto" | "manual":
+whether the cut network runs by itself, see ``bench.measure_cutnet``).
 ``AMV_AUTOTUNE=0`` disables the background run.
 """
 from __future__ import annotations
@@ -67,10 +69,16 @@ def value(name: str, default):
 
 
 def needs_run(entry: Optional[dict]) -> bool:
-    """No result for this fingerprint, or one measured on the synthetic
-    clip while the library now has a video."""
+    """No result for this fingerprint, one measured on the synthetic clip
+    while the library now has a video, or one taken before the cut network
+    was downloaded."""
     if entry is None:
         return True
+    if "TransNetV2" in str((entry.get("skipped") or {}).get("cutnet", "")):
+        # the cut network was downloaded after the last run: measure what it costs
+        from ..indexing import cutnet
+        if cutnet.weights_path() is not None:
+            return True
     if entry.get("source") == "synthetic":
         from . import bench
         return bench.library_video() is not None
@@ -100,9 +108,9 @@ def _platform() -> str:
 def plan(platform: str) -> list[str]:
     """Settings measured on ``platform`` (in this order)."""
     return {
-        "nvidia": ["parallel_decodes", "tensorrt", "batch_size"],
-        "mac": ["chunk_workers", "tagger_engine", "batch_size"],
-    }.get(platform, [])
+        "nvidia": ["parallel_decodes", "tensorrt", "batch_size", "cutnet"],
+        "mac": ["chunk_workers", "tagger_engine", "batch_size", "cutnet_device", "cutnet"],
+    }.get(platform, ["cutnet"])
 
 
 def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Callable[[], bool]] = None,
@@ -137,6 +145,8 @@ def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Calla
             "tagger_engine": lambda c: bench.measure_tagger_engine(c["get_frames"](), c["cancelled"]),
             "batch_size": lambda c: bench.measure_batch(c["get_frames"](), c["cancelled"]),
             "tensorrt": lambda c: bench.tensorrt_note(),
+            "cutnet_device": lambda c: bench.measure_cutnet_device(c["cancelled"]),
+            "cutnet": lambda c: bench.measure_cutnet(c["workdir"], c["source"], c["cancelled"]),
         }
         for name in plan(platform) if measure is None else list(measure):
             if cancelled():

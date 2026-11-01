@@ -22,6 +22,7 @@ import { journeyStrings } from './strings.journey';
 import { musicStrings } from './strings.music';
 import { fixStrings } from './strings.fix';
 import { rotoStrings } from './strings.roto';
+import { cutsStrings } from './strings.cuts';
 
 export type Lang = 'en' | 'fr';
 export type Entry = { en: string; fr: string };
@@ -48,6 +49,7 @@ export const DICT: Dict = {
   ...musicStrings,
   ...fixStrings,
   ...rotoStrings,
+  ...cutsStrings,
 };
 
 const LANG_KEY = 'amv-lang';

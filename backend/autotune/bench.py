@@ -199,6 +199,95 @@ def sample_frames(workdir: Path, source: Optional[str], n: int) -> list:
     return [imgs[i % len(imgs)].rotate(0.5 * (i // len(imgs))) for i in range(n)]
 
 
+# ── cut network (TransNetV2): device, and whether it runs by itself ────────
+CUTNET_LOOPS = 3
+
+
+def measure_cutnet_device(cancelled: Callable[[], bool]) -> dict:
+    """Apple Silicon: TransNetV2 on the CPU, on MPS (2D formulation) or
+    through Core ML on the Neural Engine — the fastest that gives the CPU's
+    probabilities (Core ML is fp16: within 0.02)."""
+    import torch
+    from ..indexing import cutnet
+    if cutnet.weights_path() is None:
+        raise Skip("TransNetV2 not downloaded")
+    if not torch.backends.mps.is_available():
+        raise Skip("no MPS")
+    rng = np.random.default_rng(0)
+    frames = np.repeat(rng.integers(0, 256, (40, cutnet.IN_H, cutnet.IN_W, 3), dtype=np.uint8), 10, axis=0)
+    model = cutnet._build(torch)
+    model.load_state_dict(torch.load(cutnet.weights_path(), map_location="cpu", weights_only=True))
+    model.eval()
+    out, measures = {}, {}
+    for dev in ("cpu", "mps", "coreml"):
+        if cancelled():
+            raise Skip("cancelled")
+        if dev == "coreml" and cutnet.coreml_worker(wait=120.0) is None:
+            measures[dev] = None
+            continue
+        m = model.to("cpu" if dev == "cpu" else "mps")
+        md = (m, "cpu" if dev == "cpu" else "mps")
+        kw = {"coreml": dev == "coreml"}
+        cutnet.predict(frames[:150], md, **kw)           # warm-up
+        t0 = time.perf_counter()
+        out[dev] = cutnet.predict(frames, md, **kw)[0]
+        measures[dev] = round((time.perf_counter() - t0) / len(frames), 6)
+    notes = []
+    for dev in ("mps", "coreml"):
+        if dev in out and not choose.equivalent(out["cpu"], out[dev]):
+            measures[dev] = None
+            notes.append(f"{dev} output differs from the CPU")
+    return {"value": choose.against_reference(measures, "cpu"), "default": "coreml", "unit": "s/frame",
+            "measures": measures, "note": "; ".join(notes)}
+
+
+def measure_cutnet(workdir: Path, source: Optional[str], cancelled: Callable[[], bool]) -> dict:
+    """What the network costs on this machine's indexing decode (decode +
+    cut detection, the pass it lives in), on a 30 s clip: "auto" (it runs
+    by itself) when that is at most ``cutnet.AUTO_MAX_OVERHEAD``, else
+    "manual" (Settings > Indexing "Precise cuts", off by default). The
+    extra time per 24-min episode is shown next to that setting."""
+    from ..indexing import cuts, cutnet, onepass, pipeline, shotdetect
+    if cutnet.weights_path() is None:
+        raise Skip("TransNetV2 not downloaded")
+    clip, origin = make_clip(workdir, source, CUTNET_LOOPS)
+
+    def one(net: str) -> float:
+        old = os.environ.get("AMV_CUTNET")
+        os.environ["AMV_CUTNET"] = net
+        try:
+            t0 = time.perf_counter()
+            if onepass.available():
+                pipeline._single_pass_decode(str(clip), shotdetect.DEFAULT_THRESHOLD, cancelled)
+            else:
+                cuts.detect_cuts(str(clip), threshold=shotdetect.DEFAULT_THRESHOLD)
+            return time.perf_counter() - t0
+        finally:
+            if old is None:
+                os.environ.pop("AMV_CUTNET", None)
+            else:
+                os.environ["AMV_CUTNET"] = old
+
+    one("0")                                  # warm-up: page cache, kernels
+    one("1")
+    if not cutnet._cache.get("model"):
+        raise Skip("TransNetV2 does not load")
+    off, on = [], []
+    for _ in range(2):
+        if cancelled():
+            raise Skip("cancelled")
+        off.append(one("0"))
+        on.append(one("1"))
+    t_off, t_on = min(off), min(on)
+    overhead = max(0.0, t_on - t_off) / max(t_off, 1e-6)
+    clip_s = CLIP_S * CUTNET_LOOPS
+    measures = {"off_s": round(t_off, 2), "on_s": round(t_on, 2), "overhead": round(overhead, 3),
+                "extra_s_per_episode": round(max(0.0, t_on - t_off) * 1440.0 / clip_s, 1)}
+    value = "auto" if overhead <= cutnet.AUTO_MAX_OVERHEAD else "manual"
+    return {"value": value, "default": "manual", "unit": "", "measures": measures,
+            "note": _clip_note(origin, clip_s)}
+
+
 # ── tagger engine (Apple Silicon: MPS vs Core ML) ───────────────────────────
 def measure_tagger_engine(frames: list, cancelled: Callable[[], bool]) -> dict:
     from ..models import coreml_tagger
