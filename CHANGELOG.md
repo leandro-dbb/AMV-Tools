@@ -11,7 +11,12 @@ All notable changes to AMV Tools are documented here.
   détecteur actuel, combinés ; sur les extraits de test (DBS : un épisode
   jamais vu au réglage ; Black Clover : un autre passage), rappel 68 → 85 %
   (DBS, combats compris), 91 → 96 % (Black Clover), précision 91-100 %. Sur un épisode entier, 399 → 497 plans.
-  Coût : +11 % sur l'indexation d'un épisode (RTX 3090). Sans le réseau,
+  Coût : +4,8 % sur l'indexation d'un épisode sur RTX 3090, +3,8 % sur
+  Mac M1 Pro (Neural Engine ; +6,5 % pour le tout premier épisode après le
+  démarrage), mêmes décisions de coupe sur chaque moteur.
+  Sans GPU, le réseau n'est activé que si l'autotune mesure ≤ 10 % de
+  surcoût ; sinon option « Coupes précises (plus lent) » (Paramètres ›
+  Indexation, éteinte par défaut, temps estimé affiché). Sans le réseau,
   rien ne change. [Rapport](docs/reports/coupes.md).
 - Cut detection: optional TransNetV2 network (MIT architecture, Apache-2.0
   weights, downloaded on demand) combined with the hand-made detector by a
@@ -19,6 +24,12 @@ All notable changes to AMV Tools are documented here.
   every decode path hands the detector the 160x90 colour picture when the
   network is on. 5 new frame-accurate annotated extracts
   (`tests/data/cuts_gt`), real-path evaluation `tests/eval/cuts_eval.py`.
+- Cut network performance: batched decision, network on its own thread and
+  low-priority CUDA stream, half precision + CUDA graph, its 48x27 frames
+  and colour histograms made on the GPU (NVIDIA); 2D formulation on MPS and
+  Core ML on the Neural Engine (Apple Silicon); autotune settings
+  `cutnet_device` and `cutnet` (auto-on only when it costs ≤ 10 % of the
+  decoding pass), setting `indexing.precise_cuts`.
 
 ## 0.5.0-beta.2 — 2026-10-30
 

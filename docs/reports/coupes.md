@@ -28,9 +28,15 @@ souples apprennent par cœur nos 4 extraits de réglage (§ 4).
   combiné au détecteur actuel et à la couleur, décision réglée sur 4 extraits
   annotés et mesurée sur 3 autres ; **5 nouveaux extraits annotés image par
   image** (251 coupes).
-- **Coût** : +11,4 % sur l'indexation complète d'un épisode sur RTX 3090
-  (limite 15 %). Sur CPU (6 cœurs), la passe de coupes passe de 328 à 64
-  images/s (2,6× le temps réel) : ~7 min de plus par épisode de 23 min.
+- **Coût (après optimisation, § 8)** : **+4,8 %** sur l'indexation complète
+  d'un épisode sur RTX 3090 (+16,6 % avant, mêmes conditions) ; sur Mac
+  M1 Pro **+3,8 %** par épisode une fois le sidecar démarré, **+6,5 %** sur
+  le tout premier (attente unique de ~3,5 s du processus Core ML) — +274 %
+  avant. **Mêmes décisions de coupe** sur les 7 extraits, sur chaque
+  moteur. Sur CPU sans GPU, le réseau coûte toujours ~+7 min par
+  épisode : il n'y est plus activé d'office (Paramètres › Indexation
+  « Coupes précises (plus lent) », éteint par défaut, temps estimé
+  affiché).
 - **Optionnel** : sans les poids (30 Mo, Paramètres › Modèles), le
   détecteur actuel tourne comme avant, au bit près.
 - **Recherche / synchro** : sur le test, les plans qui cachent une vraie
@@ -114,13 +120,12 @@ vérifié) ; `onepass` et `nvc_pass` (NVIDIA par défaut) fabriquent l'image
 512×288 qu'ils ont déjà pour chaque image. Sans les poids (ou
 `AMV_CUTNET=0`), rien ne change : mêmes tuyaux, même règle, mêmes coupes.
 
-**Mac (lecture de code).** Le Mac indexe par `single_pass` (même code que le
-CPU : décodage logiciel ou VideoToolbox, même empilement couleur, même
-décision) ; le réseau y tourne **sur le CPU** : le portage de référence
-prévient que les opérations de TransNetV2 retombent sur le CPU de façon
-incohérente avec MPS (résultats différents), donc mêmes calculs que le
-chemin CPU. Débit non mesuré (pas de Mac ici) : il faut s'attendre au même
-ordre de surcoût que sur le CPU du NAS (§ 5), à confirmer sur le M1 Pro.
+**Mac.** Le Mac indexe par `single_pass` (même code que le CPU : même
+empilement couleur, même décision). La première version y faisait tourner
+le réseau sur le CPU (le portage de référence prévenait de résultats
+différents sur MPS) ; mesuré depuis sur le M1 Pro, MPS donne les
+probabilités du CPU à 10⁻⁷ près, et le réseau tourne désormais par Core ML
+sur le Neural Engine (§ 8).
 
 ## 2 bis. Résultats par chemin (jeu de test)
 
@@ -244,7 +249,10 @@ l'application ; les chiffres des vrais chemins sont au § 2.)
 - **Décoder ou analyser moins d'images** : interdit et non fait ; toutes les
   images passent par le réseau et par les mesures.
 
-## 5. Débit
+## 5. Débit (première version)
+
+Mesures de la première version, avant le travail de performances : l'état
+actuel est au § 8.
 
 **RTX 3090 (debian-nas, Ryzen 9 5900X 6 vCPU), indexation complète d'un
 épisode** (DBS Beerus 01, 23 min, 33 512 images ; `tests/bench_pipeline.py
@@ -309,3 +317,174 @@ plans, pas par un test d'écoute ou de pertinence de recherche.)
   exacte, par jeu.
 - Médias (non commités, > 1 Mo) : NAS `/tmp/cutsgt`, VPS
   `~/dev/amv-testdata/cuts-new` et `Séries test`.
+
+## 8. Performances
+
+Demande : le gain de précision **sans manger les performances** — surcoût
+≤ 5 % sur l'indexation complète d'un épisode, sur NVIDIA et sur Mac, à
+décisions de coupe identiques ; sans sauter ni sous-échantillonner
+d'images, sans rien régler sur le jeu de test.
+
+### Résultat
+
+Épisode DBS Beerus 01 complet (23 min, 33 512 images), `tests/bench_pipeline.py
+--sections season` (coupes, mouvement, images médianes, tags, embeddings,
+miniatures, proxys), sidecar neuf à chaque passage, passages **alternés**
+sans réseau / avec réseau, même charge (3090 : machine au calme ; Mac : sur
+batterie, 78 → 41 % pendant la série, chaque paire à la même charge à
+2 % près).
+
+| Machine | Sans réseau | Avec réseau, avant | Avec réseau, après | Précision |
+|---|---|---|---|---|
+| RTX 3090 (Ryzen 9 5900X, 6 vCPU) | 70,97 s ¹ | 83,8 s (**+16,6 %**) ² | 74,37 s (**+4,8 %**) ¹ | identique |
+| Mac M1 Pro 16 Go | 54,42 s ³ | 202,1 s (**+274 %**) ⁴ | 57,95 s (**+6,5 %**) ³ | identique |
+| Mac M1 Pro, épisode suivant (sidecar déjà démarré) ⁵ | 50,1 s | — | 52,0 s (**+3,8 %**) | identique |
+| CPU seul (6 vCPU, passe de coupes seule, extrait de 2 min 32) | 14,3 / 17,3 s | 72,5 / 64,7 s | 69,4 / 63,2 s | identique |
+| CPU seul, **réglage par défaut** | — | ~+7 min / épisode | **0 %** (réseau éteint, option) | celle du détecteur seul (option : identique au réseau) |
+
+¹ Trois paires consécutives : 71,00 → 74,47 s (+4,9 %), 70,58 → 74,04 s
+(+4,9 %), 71,33 → 74,60 s (+4,6 %). Passe de décodage + coupes +
+mouvement : 60,3 → 63,0 s (+2,7 s) ; le reste du pipeline +0,8 s, dû aux
+**98 plans de plus** (497 au lieu de 399 : autant de tags, embeddings,
+miniatures et proxys en plus) — c'est le prix des coupes trouvées, pas du
+réseau (le réseau seul : +2,7 s, 3,8 %).
+² Quatre passages du code d'avant (83,4 / 86,0 / 83,9 / 82,1 s) contre la
+moyenne des passages sans réseau (71,9 s). Le rapport initial mesurait
++11,4 % ; même code, la machine donne aujourd'hui +15 à +21 % selon la
+paire (bruit de ±3 s, un passage sans réseau à 79,1 s écarté).
+³ Paires : 54,61 → 58,07 s (+6,3 %), 54,22 → 57,82 s (+6,6 %). Ces 3,5 s
+comprennent l'attente **unique** du processus Core ML au premier fichier
+(prêt 4,5 s après le démarrage du sidecar ; l'indexation du bench démarre
+1 s après) : en régime établi, +1,9 s par épisode (ligne suivante).
+⁴ Le réseau tournait sur le CPU du Mac (8 + 2 cœurs) : 232 images/s.
+⁵ Une paire DBS 01 + DBS 02 dans le même sidecar : 104,6 → 110,8 s
+(+6,0 % sur les deux) ; 1ᵉʳ épisode +3,8 s (dont l'attente unique),
+2ᵉ épisode (de la fin du décodage du 1ᵉʳ à celle du 2ᵉ) 50,1 → 52,0 s,
+fin de file (tags, embeddings) 8,3 → 8,6 s. Dans l'application, le
+sidecar démarre avec elle, bien avant la première indexation : c'est le
+cas courant.
+
+**Précision identique, vérifiée à chaque étape** (seuil, coefficients et
+jeu de test inchangés) : les listes de coupes
+(pas seulement les scores) sur les 7 extraits annotés sont identiques à
+celles du code d'avant, image par image (`tests/eval/cuts_eval.py`, JSON
+comparés) :
+
+| Chemin | Moteur du réseau | Vérifié |
+|---|---|---|
+| NVIDIA `nvc_pass` (défaut) | CUDA fp16, graphe CUDA, image 48×27 faite sur le GPU | 7/7 identiques (3 fois : à chaque étape) |
+| CPU ffmpeg `sw` | CUDA fp16 depuis des images numpy | 7/7 identiques |
+| Mac `single_pass` | Core ML (Neural Engine, fp16) | 7/7 identiques (2 versions du programme) |
+| Mac `single_pass` | MPS (formulation 2D) | 7/7 identiques |
+| Mac `single_pass` | CPU (même code de décision et de flux que `sw` sans GPU) | 7/7 identiques |
+
+(Le Mac et le NAS ne décodent pas tout à fait les mêmes pixels — versions
+de ffmpeg différentes — d'où des scores Mac un peu différents de ceux du
+§ 2 bis, *avant comme après* : la comparaison se fait sur la même machine.)
+
+### Où partait le temps, et ce qui a été fait
+
+**NVIDIA.** Le profil (py-spy, épisode entier) a montré que le surcoût
+n'était pas le travail par image côté CPU mais **le réseau lui-même**,
+exécuté dans le fil qui lit les images : 6,7 s de GPU par épisode, et ~300
+noyaux lancés depuis Python à chaque passe (ils tiennent le GIL dont le fil
+de lecture a besoin). Dans l'ordre :
+
+| Étape | Passe NVIDIA seule (sans pipeline) | Épisode complet |
+|---|---|---|
+| Avant | — | +16,6 % |
+| Décision par lots, réseau dans son propre fil (CUDA stream à part), fp16, image 48×27 et histogrammes couleur faits sur le GPU par lots de 32 | 55,8 → 58,3 s (+4,5 %) | +9,0 % (2 paires) |
+| + vrais lots de 4 fenêtres (le lot de 4 prévu ne se formait jamais : une fenêtre par passe) et passe capturée en **graphe CUDA** (un lancement au lieu de ~300) | 55,6 → 57,0 s (+2,5 %) | +2 à +9 % (bruit) |
+| + **priorités de streams** : décodage et réduction en priorité haute, réseau en priorité basse (ses passes de 22 ms ne retardent plus les petits noyaux dont dépend la lecture) | — | **+4,8 %** (3 paires) |
+
+- **fp16** : 1,75× plus rapide sur la 3090 (8 900 contre 5 000 images/s) ;
+  écart aux probabilités du calcul de référence en float32 : ≤ 7·10⁻⁴,
+  **du même ordre que le TF32 utilisé jusqu'ici** par défaut (6,6·10⁻⁴).
+  `AMV_CUTNET_HALF=0` revient au float32/TF32.
+- **Décision par lots** : les mesures bon marché des 200 images que le
+  réseau vient de classer sont calculées d'un coup (numpy) ; seules les
+  images dont le meilleur score possible dépasse le seuil (97 sur 3 637
+  sur `dbs_beerus_02_a`) reçoivent les mesures coûteuses, image par image,
+  avec le calcul exact d'avant. Le test
+  `test_batched_decision_equals_every_frame_scored_in_full` vérifie que
+  les coupes sont celles du calcul complet, sans élagage.
+- **Aucune copie GPU→CPU par image** : les images du réseau restent sur le
+  GPU ; seuls les 64 compteurs d'histogramme couleur par image redescendent
+  (256 octets).
+- Écartés : convolutions 3D réécrites en 2D (3× plus lent sur CUDA),
+  `cudnn.benchmark` (aucun gain), `channels_last_3d` (+2 %).
+
+**Mac.** Mesuré sur le M1 Pro : TransNetV2 sur le CPU, 232 images/s (le
+code d'avant : +274 %) ; sur MPS, 283 images/s seulement — les
+convolutions 3D de MPS n'atteignent que ~10 % du GPU. Dans l'ordre :
+
+| Étape | Débit du réseau | Épisode complet |
+|---|---|---|
+| Avant (CPU) | 232 img/s | +274 % |
+| MPS, réseau réécrit en **convolutions 2D** (chaque convolution (2+1)D = une 3×3 sur les images + trois 1×1 décalées dans le temps ; mêmes calculs, 10⁻⁷ près) | 1 003 img/s | +42,4 % (GPU saturé à 91 %) |
+| **Core ML sur le Neural Engine** (tronc convolutif en fp16, compilé une fois et mis en cache ; tête en PyTorch), dans un processus à part (le `predict` de Core ML tient le GIL) | 1 450-1 510 img/s, sans toucher au GPU | +9,6 % |
+| + produit 4 608 → 1 024 de la tête sur le Neural Engine aussi | | +9,4 % |
+| + processus Core ML démarré avec le sidecar | | **+6,5 %** (dont ~3,5 s d'attente au 1ᵉʳ fichier) |
+
+Écart Core ML / calcul de référence : ≤ 8,4·10⁻⁴ sur les probabilités
+(même ordre que le fp16 / TF32 de NVIDIA). fp16 sur MPS : aucun gain. Le
+moteur (Core ML, MPS ou CPU) est choisi par l'autotune
+(`cutnet_device`) : le plus rapide de ceux qui donnent les probabilités
+du CPU (à 0,02 près pour Core ML) ; tant que le processus Core ML n'est
+pas prêt, un fichier attend au plus 30 s puis passe sur MPS (tout le
+fichier sur un même moteur : le résultat ne dépend jamais du minutage).
+
+**CPU sans GPU.** Le réseau reste ~4,5× plus lent que le détecteur seul
+(ONNX Runtime et int8 déjà écartés, § 4). Il n'est donc plus activé
+d'office : l'autotune mesure la passe de décodage + coupes sur 30 s de la
+bibliothèque, avec et sans réseau, et ne l'active tout seul que si le
+surcoût est ≤ 10 % (`cutnet` = `auto`) ; sinon (`manual`) c'est
+**Paramètres › Indexation › « Coupes précises (plus lent) »**, éteint par
+défaut, avec le temps mesuré affiché (« environ +7 min par épisode de
+24 min » sur le NAS en CPU seul). Mesures de l'autotune :
+
+| Machine | `cutnet` | Passe de 30 s sans / avec réseau |
+|---|---|---|
+| RTX 3090 | `auto` | 60 s : 3,32 / 3,07 s (0 %) |
+| Mac M1 Pro (moteur : `coreml`, 0,65 ms/image contre 0,97 MPS et 4,3 CPU) | `auto` | 20 s : 0,66 / 0,74 s ; 60 s : 1,83 / 1,97 s (+4,6 %, ≈ +2 s par épisode) |
+| CPU seul (NAS, GPU masqué) | `manual` | 20 s : 1,93 / 8,12 s (+320 %, ≈ +7 min par épisode) |
+
+Le coût est pris *par seconde de vidéo* entre un extrait de 20 s et un de
+60 s : le coût fixe de fin de fichier (dernières fenêtres, passe en vol)
+pèserait bien plus sur 1 s de passe que sur un épisode (un premier essai
+sur 30 s lisait +13 % sur le Mac). Un réseau manifestement trop lent
+(> 30 % sur 20 s : le CPU) s'arrête là. Le dénominateur est la passe de
+décodage seule, pas toute l'indexation : la règle est prudente. Sur une
+machine chargée la mesure gonfle (même CPU, autre programme lourd en
+parallèle : +720 %) — elle se refait avec le bouton de l'autotune.
+
+Sans mesure (autotune pas encore passé) : activé avec CUDA, éteint
+ailleurs. `AMV_CUTNET=1` / `0` force toujours.
+
+### Ce qui n'est pas atteint ou pas mesuré
+
+- **Mac, tout premier épisode après le démarrage du sidecar : +6,5 %**
+  (> 5 %), à cause des ~3,5 s de démarrage du processus Core ML ; +3,8 %
+  ensuite. Attendre le réseau sans bloquer la lecture demanderait de
+  laisser les décisions arriver plus tard qu'annoncé, ce qui changerait
+  le choix des images médianes : non fait.
+- **CPU sans GPU** : le réseau n'y est pas plus rapide (il reste ~4,5× le
+  détecteur seul) ; la réponse est de ne plus l'y activer d'office.
+- Mesuré seulement sur ces deux machines : pas de Windows + NVIDIA (le
+  code CUDA — fp16, graphe, priorités — n'a rien de propre à Linux), pas
+  d'autre Mac (sur un Mac Intel, pas de MPS ni de Neural Engine : CPU, donc
+  l'option).
+- Bruit de mesure sur la 3090 : ±3 s d'un passage à l'autre ; le +4,8 %
+  est la moyenne de trois paires consécutives (4,6 à 4,9 %).
+
+### Reproduire
+
+- Bench : `tests/bench_pipeline.py --season <épisode> --sections season`
+  avec `AMV_CUTNET=0` puis `1`, en alternance.
+- Décisions : `python -m tests.eval.cuts_eval --media <dossier> --paths
+  nvc,sw,single_pass --net 1 --json out.json`, puis comparer les listes
+  `missed` / `false` à celles du code d'avant.
+- Tests : `tests/test_shotdetect.py` (décision par lots = calcul complet,
+  images par lots = image par image, réseau asynchrone = synchrone,
+  formulation 2D = réseau, image 48×27 du GPU = celle du CPU à 1 près,
+  règle d'activation), `tests/test_autotune.py`.

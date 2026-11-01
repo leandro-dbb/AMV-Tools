@@ -334,8 +334,14 @@ CC-BY-NC-4.0 / CC-BY-NC-SA-4.0, flagged in Settings).
 
 **Cut detection.** Every frame goes through the hand-made detector; once
 TransNetV2 is downloaded (`Settings > Models`, 30 MB) it is combined with
-it, on the GPU when there is one (CPU otherwise, Macs included). Measured
-at the exact frame on hand-annotated extracts: see
+it: on NVIDIA in half precision on its own low-priority CUDA stream (CUDA
+graph, frames made on the GPU), on Apple Silicon through Core ML on the
+Neural Engine (MPS while Core ML gets ready), on the CPU otherwise. It runs
+by itself only where the automatic tuning measured that it costs at most
+10 % of the decoding pass; elsewhere (typically CPU-only machines) it is
+`Settings > Indexing > Precise cuts (slower)`, off by default, with the
+measured extra time per episode. Same cut decisions on every engine,
+measured at the exact frame on hand-annotated extracts: see
 [docs/reports/coupes.md](docs/reports/coupes.md).
 
 SAM 3 is the one model outside the allow-list: it is not downloaded by AMV
