@@ -87,7 +87,8 @@ def _build_model(weights: str, in_h: int, in_w: int, cache: str):
     native2 = Path(weights).name.startswith("2x")
     name = Path(weights).stem if native2 else "srvgg-animevideov3-x2"
     path = Path(cache) / f"{name}-{in_h}x{in_w}-v1.mlpackage"
-    if not path.exists():
+
+    def build(tmp: Path) -> None:
         import torch
         import torch.nn.functional as F
 
@@ -118,11 +119,14 @@ def _build_model(weights: str, in_h: int, in_w: int, cache: str):
                         convert_to="mlprogram", compute_precision=ct.precision.FLOAT16,
                         compute_units=ct.ComputeUnit.CPU_AND_NE,
                         minimum_deployment_target=ct.target.macOS13)
-        tmp = path.with_name(path.stem + ".partial.mlpackage")
-        import shutil
-        shutil.rmtree(tmp, ignore_errors=True)
         ml.save(str(tmp))
-        os.replace(tmp, path)
+
+    # The upscale starts two Neural Engine processes at once: on a first run
+    # both converted to the same ".partial" name and the second os.replace
+    # failed (ENOTEMPTY), which stopped the Neural Engine for the whole job.
+    # _cached builds under a per-process name and lets the late one go.
+    from .coreml import _cached
+    path = _cached(path, build)
     return ct.models.MLModel(str(path), compute_units=ct.ComputeUnit.CPU_AND_NE)
 
 

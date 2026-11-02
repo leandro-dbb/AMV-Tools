@@ -415,3 +415,40 @@ def test_sub_segmentation_streams_from_the_single_decode(db_path, clip, monkeypa
     assert [(r[1], r[2], r[3]) for r in rows[1:]] == [(0, 4000, parent[0]), (4000, 8000, parent[0])]
     assert all(r[4] for r in rows) and tagged == 3
     assert tagger.images == 3 and siglip.images == 3
+
+
+def _build_slowly(barrier, tmp):
+    barrier.wait()                       # both processes build at the same time
+    tmp.mkdir()
+    (tmp / "weights.bin").write_bytes(b"x" * 1024)
+
+
+def _cache_in_process(path, barrier, out):
+    import functools
+    import traceback
+
+    from backend.finish.coreml import _cached
+    try:
+        _cached(path, functools.partial(_build_slowly, barrier))
+        out.put("ok")
+    except Exception:
+        out.put(traceback.format_exc())
+
+
+def test_two_processes_build_the_same_coreml_program(tmp_path):
+    # M1 Pro, first upscale after the install: the two Neural Engine
+    # processes converted the same program at once and the second one died
+    # on ENOTEMPTY ("Neural Engine upscale stopped"; 1 of 27 frames on it).
+    import multiprocessing as mp
+    ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+    path = tmp_path / "coreml" / "srvgg-animevideov3-x2-256x256-v1.mlpackage"
+    barrier, out = ctx.Barrier(2), ctx.Queue()
+    procs = [ctx.Process(target=_cache_in_process, args=(path, barrier, out)) for _ in range(2)]
+    for p in procs:
+        p.start()
+    results = [out.get(timeout=30) for _ in procs]
+    for p in procs:
+        p.join(timeout=30)
+    assert results == ["ok", "ok"]
+    assert (path / "weights.bin").stat().st_size == 1024
+    assert [p.name for p in path.parent.iterdir()] == [path.name]      # no partial left
