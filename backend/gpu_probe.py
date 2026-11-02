@@ -82,8 +82,18 @@ def _windows_adapters() -> list[str]:
     return [line.strip() for line in (out or "").splitlines() if line.strip()]
 
 
+def _mac_chip() -> list[str]:
+    """Apple Silicon: the chip name ("Apple M1 Pro"), shown by the setup
+    screen. Its GPU has no separate adapter entry to ask for."""
+    out = _run(["sysctl", "-n", "machdep.cpu.brand_string"])
+    name = (out or "").strip()
+    return [name] if name.lower().startswith("apple") else []
+
+
 def _vendor(name: str) -> str:
     low = name.lower()
+    if low.startswith("apple"):
+        return "apple"
     if "nvidia" in low or "geforce" in low or "quadro" in low or "rtx" in low:
         return "nvidia"
     if "amd" in low or "radeon" in low or "ati " in low:
@@ -135,7 +145,12 @@ def probe() -> dict[str, Any]:
     system = platform.system()
     machine = platform.machine()
     nvidia = _nvidia_gpus() if system in ("Windows", "Linux") else []
-    adapters = _windows_adapters() if system == "Windows" else []
+    if system == "Windows":
+        adapters = _windows_adapters()
+    elif system == "Darwin" and machine.lower() in ("arm64", "aarch64"):
+        adapters = _mac_chip()
+    else:
+        adapters = []
     backend, reason = recommend(nvidia, adapters, system, machine)
     return {
         "system": system,

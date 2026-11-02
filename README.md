@@ -551,10 +551,17 @@ Since 0.5.0-beta.1 the release also carries a macOS build (Apple Silicon,
 `.dmg` / `.zip`) and Linux builds (`.AppImage` / `.deb`, x64). They are not
 signed by a known developer:
 
-- **macOS**: the app is signed ad hoc only. After copying it to
-  Applications, right-click → Open (on macOS 15, if nothing offers to open it:
-  System Settings → Privacy & Security → *Open Anyway*), or run
-  `xattr -dr com.apple.quarantine "/Applications/AMV Tools.app"`.
+- **macOS**: the app is signed ad hoc only (not notarized). Checked on
+  macOS 26 (M1 Pro): the first double-click shows *“AMV Tools” Not Opened —
+  Apple could not verify “AMV Tools” is free of malware…* with two buttons.
+  Click **Done**: the highlighted default button, *Move to Trash* (also what
+  Return does), deletes the app. Then open System Settings → Privacy &
+  Security, scroll to *Security*, click **Open Anyway** next to *“AMV Tools”
+  was blocked to protect your Mac*, confirm with your password or Touch ID
+  and click **Open** in the next prompt. Since macOS 15, right-click → Open
+  no longer offers a way in. Alternative in Terminal, before the first
+  launch: `xattr -dr com.apple.quarantine "/Applications/AMV Tools.app"`
+  (adapt the path if you copied it to `~/Applications`).
 - **Linux**: `chmod +x` the AppImage and run it (it needs `libfuse2`; on
   Ubuntu 24.04 `libfuse2t64`), or install the `.deb`
   (`sudo apt install ./amv-tools_<version>_amd64.deb`).
@@ -612,6 +619,15 @@ Remove-Item "$env:APPDATA\amv-tools" -Recurse -Force -ErrorAction SilentlyContin
 
 The Hugging Face model cache under `%USERPROFILE%\.cache\huggingface` is
 preserved. Deleting it forces a multi-GB model re-download on next launch.
+
+macOS: quit the app, then delete `AMV Tools.app` (from Applications or
+`~/Applications`), `~/Library/Application Support/amv-tools` (Python,
+packages, database, finishing models, exports) and
+`~/Library/Preferences/com.amvtools.app.plist`. The search, tagging and
+masking models (SigLIP 2, wd-tagger, BiRefNet, SAM 2, TransNetV2: about
+2.5 GB after a full test) are in the shared Hugging Face cache,
+`~/.cache/huggingface/hub/models--*`; delete those folders too to free the
+space (other apps may use that cache).
 
 ## Hardware Support
 

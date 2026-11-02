@@ -9,6 +9,7 @@ import type {
   TimelineSelection,
 } from '../api/types';
 import { useT } from '../i18n';
+import { finalCutUnsupported } from '../timelineSources';
 
 export interface TimelineExportDialogProps {
   selection: TimelineSelection;
@@ -327,6 +328,13 @@ export default function TimelineExportDialog({
               )}
             </div>
           </div>
+
+          {software === 'finalcut' && preview && finalCutUnsupported(preview.sources).length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg px-3 py-2 text-xs text-amber-200"
+                 data-testid="timeline-finalcut-unsupported">
+              {t('timeline.finalcut.unsupported', { count: finalCutUnsupported(preview.sources).length })}
+            </div>
+          )}
 
           {preview && preview.warnings.length > 0 && (
             <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg px-3 py-2">

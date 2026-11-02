@@ -18,6 +18,12 @@ let apiPort = 0;
 const SIDECAR_STOP_GRACE_MS = 3000;
 let sidecarStopping: Promise<void> | null = null;
 let sidecarStopped = false;
+// The running sidecar has opened its port: an exit from then on, other than
+// a quit or a stop we asked for, is a crash (restartAfterCrash).
+let sidecarUp = false;
+let appQuitting = false;
+let sidecarRestarts = 0;
+const MAX_SIDECAR_RESTARTS = 2;
 // Per-launch secret: the sidecar refuses requests without it (backend/security.py),
 // so other local web pages cannot drive it. Renderer gets it via the preload.
 // AMV_TOKEN is a test-only override: the Windows smoke workflow launches the
@@ -300,12 +306,16 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
   // later exits (normal quit) reject into an already-settled race: no-ops.
   let rejectOnExit: ((err: Error) => void) | null = null;
   const exited = new Promise<never>((_, reject) => { rejectOnExit = reject; });
-  pyProc.on('exit', (code) => {
+  const proc = pyProc;
+  pyProc.on('exit', (code, signal) => {
     console.log(`[main] sidecar exited with code ${code}`);
     const err: SidecarExitError = new Error(`Sidecar exited with code ${code} before opening port ${apiPort}`);
     err.moduleNotFound = sawModuleNotFound;
     err.usedNoSync = noSync.length > 0;
     rejectOnExit?.(err);
+    if (proc === pyProc && sidecarUp && !appQuitting && !sidecarStopping) {
+      restartAfterCrash(proc, code ?? signal ?? 'unknown');
+    }
   });
 
   // uv is completely silent while it downloads a single big wheel (piped
@@ -350,6 +360,36 @@ function waitUntilReady(
     };
     tick();
   });
+}
+
+// The sidecar died while the app was in use (M1 Pro: a native crash in
+// PyTorch's MPS backend): every request then failed with "Failed to fetch"
+// and nothing said why. Start it again behind the startup screen, a couple
+// of times at most, then show the error.
+function restartAfterCrash(proc: ChildProcess, code: number | string) {
+  sidecarUp = false;
+  killSidecarGroup(proc);     // its workers (Core ML, ffmpeg) go with it
+  console.error(`[main] the backend stopped unexpectedly (${code})`);
+  bootstrapPhase = 'starting';
+  // the reloaded page shows the startup screen; events sent before it
+  // listens would be lost
+  const afterReload = (evt: BootstrapEvent) => {
+    mainWindow?.webContents.once('did-finish-load', () => emitBootstrap(evt));
+    mainWindow?.webContents.reload();
+  };
+  if (sidecarRestarts >= MAX_SIDECAR_RESTARTS) {
+    bootstrapPhase = 'error';
+    afterReload({ kind: 'error', message: `The Python backend stopped unexpectedly (${code}) and was already restarted ${sidecarRestarts} times. Restart AMV Tools; if it happens again, send the report from Settings > Diagnostic.` });
+    return;
+  }
+  sidecarRestarts += 1;
+  afterReload({ kind: 'line', line: `[main] the backend stopped unexpectedly (${code}) — restarting it`, stream: 'stderr' });
+  startSidecar()
+    .then((port) => {
+      sidecarUp = true;
+      emitBootstrap({ kind: 'ready', port });
+    })
+    .catch((err) => emitBootstrap({ kind: 'error', message: String(err?.message ?? err) }));
 }
 
 function venvPath(): string {
@@ -536,6 +576,7 @@ app.whenReady().then(async () => {
   watchSmokeControlDir();
   startSidecar()
     .then((port) => {
+      sidecarUp = true;
       emitBootstrap({ kind: 'ready', port });
       captureSmokeShot('ready');
     })
@@ -555,6 +596,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
+  appQuitting = true;
   if (sidecarStopped || !pyProc) return;
   event.preventDefault();
   void stopSidecar().finally(() => {

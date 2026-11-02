@@ -1,6 +1,7 @@
 """SigLIP 2 loader — image + text embedding for semantic search."""
 from __future__ import annotations
 
+import functools
 import threading
 import time
 import logging
@@ -12,6 +13,20 @@ from PIL import Image
 from .device import DeviceInfo
 
 log = logging.getLogger(__name__)
+
+
+def _one_pass_at_a_time_on_mps(fn):
+    """PyTorch's MPS backend is not thread-safe: the sidecar's search warm-up
+    (or an indexing batch) and a search running the model at the same time
+    crashed the whole sidecar (SIGSEGV in a Metal kernel, M1 Pro, first
+    search right after a relaunch). Passes on MPS take turns."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.device.backend != "mps":
+            return fn(self, *args, **kwargs)
+        with self._mps_pass:
+            return fn(self, *args, **kwargs)
+    return wrapper
 
 
 class SigLIP2Model:
@@ -35,6 +50,7 @@ class SigLIP2Model:
         self._processor = None
         self._processor_on_device = True
         self._lock = threading.Lock()
+        self._mps_pass = threading.RLock()      # embed_images retries itself
         self._last_used = 0.0
         self._offload_thread: Optional[threading.Thread] = None
         self._stop_offload = threading.Event()
@@ -123,6 +139,7 @@ class SigLIP2Model:
         non_blocking = self.device.backend == "cuda"
         return {k: v.to(self.device.torch_device, non_blocking=non_blocking) for k, v in inputs.items()}
 
+    @_one_pass_at_a_time_on_mps
     def embed_images(self, images: List[Image.Image], max_num_patches: Optional[int] = None) -> np.ndarray:
         if max_num_patches is None:
             max_num_patches = self.max_num_patches
@@ -164,6 +181,7 @@ class SigLIP2Model:
                 self.embed_images(images[mid:], max_num_patches=max_num_patches),
             ], axis=0)
 
+    @_one_pass_at_a_time_on_mps
     def embed_text(self, text: str) -> np.ndarray:
         """Encode a text query. Matches what scene-scout's legacy code did so
         searches behave the same:

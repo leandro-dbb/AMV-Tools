@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, Cpu, Download, Gauge, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import {
   finishApi, formatBytes, formatDuration, requiredModel, subscribeFinish,
@@ -119,9 +120,12 @@ export default function FinishDialog({ kind, sources, caps, onCapsChange, onClos
     </div>
   );
 
-  return (
+  // Portal: opened from the editor's header, whose backdrop blur makes it
+  // the containing block of `fixed` children — the overlay was 74 px tall
+  // and the dialog's title and first options sat above the window.
+  return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
-      <div className="w-full max-w-lg bg-[#18181B] border-2 border-[#27272A] rounded-2xl shadow-2xl shadow-[#8B5CF6]/20" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg max-h-full overflow-y-auto bg-[#18181B] border-2 border-[#27272A] rounded-2xl shadow-2xl shadow-[#8B5CF6]/20" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b-2 border-[#27272A]">
           <div>
             <div className="text-[#FAFAFA] font-semibold">{t('finish.dialog.title', { kind: t(`finish.kind.${kind}`) })}</div>
@@ -268,6 +272,7 @@ export default function FinishDialog({ kind, sources, caps, onCapsChange, onClos
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

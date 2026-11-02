@@ -214,7 +214,7 @@ export default function DiagnosticSection() {
                     : <Download size={12} />}
                   {retrying === model.key
                     ? t('settings.diagnostic.model.retrying')
-                    : t('settings.diagnostic.model.retry')}
+                    : t(model.present ? 'settings.diagnostic.model.retry' : 'settings.diagnostic.model.download')}
                 </button>
               </div>
               {downloadOk === model.key && (

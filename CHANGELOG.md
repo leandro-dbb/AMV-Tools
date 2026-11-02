@@ -4,6 +4,39 @@ All notable changes to AMV Tools are documented here.
 
 ## Unreleased
 
+### macOS : test de l'installeur sur un MacBook M1 Pro (macOS 26)
+
+- **Plus de plantage du moteur à la relance** : une recherche tapée juste
+  après l'ouverture de l'appli tuait le moteur Python (« Failed to fetch »
+  partout) — le préchauffage de la recherche et la recherche faisaient
+  tourner SigLIP sur MPS en même temps, ce que PyTorch ne supporte pas.
+  Même risque pour une recherche pendant l'indexation. Les passes SigLIP
+  sur MPS se suivent maintenant.
+- Si le moteur s'arrête quand même en cours d'utilisation, l'appli le
+  relance derrière l'écran de démarrage (deux fois au plus), puis affiche
+  l'erreur, au lieu de rester bloquée.
+- Indexation HEVC : un épisode dont la vidéo finit avant l'audio (Black
+  Clover S02E04) était décodé deux fois (+2 min 18 sur 3 min 54) à cause
+  de sa dernière scène sans image.
+- Premier upscale : le Neural Engine ne s'arrête plus dès le départ
+  (« Directory not empty » : deux processus préparaient le même programme
+  Core ML) ; jusque-là le GPU faisait 26 images sur 27.
+- Fermer l'appli ne laisse plus de copie de 14 Mo du réseau de coupes dans
+  le dossier temporaire à chaque session.
+- La boîte de finition (upscale, ralenti, profondeur) ne s'ouvre plus à
+  moitié hors de la fenêtre.
+- Export timeline vers Final Cut Pro : avertissement quand les sources sont
+  en MKV/WebM (Final Cut ne les ouvre pas) et la marche à suivre.
+- « Coupes précises » renvoie au bon endroit pour télécharger TransNetV2
+  (Paramètres › Diagnostic, bouton « Télécharger » et plus « Réessayer »),
+  et son coût est mesuré dès le téléchargement.
+- Écran de premier lancement : « Détecté sur cet ordinateur : Apple M1 Pro »
+  au lieu de « Détecté sur ce PC : aucun GPU utilisable ».
+- Le menu Finition ne nomme plus un modèle que le palier n'utilise pas.
+- README : mode d'emploi exact du premier lancement sur macOS 15+
+  (« Terminé », pas « Placer dans la corbeille », puis « Ouvrir quand
+  même ») et désinstallation complète. [Rapport](docs/reports/test-installeur-mac.md).
+
 ### Windows : premier vrai test sur Windows 11 + RTX 3090
 
 - **Premier lancement sur un Windows neuf** : le moteur CUDA échouait
