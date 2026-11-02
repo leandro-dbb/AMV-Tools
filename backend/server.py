@@ -94,6 +94,10 @@ def make_app() -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+    # User requests (search, previews, exports…) pause the background
+    # autotune (backend/autotune/yielding.py).
+    from backend.autotune.yielding import UserActivityMiddleware
+    app.add_middleware(UserActivityMiddleware)
     # Added last so it wraps CORS: Host / Origin / per-launch token check.
     app.add_middleware(LocalAccessMiddleware)
     for r in ROUTERS:

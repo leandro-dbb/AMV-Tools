@@ -32,6 +32,10 @@ All notable changes to AMV Tools are documented here.
   purgé une fois le moteur installé, puis après chaque mise à jour des
   dépendances (`uv cache prune --ci`, en tâche de fond basse priorité) ;
   les mises à jour ne téléchargent toujours que les paquets qui changent.
+- La recherche n'attend plus le réglage automatique : une requête de
+  l'utilisateur (recherche, aperçu, export, finition…) interrompt aussitôt
+  le bench de fond, qui reprend là où il s'était arrêté après 15 s de
+  calme, en priorité basse (la première recherche attendait > 90 s).
 
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 

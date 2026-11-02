@@ -28,12 +28,13 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
-from . import cache, fingerprint
+from . import cache, fingerprint, yielding
 
 log = logging.getLogger(__name__)
 
 START_DELAY_S = 20.0        # let the sidecar finish its own warm-up first
 IDLE_POLL_S = 30.0
+USER_POLL_S = 1.0           # waiting for the user to be idle (yielding.QUIET_S)
 
 _entry_lock = threading.Lock()
 _entry: dict[str, Any] = {}     # {"key": ..., "entry": ...} memo of the cache read
@@ -114,18 +115,25 @@ def plan(platform: str) -> list[str]:
 
 
 def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Callable[[], bool]] = None,
-        platform: Optional[str] = None, source: Optional[str] = None) -> dict:
+        platform: Optional[str] = None, source: Optional[str] = None,
+        progress: Optional[dict] = None) -> dict:
     """Measure, choose, store; returns the cache entry. ``measure``: setting
     -> callable(ctx) override (tests). A failed measurement keeps that
-    setting's default; the others still run."""
+    setting's default; the others still run. ``progress``: the results of
+    an interrupted run of the same fingerprint, filled in as settings are
+    measured — a new run measures only what is missing."""
     from . import bench
     cancelled = cancelled or (lambda: False)
     key, fp = fingerprint.current()
     platform = platform or _platform()
     t0 = time.perf_counter()
-    settings: dict[str, Any] = {}
-    skipped: dict[str, str] = {}
-    errors: dict[str, str] = {}
+    progress = {} if progress is None else progress
+    if progress.get("key") != key:
+        progress.clear()
+        progress["key"] = key
+    settings: dict[str, Any] = progress.setdefault("settings", {})
+    skipped: dict[str, str] = progress.setdefault("skipped", {})
+    errors: dict[str, str] = progress.setdefault("errors", {})
     with bench.workdir() as tmp:
         from pathlib import Path
         ctx: dict[str, Any] = {"workdir": Path(tmp), "source": source, "cancelled": cancelled,
@@ -149,6 +157,8 @@ def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Calla
             "cutnet": lambda c: bench.measure_cutnet(c["workdir"], c["source"], c["cancelled"]),
         }
         for name in plan(platform) if measure is None else list(measure):
+            if name in settings or name in skipped or name in errors:
+                continue                  # measured before the interruption
             if cancelled():
                 raise bench.Skip("cancelled")
             _status["step"] = name
@@ -164,6 +174,10 @@ def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Calla
                     raise
                 skipped[name] = str(exc)
             except Exception as exc:
+                if cancelled():
+                    # stopped mid-measure (a decode cut short): not a failure,
+                    # measured again when the run resumes
+                    raise bench.Skip("cancelled") from exc
                 log.warning("autotune %s failed (%s); keeping the default", name, exc)
                 errors[name] = repr(exc)[:300]
     if cancelled():
@@ -174,17 +188,24 @@ def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Calla
         "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "duration_s": round(time.perf_counter() - t0, 1),
         "source": "library" if ctx["source"] else "synthetic",
-        "settings": settings,
-        "skipped": skipped,
-        "errors": errors,
+        "settings": dict(settings),
+        "skipped": dict(skipped),
+        "errors": dict(errors),
     }
     cache.store(key, entry)
+    progress.clear()
     _forget()
     return entry
 
 
+def _must_yield() -> bool:
+    """Indexing / a re-embed runs, or the user is using the app."""
+    return _busy() or yielding.active()
+
+
 def _background(force: bool, delay: float) -> None:
     from . import bench
+    yielding.lower_this_thread()
     try:
         if delay:
             time.sleep(delay)
@@ -200,15 +221,26 @@ def _background(force: bool, delay: float) -> None:
         if not force and not needs_run(_current_entry()):
             _status.update(state="done", step=None)
             return
-        while _busy():
-            _status.update(state="waiting", step=None)
-            if _cancel.wait(IDLE_POLL_S):
+        progress: dict[str, Any] = {}
+        while True:
+            # Indexing, a re-embed or the user (a search, a preview, an
+            # export…) comes first: wait, and stop a running bench as soon as
+            # one of them starts; it resumes where it stopped (``progress``).
+            while _must_yield():
+                _status.update(state="waiting", step=None)
+                if _cancel.wait(IDLE_POLL_S if _busy() else USER_POLL_S):
+                    return
+            _status.update(state="running", step=None, error=None, started_at=time.time())
+            try:
+                run(cancelled=lambda: _cancel.is_set() or _must_yield(), progress=progress)
+                _status.update(state="done", step=None)
                 return
-        _status.update(state="running", step=None, error=None, started_at=time.time())
-        run(cancelled=lambda: _cancel.is_set() or _busy())
-        _status.update(state="done", step=None)
+            except bench.Skip:
+                if _cancel.is_set():
+                    raise
+                log.info("autotune paused (%s); resumes when the app is idle",
+                         "indexing" if _busy() else "user request")
     except bench.Skip:
-        # indexing started mid-bench: nothing stored, measure next launch
         _status.update(state="postponed", step=None)
     except Exception as exc:
         log.warning("autotune failed (%s); the default settings stay", exc)

@@ -148,3 +148,121 @@ def test_real_uv_prune_keeps_a_hard_linked_venv_working(tmp_path, monkeypatch):
     assert subprocess.run([str(py), "-c", "import six"]).returncode == 0
     r = subprocess.run([uv, "sync", "--offline"], cwd=proj, env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+# ── 5. the autotune never makes the user wait ───────────────────────────────
+@pytest.fixture
+def quiet_autotune(tmp_path, monkeypatch):
+    from backend import autotune
+    from backend.autotune import fingerprint, yielding
+    monkeypatch.setenv("AMV_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(fingerprint, "current", lambda: ("k1", {"gpu": "test"}))
+    monkeypatch.setattr(autotune, "_busy", lambda: False)
+    monkeypatch.setattr(autotune, "USER_POLL_S", 0.01)
+    monkeypatch.setattr(yielding, "QUIET_S", 0.2)
+    yielding.reset()
+    autotune._forget()
+    yield autotune
+    autotune._cancel.set()
+    if autotune._thread is not None:
+        autotune._thread.join(5)
+    autotune._cancel.clear()
+    yielding.reset()
+
+
+def _poll(pred, timeout=20.0):
+    import time
+    end = time.monotonic() + timeout
+    while time.monotonic() < end and not pred():
+        time.sleep(0.01)
+    return pred()
+
+
+def test_a_user_request_stops_the_bench_and_it_resumes_where_it_stopped(quiet_autotune, monkeypatch):
+    """A search arriving mid-bench stops the measure in progress (its
+    ``cancelled`` turns true); once the app is quiet the run resumes and
+    measures only what is left."""
+    from backend.autotune import yielding
+    autotune = quiet_autotune
+    calls = []
+
+    def nvdec(ctx):
+        calls.append("parallel_decodes")
+        return {"value": 2, "default": 2}
+
+    real_run = autotune.run
+    monkeypatch.setattr(autotune, "run", lambda **kw: real_run(
+        measure={"parallel_decodes": nvdec, "batch_size": lambda c: _batch_until_cancelled(c, calls)},
+        platform="nvidia", source="none", **kw))
+    autotune.start_background(force=True, delay=0.0)
+    assert _poll(lambda: calls.count("batch_size") == 1)
+    yielding.begin()                           # the search starts…
+    assert _poll(lambda: autotune.status()["state"] == "waiting")
+    yielding.end()                             # …and ends; quiet for QUIET_S
+    assert _poll(lambda: autotune.status()["state"] == "done")
+    assert calls == ["parallel_decodes", "batch_size", "batch_size"]   # nvdec not measured twice
+    assert autotune.value("batch_size", None) == 32
+
+
+def _batch_until_cancelled(ctx, calls):
+    import time
+    calls.append("batch_size")
+    if calls.count("batch_size") == 1:
+        while not ctx["cancelled"]():
+            time.sleep(0.005)
+        raise RuntimeError("decode cut short")   # an interrupted measure is not a failure
+    return {"value": 32, "default": 64}
+
+
+def test_the_bench_does_not_start_while_the_user_is_active(quiet_autotune, monkeypatch):
+    from backend.autotune import yielding
+    autotune = quiet_autotune
+    calls = []
+    monkeypatch.setattr(autotune, "run", lambda **kw: calls.append(1) or {})
+    yielding.begin()
+    autotune.start_background(force=True, delay=0.0)
+    assert _poll(lambda: autotune.status()["state"] == "waiting")
+    import time
+    time.sleep(0.3)
+    assert not calls
+    yielding.end()
+    assert _poll(lambda: autotune.status()["state"] == "done") and calls == [1]
+
+
+@pytest.mark.parametrize("method, path, user", [
+    ("POST", "/api/search", True),
+    ("POST", "/api/search/image", True),
+    ("GET", "/api/search/similar/12", True),
+    ("GET", "/api/scene/12/proxy", True),
+    ("GET", "/api/scene/12/thumbnail", True),
+    ("GET", "/api/videos/3/stream", True),
+    ("POST", "/api/finish/jobs", True),
+    ("POST", "/api/export", True),
+    ("GET", "/api/status", False),
+    ("GET", "/api/autotune", False),
+    ("POST", "/api/autotune/run", False),
+    ("GET", "/api/index/queue", False),
+    ("GET", "/api/finish/jobs", False),
+    ("GET", "/api/diagnostics", False),
+    ("GET", "/health", False),
+])
+def test_which_requests_count_as_the_user(method, path, user):
+    from backend.autotune.yielding import is_user_request
+    assert is_user_request(method, path) is user
+
+
+def test_middleware_marks_search_requests(monkeypatch, tmp_path):
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    from backend.autotune import yielding
+    from backend.server import make_app
+    monkeypatch.setenv("AMV_DATA_DIR", str(tmp_path))
+    seen = []
+    monkeypatch.setattr(yielding, "begin", lambda: seen.append("begin"))
+    monkeypatch.setattr(yielding, "end", lambda: seen.append("end"))
+    c = TestClient(make_app())
+    c.get("/api/status")
+    assert seen == []
+    c.post("/api/search", json={"query": "beerus"})
+    assert seen == ["begin", "end"]
