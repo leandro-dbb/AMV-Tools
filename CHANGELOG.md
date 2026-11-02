@@ -45,6 +45,15 @@ All notable changes to AMV Tools are documented here.
   (PSNR 30,0 contre 29,6 dB, une génération d'encodage en moins), même
   taille. Avec la sous-segmentation (ses bornes viennent après le décodage)
   ou si une borne ne tombe pas sur une IDR, l'ancien chemin est gardé.
+- **Windows : passe de décodage NVIDIA moins coûteuse.** Sous Windows
+  (WDDM) le fil qui redimensionne et analyse les images limitait la passe
+  (NVDEC n'y était occupé qu'à ~35 %, plancher NVDEC pourtant identique à
+  Linux) : les ~200 petits noyaux GPU de chaque lot de 32 images sont
+  rejoués en un graphe CUDA (mêmes noyaux, mêmes bits ; l'histogramme
+  couleur du réseau n'impose plus de synchronisation), et l'encodage NVENC
+  des aperçus a son propre fil. RTX 3090, épisode avec réseau de coupes :
+  passe 92 → 81 s. Linux et Mac inchangés (`AMV_NVC_GRAPH`,
+  `AMV_PROXY_ENC_THREAD` forcent).
 
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 

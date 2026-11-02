@@ -291,6 +291,7 @@ class SmallRgbGpu:
         self.lut = None if gray_lut is None else torch.tensor(gray_lut, dtype=torch.uint8, device=device)
         kr, kb = _MATRICES.get(matrix, _MATRICES["bt601"])
         self.k = (kr, kb, 1.0 - kr - kb, 1.0 if full_range else 255.0 / 224.0)
+        self.no_sync = False
 
     def __call__(self, st):
         """``st``: (n, STACK_H * 3 / 2, FRAME_W) uint8 stacked frames →
@@ -314,7 +315,15 @@ class SmallRgbGpu:
         q = (rgb >> 6).long()
         bins = (q[..., 0] << 4) | (q[..., 1] << 2) | q[..., 2]
         bins = (bins.reshape(n, -1) + (torch.arange(n, device=st.device) * 64)[:, None]).reshape(-1)
-        counts = torch.bincount(bins, minlength=n * 64).reshape(n, 64).to(torch.int32)
+        if self.no_sync:
+            # the same integer counts without bincount's device -> host
+            # sync (it sizes its output from the maximum): capturable in a
+            # CUDA graph (nvc_pass, Windows)
+            counts = torch.zeros(n * 64, dtype=torch.int64, device=st.device)
+            counts.scatter_add_(0, bins, torch.ones_like(bins))
+            counts = counts.reshape(n, 64).to(torch.int32)
+        else:
+            counts = torch.bincount(bins, minlength=n * 64).reshape(n, 64).to(torch.int32)
         return rgb, counts
 
 

@@ -360,11 +360,16 @@ def direct_writer(tmp_path, monkeypatch):
     return nvc_pass, encoded
 
 
-def test_direct_proxies_put_an_idr_on_each_shots_first_slot_once_decided(direct_writer, monkeypatch):
+@pytest.mark.parametrize("threaded", ["0", "1"])
+def test_direct_proxies_put_an_idr_on_each_shots_first_slot_once_decided(direct_writer, monkeypatch, threaded):
     """Frames are held until the detector cannot cut before them any more;
-    the first 15 fps frame of every shot is an IDR; the stream end drains."""
+    the first 15 fps frame of every shot is an IDR; the stream end drains.
+    Same frames and IDRs with the encoder on its own thread (Windows)."""
     import torch
     nvc_pass, encoded = direct_writer
+    monkeypatch.setenv("AMV_PROXY_ENC_THREAD", threaded)
+    monkeypatch.setattr(torch.cuda, "Event", lambda **kw: type("E", (), {"record": lambda s, x=None: None,
+                                                                         "synchronize": lambda s: None})())
     fps = 24000 / 1001
     n_frames = 2400
     cuts = [37, 38 + 24, 500, 1201, 2390]               # source frames that start a shot
@@ -387,6 +392,8 @@ def test_direct_proxies_put_an_idr_on_each_shots_first_slot_once_decided(direct_
         if picks:
             w.write(torch.tensor(picks), picks)
         w.release(sc)
+        if threaded == "1":
+            _poll(lambda: w._q is None or w._q.empty())
         # never encoded a frame the detector could still cut before
         if encoded:
             assert slots[encoded[-1][0]] < sc.n - sc.detector.lookahead
@@ -395,6 +402,7 @@ def test_direct_proxies_put_an_idr_on_each_shots_first_slot_once_decided(direct_
             sc.cuts_ms.append(sc.ts(c))
     sc.cuts_ms.append(int(n_frames / fps * 1000))        # finish() appends the duration
     w.release(sc, final=True)
+    w.finish_encode()
     assert [e[0] for e in encoded] == list(range(len(slots)))
     expect = {0} | {next(k for k, s in enumerate(slots) if s >= c) for c in cuts}
     assert {e[0] for e in encoded if e[1]} == expect
