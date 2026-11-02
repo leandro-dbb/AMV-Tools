@@ -238,8 +238,11 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         # (high priority: the cut network's passes, on a low-priority stream,
         # must not hold up the decode -> downsize -> scan chain)
         dec_stream = torch.cuda.Stream(priority=-1)
+        extra = {}
+        if os.environ.get("AMV_NVC_LATENCY") == "low":     # measurements (display order kept)
+            extra["latency"] = nvc.DisplayDecodeLatencyType.LOW
         dec = nvc.CreateDecoder(gpuid=0, codec=dmx.GetNvCodecId(), cudacontext=ctx,
-                                cudastream=int(dec_stream.cuda_stream), usedevicememory=True)
+                                cudastream=int(dec_stream.cuda_stream), usedevicememory=True, **extra)
     except Exception as exc:
         log.debug("PyNvVideoCodec cannot open %s: %s", path, exc)
         return None

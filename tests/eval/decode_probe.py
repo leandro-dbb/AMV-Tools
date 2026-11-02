@@ -54,8 +54,9 @@ def step_nvc_raw(video: str) -> dict:
     stream = torch.cuda.Stream()
     t0 = time.perf_counter()
     dmx = nvc.CreateDemuxer(filename=video)
+    extra = {"latency": nvc.DisplayDecodeLatencyType.LOW} if os.environ.get("AMV_NVC_LATENCY") == "low" else {}
     dec = nvc.CreateDecoder(gpuid=0, codec=dmx.GetNvCodecId(), cudacontext=ctx,
-                            cudastream=int(stream.cuda_stream), usedevicememory=True)
+                            cudastream=int(stream.cuda_stream), usedevicememory=True, **extra)
     n = 0
     t_dec = 0.0
     for pkt in dmx:
