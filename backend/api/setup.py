@@ -217,6 +217,10 @@ async def install_backend(req: SetupRequest):
             return {"ok": False, "log": log[-12_000:], "hint": hint}
         state.update_settings(_settings_for_backend(req.backend))
         (user_data_dir() / ".setup_complete").write_text(req.backend)
+        # Held back until now (see autotune._background): measure with the
+        # backend that was just installed, a moment after the app opens.
+        from .. import autotune
+        autotune.start_background()
         state.publish({
             "type": "install",
             "line": f"\n[OK] Installation complete.\n{validation_log}\n",

@@ -138,3 +138,30 @@ def test_refused_prompt_maps_to_cancelled(monkeypatch, tmp_path):
     monkeypatch.setattr(winruntime.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
         cmd, 1, stdout="", stderr="Start-Process : Cette commande ne peut pas être exécutée … L'opération a été annulée par l'utilisateur."))
     assert winruntime._run_elevated(tmp_path / "x.exe") == winruntime._CANCELLED
+
+
+def test_autotune_waits_for_the_first_run_setup(tmp_path, monkeypatch):
+    # Real VM: the autotune imported torch 20 s after launch, while the
+    # onboarding screen was still up (VC++ runtime missing): a half-imported
+    # torch stayed in the sidecar -> "GPU unavailable" banner after setup.
+    from backend import autotune
+    monkeypatch.setattr("backend.paths.user_data_dir", lambda: tmp_path)
+    ran = []
+    monkeypatch.setattr(autotune, "run", lambda **kw: ran.append(1))
+    monkeypatch.setattr(autotune, "needs_run", lambda entry: True)
+    monkeypatch.setattr(autotune, "_busy", lambda: False)
+    autotune._background(False, 0)
+    assert ran == [] and autotune._status["state"] == "waiting_setup"
+    (tmp_path / ".setup_complete").write_text("cu130")
+    autotune._background(False, 0)
+    assert ran == [1]
+
+
+def test_successful_setup_starts_the_autotune(client, data_dir, monkeypatch):
+    from backend import autotune
+    started = []
+    monkeypatch.setattr(autotune, "start_background", lambda *a, **k: started.append(1) or True)
+    monkeypatch.setenv("AMV_E2E_SKIP_SYNC", "1")
+    (data_dir / ".setup_complete").unlink(missing_ok=True)
+    r = client.post("/api/setup/install", json={"backend": "cpu"}).json()
+    assert r["ok"] and started == [1]

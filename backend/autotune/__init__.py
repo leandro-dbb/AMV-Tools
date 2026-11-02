@@ -188,6 +188,15 @@ def _background(force: bool, delay: float) -> None:
     try:
         if delay:
             time.sleep(delay)
+        from ..paths import user_data_dir
+        if not force and not (user_data_dir() / ".setup_complete").exists():
+            # First run: the benches import torch, and the onboarding is about
+            # to replace it (CPU -> CUDA build). On Windows a loaded torch keeps
+            # its DLLs locked against that reinstall, and a torch that failed
+            # to load stays half-imported in this process. The setup starts
+            # the autotune once the chosen backend is installed.
+            _status.update(state="waiting_setup", step=None)
+            return
         if not force and not needs_run(_current_entry()):
             _status.update(state="done", step=None)
             return
