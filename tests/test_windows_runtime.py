@@ -183,3 +183,25 @@ def test_depth_png_goes_through_python_file_api(tmp_path, monkeypatch):
     runner.write_png16(out, img)
     back = cv2.imdecode(np.frombuffer(out.read_bytes(), np.uint8), cv2.IMREAD_UNCHANGED)
     assert back.dtype == np.uint16 and (back == img).all()
+
+
+def test_stale_autotune_workdirs_are_swept(tmp_path):
+    # Real VM: one amv-autotune-* folder (63 MB looped.mkv) stayed in %TEMP%
+    # per sidecar stopped during the autotune (13 after the benches).
+    import os
+    import time
+
+    from backend.autotune import bench
+
+    old = tmp_path / "amv-autotune-old"
+    old.mkdir()
+    (old / "looped.mkv").write_bytes(b"x" * 10)
+    past = time.time() - 2 * bench.STALE_WORKDIR_S
+    os.utime(old, (past, past))
+    fresh = tmp_path / "amv-autotune-running"
+    fresh.mkdir()
+    other = tmp_path / "someone-else"
+    other.mkdir()
+    os.utime(other, (past, past))
+    assert bench.sweep_stale_workdirs(str(tmp_path)) == 1
+    assert not old.exists() and fresh.exists() and other.exists()

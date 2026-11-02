@@ -415,5 +415,35 @@ def tensorrt_note() -> dict:
                else "TensorRT not installed: PyTorch kept")
 
 
+WORKDIR_PREFIX = "amv-autotune-"
+STALE_WORKDIR_S = 3600.0
+
+
+def sweep_stale_workdirs(root: Optional[str] = None, max_age_s: float = STALE_WORKDIR_S) -> int:
+    """Removes work folders left by a sidecar stopped mid-run (the app closed
+    or killed during the autotune: its cleanup never ran). Seen on Windows:
+    one 63 MB looped.mkv in %TEMP% per interrupted run. Returns the count."""
+    import shutil
+    import time as _time
+    base = root or tempfile.gettempdir()
+    removed = 0
+    try:
+        entries = list(os.scandir(base))
+    except OSError:
+        return 0
+    for e in entries:
+        try:
+            if (e.name.startswith(WORKDIR_PREFIX) and e.is_dir(follow_symlinks=False)
+                    and _time.time() - e.stat().st_mtime > max_age_s):
+                shutil.rmtree(e.path, ignore_errors=True)
+                removed += not os.path.exists(e.path)
+        except OSError:
+            continue
+    return removed
+
+
 def workdir() -> tempfile.TemporaryDirectory:
-    return tempfile.TemporaryDirectory(prefix="amv-autotune-")
+    sweep_stale_workdirs()
+    # ignore_cleanup_errors: on Windows a file still held (ffmpeg, a worker)
+    # must not turn a finished measurement into a failure.
+    return tempfile.TemporaryDirectory(prefix=WORKDIR_PREFIX, ignore_cleanup_errors=True)
