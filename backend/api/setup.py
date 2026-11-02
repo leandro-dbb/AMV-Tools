@@ -131,10 +131,16 @@ elif expected == "mps":
 else:
     raise SystemExit(f"Unknown validation target for {backend}: {expected}")
 """
+    # The child writes UTF-8 (PYTHONIOENCODING): decode it as such. With the
+    # default locale codec (cp1252 on Windows) French Windows errors reached
+    # the onboarding screen as "Le module spÃ©cifiÃ© est introuvable".
     kwargs = {
         "cwd": str(PROJECT_ROOT),
         "capture_output": True,
         "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": {**os.environ, "PYTHONIOENCODING": "utf-8"},
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[assignment]
@@ -178,13 +184,29 @@ async def install_backend(req: SetupRequest):
     rc = await proc.wait()
     log = "".join(out_chunks)
     if rc == 0:
+        runtime_msg = ""
+        if sys.platform == "win32" and os.environ.get("AMV_E2E_SKIP_SYNC") != "1":
+            # PyTorch needs the Visual C++ runtime, absent from a fresh Windows.
+            from .. import winruntime
+
+            def _log(line: str) -> None:
+                out_chunks.append(line)
+                state.publish({"type": "install", "line": line})
+
+            _ok, runtime_msg = await asyncio.to_thread(
+                winruntime.ensure_msvc_runtime, user_data_dir(), _log)
+            log = "".join(out_chunks)
         valid, validation_log = _validate_backend(req.backend)
         log = f"{log}\n\n[validation]\n{validation_log}\n"
         if not valid:
-            hint = (
-                f"{req.backend} installed, but the runtime validation failed. "
-                "Retry the backend setup; if it keeps failing, use Clean reinstall from Settings."
-            )
+            from .. import winruntime
+            if sys.platform == "win32" and winruntime.looks_like_missing_runtime(validation_log):
+                hint = runtime_msg or winruntime.MISSING_HINT
+            else:
+                hint = (
+                    f"{req.backend} installed, but the runtime validation failed. "
+                    "Retry the backend setup; if it keeps failing, use Clean reinstall from Settings."
+                )
             state.publish({
                 "type": "install",
                 "line": f"\n[!] Backend validation failed\n{validation_log}\n{hint}\n",
