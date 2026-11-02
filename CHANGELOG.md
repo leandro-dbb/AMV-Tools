@@ -2,7 +2,77 @@
 
 All notable changes to AMV Tools are documented here.
 
-## Unreleased
+## 0.5.0-beta.3 — 2026-11-02
+
+Third **beta**: everything from 0.5.0-beta.2, plus precise cuts (optional
+TransNetV2 network), the fixes from the first real Windows 11 + NVIDIA test
+and from the macOS installer test on a MacBook M1 Pro. Installers for
+Windows, macOS (Apple Silicon) and Linux, still unsigned.
+[Release report](docs/reports/release-0.5.0-beta.3.md).
+
+**En bref (pour un monteur)**
+
+- **Coupes plus précises** (optionnel) : télécharge TransNetV2 dans
+  Paramètres › Modèles (30 Mo) et l'indexation trouve plus de coupes à
+  l'image près (combats rapides, flashs, plans sombres), pour environ 5 %
+  de temps d'indexation en plus sur carte NVIDIA ou Mac. Sans ce
+  téléchargement, rien ne change.
+- **Windows** : le premier lancement marche sur un Windows neuf (le
+  composant Microsoft Visual C++ manquant est installé, Windows demande
+  l'autorisation une fois) ; plus de faux bandeau « GPU indisponible » ;
+  indexation ~25 % plus rapide sur carte NVIDIA ; aperçus au survol prêts
+  bien plus vite ; la recherche n'attend plus le réglage automatique ;
+  ~1 Go d'espace disque libéré après l'installation ; dossiers avec accents
+  acceptés à l'export de la profondeur.
+- **Mac** : plus de plantage du moteur quand on cherche juste après
+  l'ouverture ; si le moteur tombe quand même, l'appli le relance toute
+  seule ; le premier upscale reste sur le Neural Engine ; indexation HEVC
+  deux fois moins longue sur certains épisodes ; mode d'emploi exact du
+  premier lancement sur macOS 15+.
+- **Export** : les clips exportés ne portent plus deux fois le nom de
+  l'épisode (`Serie_01_scene_468.mp4`) ; export timeline vers Final Cut Pro :
+  avertissement quand les sources sont en MKV/WebM, que Final Cut n'ouvre pas.
+- **Finition** : le ralenti propose « Télécharger » quand son modèle manque,
+  comme l'upscale et la profondeur ; la boîte de finition ne s'ouvre plus à
+  moitié hors de la fenêtre.
+- Toujours là : export timeline vers Premiere Pro, DaVinci Resolve, After
+  Effects, Vegas Pro et Final Cut Pro, synchro musique, upscale AnimeJaNai,
+  profondeur Video Depth Anything, éditeur de détourage (bêta). Le
+  **détourage automatique (Mask Mode auto) reste désactivé par défaut**.
+
+**In short (for an editor)**
+
+- **More precise cuts** (optional): download TransNetV2 in Settings › Models
+  (30 MB) and indexing finds more cuts at the exact frame (fast fights,
+  flashes, dark shots), for about 5 % more indexing time on an NVIDIA card
+  or a Mac. Without that download, nothing changes.
+- **Windows**: first launch works on a fresh Windows (the missing Microsoft
+  Visual C++ component is installed, Windows asks once); no more false
+  "GPU unavailable" banner; indexing ~25 % faster on an NVIDIA card; hover
+  previews ready much sooner; search no longer waits for the automatic
+  tuning; ~1 GB of disk space freed after install; folders with accents
+  accepted by the depth export.
+- **Mac**: the engine no longer crashes when you search right after opening
+  the app; if it ever stops, the app restarts it; the first upscale stays on
+  the Neural Engine; HEVC indexing half as long on some episodes; exact
+  first-launch steps for macOS 15+.
+- **Export**: exported clips no longer carry the episode name twice
+  (`Show_01_scene_468.mp4`); timeline export to Final Cut Pro warns when the
+  sources are MKV/WebM, which Final Cut cannot open.
+- **Finishing**: slow-mo offers "Download" when its model is missing, like
+  upscale and depth; the finishing dialog no longer opens half outside the
+  window.
+- Still there: timeline export to Premiere Pro, DaVinci Resolve, After
+  Effects, Vegas Pro and Final Cut Pro, music sync, AnimeJaNai upscale,
+  Video Depth Anything depth, the cut-out editor (beta). **Automatic cutout
+  (Mask Mode auto) stays off by default.**
+
+### Release review (0.5.0-beta.3)
+
+- Reports and test data: personal paths, the location of a test-machine
+  secret, the host runbook and real episode file names (release groups,
+  CRC) replaced by neutral descriptions; the clip-name test uses an
+  anonymised fansub name.
 
 ### macOS : test de l'installeur sur un MacBook M1 Pro (macOS 26)
 
