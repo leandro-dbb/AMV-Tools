@@ -103,9 +103,58 @@ def _footprint(pid: int) -> Optional[int]:
     return None
 
 
+class _ProcessEntry32(ctypes.Structure):
+    _fields_ = [("dwSize", ctypes.c_uint32), ("cntUsage", ctypes.c_uint32),
+                ("th32ProcessID", ctypes.c_uint32), ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", ctypes.c_uint32), ("cntThreads", ctypes.c_uint32),
+                ("th32ParentProcessID", ctypes.c_uint32), ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", ctypes.c_uint32), ("szExeFile", ctypes.c_char * 260)]
+
+
+class _ProcessMemoryCounters(ctypes.Structure):
+    _fields_ = [("cb", ctypes.c_uint32), ("PageFaultCount", ctypes.c_uint32)] + [
+        (n, ctypes.c_size_t) for n in (
+            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+            "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage")]
+
+
+def _processes_windows() -> list[tuple[int, int, int]]:
+    """Windows has neither /proc nor ps: Toolhelp snapshot + working set."""
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    k32.OpenProcess.restype = ctypes.c_void_p
+    k32.Process32First.argtypes = k32.Process32Next.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    k32.K32GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32]
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return []
+    out = []
+    try:
+        e = _ProcessEntry32()
+        e.dwSize = ctypes.sizeof(e)
+        ok = k32.Process32First(snap, ctypes.byref(e))
+        while ok:
+            rss = 0
+            h = k32.OpenProcess(0x1000, False, e.th32ProcessID)  # QUERY_LIMITED_INFORMATION
+            if h:
+                pmc = _ProcessMemoryCounters()
+                pmc.cb = ctypes.sizeof(pmc)
+                if k32.K32GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb):
+                    rss = int(pmc.WorkingSetSize)
+                k32.CloseHandle(h)
+            out.append((int(e.th32ProcessID), int(e.th32ParentProcessID), rss))
+            ok = k32.Process32Next(snap, ctypes.byref(e))
+    finally:
+        k32.CloseHandle(snap)
+    return out
+
+
 def _processes() -> list[tuple[int, int, int]]:
     """(pid, ppid, rss bytes) of every process (no psutil in the app's venv)."""
     out = []
+    if sys.platform == "win32":
+        return _processes_windows()
     if sys.platform.startswith("linux"):
         page = os.sysconf("SC_PAGE_SIZE")
         for d in os.listdir("/proc"):
@@ -159,6 +208,10 @@ class _Cpu:
             with open("/proc/stat") as fh:
                 v = [int(x) for x in fh.readline().split()[1:]]
             return sum(v), v[3] + v[4]
+        if sys.platform == "win32":
+            idle, kern, user = (ctypes.c_uint64() for _ in range(3))
+            if ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kern), ctypes.byref(user)):
+                return kern.value + user.value, idle.value  # kernel time includes idle
         return None
 
     def percent(self) -> Optional[float]:
@@ -378,15 +431,28 @@ class Sidecar:
         self._ws_stop.set()
         if self.proc is None:
             return
-        try:
-            os.killpg(self.proc.pid, signal.SIGTERM)
-        except Exception:
-            self.proc.terminate()
-        try:
-            self.proc.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            os.killpg(self.proc.pid, signal.SIGKILL)
-            self.proc.wait(timeout=5)
+        if sys.platform == "win32":
+            # No process groups: the app's own shutdown, then the whole tree.
+            try:
+                self.post("/api/shutdown", {}, timeout=5)
+            except Exception:
+                pass
+            try:
+                self.proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                pass
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.proc.pid)], capture_output=True)
+            self.proc.wait(timeout=10)
+        else:
+            try:
+                os.killpg(self.proc.pid, signal.SIGTERM)
+            except Exception:
+                self.proc.terminate()
+            try:
+                self.proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+                self.proc.wait(timeout=5)
         if self._ws_thread is not None:
             self._ws_thread.join(timeout=3)
 
@@ -667,7 +733,16 @@ def environment(repo: Path) -> dict:
         env["gpu"] = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
                                     capture_output=True, text=True).stdout.strip()
     try:
-        env["ram_gb"] = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30, 1)
+        if sys.platform == "win32":
+            class _MemStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_uint32), ("dwMemoryLoad", ctypes.c_uint32)] + [
+                    (n, ctypes.c_uint64) for n in ("total", "avail", "tpf", "apf", "tv", "av", "aev")]
+            ms = _MemStatus()
+            ms.dwLength = ctypes.sizeof(ms)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms))
+            env["ram_gb"] = round(ms.total / 2**30, 1)
+        else:
+            env["ram_gb"] = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30, 1)
     except (ValueError, OSError, AttributeError):
         pass
     return env
