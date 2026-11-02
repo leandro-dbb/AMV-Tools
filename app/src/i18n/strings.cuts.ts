@@ -12,8 +12,8 @@ export const cutsStrings: Dict = {
     fr: 'Activé d\'office sur cette machine : il coûte {pct} % sur la passe de décodage (mesuré).',
   },
   'settings.indexing.preciseCuts.manual': {
-    en: 'On this machine: about +{minutes} min per 24-min episode (measured).',
-    fr: 'Sur cette machine : environ +{minutes} min par épisode de 24 min (mesuré).',
+    en: 'On this machine: about +{extra} per 24-min episode (measured).',
+    fr: 'Sur cette machine : environ +{extra} par épisode de 24 min (mesuré).',
   },
   'settings.indexing.preciseCuts.unmeasured': {
     en: 'Extra time not measured yet on this machine (Settings > Diagnostic > Automatic tuning).',

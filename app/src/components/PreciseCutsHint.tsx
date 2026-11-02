@@ -27,6 +27,11 @@ export function usePreciseCuts(): { hint: string; auto: boolean } {
     const pct = Math.round(100 * (m.overhead ?? 0));
     return { hint: `${base} ${t('settings.indexing.preciseCuts.auto', { pct: `+${pct}` })}`, auto: true };
   }
-  const minutes = Math.max(1, Math.round((m.extra_s_per_episode ?? 0) / 60));
-  return { hint: `${base} ${t('settings.indexing.preciseCuts.manual', { minutes })}`, auto: false };
+  return { hint: `${base} ${t('settings.indexing.preciseCuts.manual', { extra: extraPerEpisode(m.extra_s_per_episode ?? 0) })}`, auto: false };
+}
+
+// M1 Pro: 13.5 s measured read "about +1 min" (minutes rounded up to 1).
+export function extraPerEpisode(seconds: number): string {
+  if (seconds < 59.5) return `${Math.max(1, Math.round(seconds))} s`;
+  return `${Math.round(seconds / 60)} min`;
 }
