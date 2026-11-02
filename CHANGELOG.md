@@ -2,6 +2,45 @@
 
 All notable changes to AMV Tools are documented here.
 
+## Unreleased — Linux installer fixes
+
+From the first end-to-end test of the Linux installers (AppImage and
+`.deb`, Debian 12 + RTX 3090).
+[Report](docs/reports/test-installeurs-linux-mac.md).
+
+**En bref (pour un monteur)**
+
+- **Linux** : le premier lancement marche (0.5.0-beta.3 s'arrêtait au bout
+  de 10 s sur « torch==2.4.1 can't be installed » sur Debian 12, Fedora,
+  Ubuntu récents) et il est 6 fois plus court (2 min au lieu de 12 à
+  5 Mo/s : 3 Go de téléchargement inutile en moins) ; juste après
+  l'installation du moteur NVIDIA, l'appli tourne bien sur la carte
+  graphique (elle restait sur le processeur jusqu'au redémarrage).
+- **Noms des fichiers** : les clips du dérushage, les sorties de la
+  finition et les exports du détourage ne portent plus le groupe de
+  fansub, la qualité et la somme de contrôle du fichier d'origine, et
+  gardent les accents.
+- **Recherche** : un « Plans similaires » ne se relance plus tout seul à
+  chaque retour sur l'onglet Recherche (il pouvait remplacer la recherche
+  qu'on venait de taper).
+- L'écran d'accueil annonce les vraies tailles de téléchargement (environ
+  5 Go pour NVIDIA CUDA 13).
+
+**In short (for an editor)**
+
+- **Linux**: first launch works (0.5.0-beta.3 stopped after 10 s on
+  "torch==2.4.1 can't be installed" on Debian 12, Fedora, recent Ubuntu)
+  and is 6× shorter (2 min instead of 12 at 5 MB/s: 3 GB of useless
+  download gone); right after the NVIDIA engine install the app really runs
+  on the graphics card (it stayed on the CPU until restarted).
+- **File names**: derush clips, finishing outputs and cut-out exports no
+  longer carry the fansub group, quality and CRC of the source file, and
+  keep accented letters.
+- **Search**: a "similar shots" no longer re-runs on every return to the
+  Search tab (it could replace the search just typed).
+- The welcome screen shows the real download sizes (about 5 GB for NVIDIA
+  CUDA 13).
+
 ## 0.5.0-beta.3 — 2026-11-02
 
 Third **beta**: everything from 0.5.0-beta.2, plus precise cuts (optional

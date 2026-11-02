@@ -576,8 +576,11 @@ Accurate profile, ~43 s with Fast — see [docs/PERFORMANCE.md](docs/PERFORMANCE
 the packaged app itself (signing, notarization) has not been QA'd. On Macs
 the wd-tagger runs on the GPU through PyTorch and downloads the same
 checkpoint as `model.safetensors` (Apache-2.0) instead of `model.onnx`.
-Linux is built in CI as
-`AppImage` and `.deb` but has not been QA'd end-to-end either. You can also
+The Linux `AppImage` and `.deb` were checked end-to-end on Debian 12 with an
+RTX 3090 (install, CUDA 13 engine, indexing, search, exports, music sync,
+finishing, cut-out editor, uninstall — see
+[docs/reports/test-installeurs-linux-mac.md](docs/reports/test-installeurs-linux-mac.md));
+not yet on Ubuntu, Fedora or a Wayland session. You can also
 build from source (see below) — `.github/workflows/build.yml`
 produces macOS builds on a Mac runner and Linux packages on Ubuntu (macOS
 builds cannot be produced from Windows). See `docs/RELEASING.md` for the
