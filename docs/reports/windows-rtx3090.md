@@ -5,7 +5,7 @@ TransNetV2 optimisées), nuit du 2 novembre 2026. Première fois qu'AMV Tools
 tourne sur un vrai Windows avec une carte NVIDIA : la RTX 3090 de debian-nas,
 prêtée à une VM Windows le temps des tests.
 
-**En bref.** Tout le parcours marche sur Windows 11 + RTX 3090 **après 4
+**En bref (mise à jour du 2 novembre au soir, voir § 8 « Corrections »).** Proxys de survol 39 → 3 s, indexation -25 % à conditions égales, surcoût du réseau +10,2 → +5,9 %, coupes identiques ; cache uv purgé (gain réel 1 Go : le reste était compté en double). **Constat initial :** Tout le parcours marche sur Windows 11 + RTX 3090 **après 4
 corrections** (dont 2 bloquantes pour un utilisateur sur un PC neuf) ; la
 précision des coupes est **identique à Linux, image par image**. L'indexation
 est en revanche **~1,7× plus lente que sous Linux sur la même carte**
@@ -237,3 +237,110 @@ Réglage propre au test laissé dans la VM : l'élévation des administrateurs
 ne demande plus de confirmation (`ConsentPromptBehaviorAdmin = 0`), pour
 que l'installation du runtime VC++ passe sans clic pendant le test pilotée
 à distance.
+
+## 8. Corrections (2 novembre 2026, après-midi)
+
+Mesures Linux sur debian-nas (RTX 3090 bridée 250 W / 1500 MHz) le matin,
+puis **une seule coupure** de debian-nas l'après-midi (consigne de 15 h 40,
+au lieu de la fenêtre de nuit) pour la VM Windows, même carte, même
+bridage. Bench : `tests/bench_pipeline.py --season DBS01 --sections season`,
+sidecar neuf à chaque passage, paires alternées sans / avec réseau.
+Appli testée = installeur **GitHub Actions** de la branche (run
+41463521345, commit `5b1afb9`, SHA-256 vérifié dans la VM), installation
+propre (`/S`, dossier de données neuf), puis le build Windows
+(`electron-builder --win dir` sur le VPS, NSIS impossible sans Wine)
+des commits suivants copié par-dessus pour vérifier leurs correctifs.
+
+### Coupure de debian-nas
+
+| | Heure (Paris) |
+|---|---|
+| `qm shutdown 401` | 15:38:05 → arrêtée 15:38:37 |
+| `qm start 501`, SSH, bridage vérifié avant toute charge (tâche de démarrage 15:39:26 : 250 W, 210–1500 MHz) | 15:38:48 → 15:42:09 |
+| Restauration (`qm shutdown 501`, `qm start 401`) | `qm shutdown 501` 18:16:27 (arrêt propre), `qm start 401` 18:16:58 |
+| debian-nas de retour, vérifications | SSH 18:17:35 ; vérifié 18:22:29 : `gpu-clock-cap` actif, 3090 à 250 W (P8 au repos), `hyperqwen-single-1` et `jellyfin` healthy, `nextcloud`, `nextcloud-db`, `nextcloud-redis` Up, Nextcloud répond 200. Coupure totale : 2 h 20 |
+
+### Tableau avant / après
+
+| # | Point | Cause racine | Correction | Windows avant → après | Linux avant → après |
+|---|---|---|---|---|---|
+| 1 | Proxys de survol lents | Pas un ffmpeg par plan (déjà un seul par épisode) : la passe **redécodait la copie 240p** (21 000 images, latence NVDEC par image : 4,4 s sous Linux, ~30 s sous Windows — NVDEC/NVENC y font le même travail qu'à Linux, étalé sur 4× plus de temps) puis réencodait | Le décodage d'indexation encode **les proxys eux-mêmes** (une session NVENC par épisode, IDR sur la 1ʳᵉ image de chaque plan, images gardées sur le GPU jusqu'à ce que la coupe ne puisse plus bouger) ; la passe ne fait plus que **découper sans réencoder** (1 ffmpeg en copie) après avoir vérifié chaque borne | proxys veille 30–44 s ; aujourd'hui, mêmes conditions : base 39,0 / 42,9 s → **2,4–4,6 s** (7 passages) | **5,1 → 0,7 s** (3 paires), 399/399, même taille, PSNR 30,0 contre 29,6 dB |
+| 2 | Surcoût du réseau de coupes | Sous Windows, le fil qui redimensionne et analyse les images (attendu 57 % du temps par la boucle de décodage, py-spy) lançait ~200 petits noyaux GPU par lot de 32 images, bien plus chers sous WDDM ; le réseau en ajoutait | Windows : redimensionnement + images du réseau rejoués en **graphe CUDA** par tampon (mêmes noyaux, mêmes bits ; histogramme par `scatter_add` au lieu de `bincount`, qui synchronisait l'hôte à chaque lot), NVENC dans son propre fil | veille +10,2 % ; aujourd'hui **+5,9 %** (3 paires : +8,0 / +7,5 / +2,3 %) — objectif de 5 % approché, pas tenu sur toutes les paires ; passe seule (sonde) avec réseau : 92,4 → 80,8 / 81,6 s | +5,0 % → +6,0 % en relatif (75,3/71,7 → 69,4/65,5 s) : surcoût absolu inchangé (~3,5–3,9 s), dénominateur réduit de 6 s par le point 1 |
+| 3 | Indexation Windows 1,7× Linux | **Plancher NVDEC identique** (décodage brut PyNvVideoCodec 53,8 s Windows contre 53,5 s Linux) ; l'écart est dans notre traitement autour (passe `nvc` 65,3 contre 55,7 s ; avec mouvement 70,6 contre 57,3 s) et dans les proxys | points 1 et 2 | mêmes conditions (hôte saturé) : base 181,4 s → **135,1 s** (130,4 / 135,1 / 139,8), **-25 %** | 71,2 → **65,5 s** |
+| 4 | Cache uv jamais purgé | Jamais nettoyé ; mais uv **lie** le venv au cache (liens physiques, aussi sous Windows : `torch_cuda.dll` avait 3 noms) — les « 7,7 Go » comptaient en double 7,1 Go du venv ; seuls 0,94 Go étaient propres au cache. Et sous Windows la purge depuis le sidecar échoue (« Accès refusé » sur `c10.dll`, DLL chargée) | `uv cache prune --ci --force` après installation et après chaque mise à jour ; **sous Windows par Electron au démarrage suivant, avant Python** | cache 8,07 Go apparents (0,94 Go réels) → **0** ; 1,0 Go libéré ; empreinte réelle ≈ 12 Go (venv 7,2 + modèles 4,7 + Python 0,06), pas 19 | testé (vrai uv, venv lié, `uv sync --offline` après purge) |
+| 5 | 1ʳᵉ recherche > 90 s pendant l'autotune | L'autotune ne cédait qu'à l'indexation | Middleware : toute requête utilisateur interrompt le bench, qui reprend là où il en était après 15 s de calme, fil en priorité basse ; arrêt à chaque lot | appli installée : 3 recherches **95 / 87 / 126 ms** pendant l'autotune (en pause), reprise et fin en 188 s | décodage / réseau : 0,1–0,2 s ; étape des lots : 3,2–5,6 s = rechargement de SigLIP (déchargé après 30 s), pas l'autotune |
+| 6 | Ralenti sans bouton « Télécharger » | Le dialogue vérifiait RIFE 4.25 en dur, le profil fait tourner RIFE 4.26 | `capabilities.defaults` : le dialogue suit le modèle du profil | appli : bouton présent, RIFE 4.26 téléchargé en 14,5 s, installé | tests |
+| 7 | Nom d'épisode en double | `{anime}` et `{episode}` recevaient tous deux le nom complet | titre / numéro d'épisode extraits du nom | appli : `Dragon_Ball_Super_-_Beerus_01_scene_10.mp4` | tests |
+| 8 | Fuite `%TEMP%` de l'autotune | (corrigé la veille) | — | en vrai : 2 dossiers laissés par des sidecars de bench arrêtés en plein autotune ; l'un vieilli de 2 h a été **supprimé** au démarrage suivant, les récents (< 1 h) gardés comme prévu | — |
+
+**Précision des coupes : identique.** `tests/eval/cuts_eval.py`, 7 extraits,
+réseau actif : Windows avec tout le nouveau code (graphe CUDA compris),
+chemins `nvc` et `sw` : **14/14 identiques image par image** à la
+référence Windows de la veille et à Linux ; Linux (nouveau code, proxys
+directs) : 14/14 identiques au code de base. Variantes essayées pour
+Windows (lots de 2 fenêtres, réseau synchrone, 4 tampons, latence basse du
+décodeur) : 7/7 identiques sous Linux, sans gain mesurable sous Windows.
+
+### Sondes Windows (épisode DBS 01, `tests/eval/decode_probe.py`)
+
+| | Windows | Linux |
+|---|---|---|
+| `ffmpeg -hwaccel cuda -f null` | 58,6 s | 54,4 s |
+| PyNvVideoCodec seul (plancher NVDEC) | **53,8 s** | 53,5 s |
+| passe `nvc` (coupes, médianes, copie proxys) | 65,3 s | 55,7 s |
+| + mouvement (la passe de l'appli) | 70,6 s | 57,3 s |
+| + réseau de coupes | 91–106 s → **80,8 / 81,6 s** (graphe CUDA) | 58,5 s |
+| onepass (ffmpeg) | 150,6 s | 67,7 s |
+
+py-spy (Windows, réseau actif) : le fil principal attend le fil de
+traitement 57 % du temps ; ce fil passe ~27 % dans les lancements de
+noyaux de redimensionnement, ~20 % dans les appels NVENC image par image,
+~23 % dans le détecteur. GPU surtout en P3 (~1 070 MHz en moyenne) : charge
+légère, goulot côté CPU/lancements.
+
+### Parcours de l'appli installée (installeur CI)
+
+| Étape | Résultat |
+|---|---|
+| Installation silencieuse | OK, 55 s, 330 Mo |
+| Premier lancement (Python + paquets de base) | OK, 504 s (297 s la veille : réseau et hôte plus chargés) |
+| Détection matérielle | OK — RTX 3090, CUDA 13 recommandé |
+| Moteur CUDA 13 | OK, 11 min 08 jusqu'à l'appli |
+| Purge du cache uv | sidecar : échec partiel (« Accès refusé », corrigé) ; build corrigé : purge par Electron au démarrage, cache 0 Go |
+| Indexation DBS 01 (profil Précis, proxys activés) | OK, 816 s, 539 plans (sans réseau à cause du défaut d'autotune, corrigé ; hôte saturé) |
+| Recherche pendant l'autotune | 95 / 87 / 126 ms, autotune en pause puis terminé |
+| Ralenti, modèle manquant | bouton « Télécharger » présent, RIFE 4.26 en 14,5 s |
+| Export de clip | `Dragon_Ball_Super_-_Beerus_01_scene_10.mp4` |
+| Mise à jour avec cache purgé | resynchronisation au lancement, sidecar prêt en 16,5 s, CUDA |
+| Fermeture | propre, 1–3 s |
+
+Non refait aujourd'hui (faute de temps dans la fenêtre) : personnage,
+dérushage, export timeline, synchro musique, roto — inchangés par ces
+corrections et validés la veille.
+
+### Trouvé en vrai pendant ces tests (corrigé)
+
+- **Autotune après l'installation du moteur** : il tournait dans le sidecar
+  qui avait encore torch CPU chargé, mais l'empreinte nommait torch CUDA :
+  réseau de coupes mesuré sur CPU (+185 %) et rangé « manual » pour de bon
+  → l'appli indexait sans réseau (399 plans au lieu de 497). L'autotune
+  attend maintenant le lancement suivant quand le torch chargé n'est pas
+  celui installé (`a98a984`). Relancé dans la VM : réseau « auto », 0 %.
+- Purge du cache refusée par Windows (ci-dessus, `846b740`).
+- `_ProxyWriter` sans dossier de proxys (proxys désactivés, profil
+  Précis) : la passe NVDEC échouait (attrapé sur Linux avant commit).
+
+### Ce qui reste
+
+- **Proxys avec sous-segmentation** (profil Précis + proxys activés) : les
+  bornes des sous-plans viennent après le décodage, le mode direct ne
+  s'applique pas ; l'ancien chemin coûte toujours cher sous Windows
+  (appli : 520 proxys en une passe 121,7 s + 19 un par un 79,3 s, hôte
+  chargé). Les proxys sont désactivés par défaut dans ce profil.
+- Mac : chemin des proxys inchangé (VideoToolbox + libx264), non testé ici
+  (le Mac est testé par une autre session).
+- Linux après le graphe CUDA / fil NVENC : non remesuré (activés seulement
+  sous Windows, carte rendue à debian-nas ensuite).
+- Bruit : l'hôte Proxmox était à 56/62 Go de RAM (4,3 Go en swap, KSM
+  actif) pendant la coupure ; les passages Windows varient de ±15 %, le
+  premier de chaque série est toujours lent ; d'où les paires alternées.

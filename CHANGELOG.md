@@ -54,6 +54,11 @@ All notable changes to AMV Tools are documented here.
   des aperçus a son propre fil. RTX 3090, épisode avec réseau de coupes :
   passe 92 → 81 s. Linux et Mac inchangés (`AMV_NVC_GRAPH`,
   `AMV_PROXY_ENC_THREAD` forcent).
+- Windows : la purge du cache uv se fait au démarrage suivant de l'appli,
+  avant Python (Windows refuse de supprimer le cache d'une DLL chargée).
+- Le réglage automatique ne mesure plus avec le PyTorch que l'installation
+  du moteur vient de remplacer (il désactivait à tort le réseau de coupes
+  après une installation CUDA) : il attend le lancement suivant.
 
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 
