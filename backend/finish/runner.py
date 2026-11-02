@@ -213,7 +213,16 @@ def check_memory(kind: str, clip: ClipInfo, p: dict, models_cfg: Optional[dict] 
 
 # ── source / output resolution ──────────────────────────────────────────────
 def _sanitize(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "clip"
+    # Unicode-aware like the clip export: "Pokémon" used to become "Pok_mon".
+    return re.sub(r"[^\w.-]+", "_", name).strip("_") or "clip"
+
+
+def _scene_stem(display_name: str, path: str, scene_id: int) -> str:
+    """``<series> <episode>_scene<id>``, without the release group, quality
+    and CRC of the file name (as the clip export names it)."""
+    from ..export.naming import split_title
+    title = " ".join(p for p in split_title(display_name or Path(path).stem) if p)
+    return f"{title}_scene{scene_id}"
 
 
 def resolve_source(src: dict) -> tuple[ClipInfo, str]:
@@ -230,7 +239,7 @@ def resolve_source(src: dict) -> tuple[ClipInfo, str]:
         path = scene["filepath"]
         start = src.get("start_ms", scene["start_ms"])
         end = src.get("end_ms", scene["end_ms"])
-        stem = f"{scene.get('display_name') or Path(path).stem}_scene{scene['id']}"
+        stem = _scene_stem(scene.get("display_name"), path, scene["id"])
     elif src.get("path"):
         path = str(src["path"])
         start, end = src.get("start_ms"), src.get("end_ms")
