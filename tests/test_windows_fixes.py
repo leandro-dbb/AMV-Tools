@@ -41,3 +41,24 @@ def test_clip_name_without_episode_number_drops_the_empty_field():
     assert clip_stem("{anime}_{episode}_scene_{scene_id}", "Mon film", 3) == "Mon_film_scene_3"
     assert clip_stem("{episode}-{anime}-{scene_id}", "Mon film", 3) == "Mon_film-3"
     assert clip_stem("{anime}_{scene_id}_{tags}", "Mon film", 3, tags="alpha") == "Mon_film_3_alpha"
+
+
+# ── 6. slow motion: download button in the dialog ───────────────────────────
+def test_capabilities_name_the_models_jobs_will_use(tmp_path, monkeypatch):
+    """The dialog checked a fixed ``rife-4.25`` while the job ran the tier's
+    RIFE 4.26: missing, the job failed with "Download it from Settings >
+    Models" and the dialog had no download button. Capabilities now name the
+    model each kind runs without a ``model`` param."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    from backend.finish import runner
+    from backend.server import make_app
+
+    monkeypatch.setenv("AMV_MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(runner, "_tier_models", lambda: {"interpolate": "rife-4.26", "depth": "depth-anything-v2-small"})
+    caps = TestClient(make_app()).get("/api/finish/capabilities").json()
+    assert caps["defaults"]["interpolate"] == "rife-4.26"
+    assert caps["defaults"]["depth"] == "depth-anything-v2-small"
+    rife = next(m for m in caps["models"] if m["id"] == "rife-4.26")
+    assert rife["installed"] is False          # -> the dialog shows "Download"

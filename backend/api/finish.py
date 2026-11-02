@@ -159,7 +159,21 @@ def capabilities():
         "cpu_only": device["backend"] == "cpu",
         "mask_enabled": bool(get_state().settings.get("models", {}).get("enable_mask", False)),
         "models": registry.list_models(),
+        # the model a job of each kind uses when its params name none (the
+        # selected tier's): what the dialog must offer to download
+        "defaults": _default_models(),
     }
+
+
+def _default_models() -> dict[str, str]:
+    from ..finish.runner import model_for
+    out = {}
+    for kind in ("upscale", "interpolate", "depth"):
+        try:
+            out[kind] = model_for(kind, {})
+        except Exception as exc:  # the dialog falls back to its own default
+            log.debug("no default %s model: %s", kind, exc)
+    return out
 
 
 @router.get("/api/finish/models")

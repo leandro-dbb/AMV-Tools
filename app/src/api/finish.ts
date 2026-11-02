@@ -35,6 +35,8 @@ export interface FinishCapabilities {
   cpu_only: boolean;
   mask_enabled: boolean;
   models: FinishModel[];
+  /** Model a job of each kind uses when its params name none (tier default). */
+  defaults?: Partial<Record<FinishKind, string>>;
 }
 
 export interface FinishJob {
@@ -101,11 +103,16 @@ export const finishApi = {
 };
 
 /** Kind → registry model it needs (upscale depends on the chosen model). */
-export function requiredModel(kind: FinishKind, params: Record<string, unknown>): string | null {
-  if (kind === 'upscale') return String(params.model ?? 'realesr-animevideov3');
-  if (kind === 'interpolate') return 'rife-4.25';
-  if (kind === 'depth') return 'depth-anything-v2-small';
-  return null;
+export function requiredModel(kind: FinishKind, params: Record<string, unknown>,
+  defaults?: Partial<Record<FinishKind, string>>): string | null {
+  // The sidecar runs params.model, else the selected tier's model (e.g.
+  // RIFE 4.26): the dialog must check and offer that one, not a fixed id.
+  if (kind === 'matte') return null;
+  if (params.model) return String(params.model);
+  const fallback: Record<string, string> = {
+    upscale: 'realesr-animevideov3', interpolate: 'rife-4.25', depth: 'depth-anything-v2-small',
+  };
+  return defaults?.[kind] ?? fallback[kind] ?? null;
 }
 
 export function formatBytes(n: number): string {

@@ -34,7 +34,7 @@ export default function FinishDialog({ kind, sources, caps, onCapsChange, onClos
 
   const set = (k: string, v: unknown) => { setParams((p) => ({ ...p, [k]: v })); setEstimate(null); };
 
-  const modelId = requiredModel(kind, params);
+  const modelId = requiredModel(kind, params, caps?.defaults);
   const model = useMemo(() => caps?.models.find((m) => m.id === modelId) ?? null, [caps, modelId]);
   const modelReady = !modelId || !!model?.installed;
   const totalSeconds = useMemo(
