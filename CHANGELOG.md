@@ -28,6 +28,10 @@ All notable changes to AMV Tools are documented here.
   comme l'upscale et la profondeur. Il vérifiait RIFE 4.25 alors que le
   profil fait tourner RIFE 4.26 ; il suit maintenant le modèle choisi par
   le profil (`/api/finish/capabilities` → `defaults`).
+- Premier lancement : le cache uv de l'appli (7,7 Go sous Windows) est
+  purgé une fois le moteur installé, puis après chaque mise à jour des
+  dépendances (`uv cache prune --ci`, en tâche de fond basse priorité) ;
+  les mises à jour ne téléchargent toujours que les paquets qui changent.
 
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 

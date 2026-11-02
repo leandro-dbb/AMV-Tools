@@ -62,3 +62,89 @@ def test_capabilities_name_the_models_jobs_will_use(tmp_path, monkeypatch):
     assert caps["defaults"]["depth"] == "depth-anything-v2-small"
     rife = next(m for m in caps["models"] if m["id"] == "rife-4.26")
     assert rife["installed"] is False          # -> the dialog shows "Download"
+
+
+# ── 4. first launch: the uv cache is pruned once the venv is installed ─────
+@pytest.fixture
+def fake_uv(tmp_path, monkeypatch):
+    """A ``uv`` that logs its arguments and empties the cache like a prune."""
+    import stat
+    import sys
+    log = tmp_path / "uv-calls.txt"
+    exe = tmp_path / "uv"
+    exe.write_text(f"#!{sys.executable}\nimport os, shutil, sys\n"
+                   f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+                   "shutil.rmtree(os.path.join(os.environ['UV_CACHE_DIR'], 'archive-v0'), ignore_errors=True)\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    from backend.api import setup
+    monkeypatch.setattr(setup, "_uv_exe", lambda: str(exe))
+    cache = tmp_path / "uv-cache"
+    (cache / "archive-v0" / "abc").mkdir(parents=True)
+    (cache / "archive-v0" / "abc" / "torch.dll").write_bytes(b"x" * 4096)
+    data = tmp_path / "data"
+    monkeypatch.setenv("AMV_DATA_DIR", str(data))
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("AMV_UV_CACHE_PRUNE", "1")
+    return log
+
+
+@pytest.mark.skipif(__import__("sys").platform == "win32", reason="shebang fake uv")
+def test_prune_runs_forced_ci_prune_and_reports_sizes(fake_uv):
+    from backend import uvcache
+    res = uvcache.prune("engine install")
+    # --force: the `uv run` that started the sidecar holds the cache lock
+    assert fake_uv.read_text().split() == ["cache", "prune", "--ci", "--force"]
+    assert res["ok"] and res["cache_before"] == 4096 and res["cache_after"] == 0
+
+
+@pytest.mark.skipif(__import__("sys").platform == "win32", reason="shebang fake uv")
+def test_prune_after_update_runs_once_per_lock(fake_uv, monkeypatch):
+    from backend import uvcache
+    from backend.paths import user_data_dir
+    assert uvcache.prune_after_update() is None            # engine not installed yet
+    (user_data_dir() / ".setup_complete").write_text("cu130")
+    t = uvcache.prune_after_update()
+    assert t is not None
+    t.join(10)
+    assert uvcache.prune_after_update() is None            # same uv.lock: done
+    assert len(fake_uv.read_text().splitlines()) == 1
+    monkeypatch.setattr(uvcache, "_lock_sha", lambda: "an-updated-lock")
+    t = uvcache.prune_after_update()
+    t.join(10)
+    assert len(fake_uv.read_text().splitlines()) == 2
+
+
+def test_prune_is_off_outside_the_packaged_app(fake_uv, monkeypatch):
+    from backend import uvcache
+    monkeypatch.delenv("AMV_UV_CACHE_PRUNE")
+    assert not uvcache.enabled() and uvcache.prune_in_background("x") is None
+
+
+def test_real_uv_prune_keeps_a_hard_linked_venv_working(tmp_path, monkeypatch):
+    """With the real uv: the venv it linked from the cache still imports
+    after the prune, and a later sync (an app update) needs nothing more."""
+    import shutil
+    import subprocess
+    import sys
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv not on PATH")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text('[project]\nname = "p"\nversion = "0"\nrequires-python = ">=3.10"\n'
+                                         'dependencies = ["six"]\n')
+    env = {**__import__("os").environ, "UV_CACHE_DIR": str(tmp_path / "c"), "UV_PYTHON": sys.executable}
+    r = subprocess.run([uv, "sync", "-q"], cwd=proj, env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        pytest.skip(f"uv sync needs the network: {r.stderr[-200:]}")
+    monkeypatch.setenv("UV_CACHE_DIR", env["UV_CACHE_DIR"])
+    from backend import uvcache
+    from backend.api import setup
+    monkeypatch.setattr(setup, "_uv_exe", lambda: uv)
+    monkeypatch.setenv("AMV_DATA_DIR", str(tmp_path / "data"))
+    res = uvcache.prune("test")
+    assert res["ok"] and res["cache_after"] < res["cache_before"]
+    py = proj / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    assert subprocess.run([str(py), "-c", "import six"]).returncode == 0
+    r = subprocess.run([uv, "sync", "--offline"], cwd=proj, env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr

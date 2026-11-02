@@ -163,6 +163,8 @@ async def install_backend(req: SetupRequest):
         # validation) but do not reinstall torch into the developer's venv.
         cmd = [sys.executable, "-c", "print('AMV_E2E_SKIP_SYNC: uv sync skipped')"]
     state = get_state()
+    from .. import uvcache
+    await asyncio.to_thread(uvcache.wait_idle)
     state.publish({"type": "install", "line": f"$ {' '.join(cmd)}\n"})
 
     kwargs = dict(
@@ -221,6 +223,9 @@ async def install_backend(req: SetupRequest):
         # backend that was just installed, a moment after the app opens.
         from .. import autotune
         autotune.start_background()
+        # The wheels of the venv just built (and of the PyTorch it replaced)
+        # are not needed again: free the app's uv cache (backend.uvcache).
+        uvcache.prune_in_background("engine install")
         state.publish({
             "type": "install",
             "line": f"\n[OK] Installation complete.\n{validation_log}\n",

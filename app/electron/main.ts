@@ -228,6 +228,9 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
       AMV_DATA_DIR: userDataPath,
       AMV_TOKEN: apiToken,
       UV_CACHE_DIR: isDev ? path.join(runtimeUvRoot, 'uv_cache') : path.join(userDataPath, '.uv_cache'),
+      // Packaged app: the sidecar empties this private cache once the venv is
+      // installed or updated (backend/uvcache.py); a dev checkout keeps its own.
+      AMV_UV_CACHE_PRUNE: isDev ? '0' : '1',
       UV_PYTHON_INSTALL_DIR: path.join(runtimeUvRoot, 'python'),
       ...(isDev ? {} : { UV_PROJECT_ENVIRONMENT: path.join(userDataPath, '.venv') }),
       PATH: `${bundledUvRoot}${path.delimiter}${runtimeUvRoot}${path.delimiter}${process.env.PATH ?? ''}`,
