@@ -473,6 +473,8 @@ def _temp_program_loader(path):
 
 
 def test_terminated_coreml_worker_cleans_its_temporary_program(tmp_path):
+    import time
+
     # Quitting the app terminates the Core ML workers: the cut network's
     # worker died without finalising and left a 14 MB .mlmodelc in $TMPDIR
     # after every session.
@@ -482,10 +484,13 @@ def test_terminated_coreml_worker_cleans_its_temporary_program(tmp_path):
     assert w.wait_ready(60)
     assert w.call([np.arange(3)])[0].tolist() == [0, 1, 2]
     assert compiled.exists()
+    t0 = time.monotonic()
     w._proc.terminate()                     # what backend.shutdown.finish does
     w._proc.join(10)
     assert not w._proc.is_alive()
     assert not compiled.exists()
+    # within the second the sidecar gives its children before kill()
+    assert time.monotonic() - t0 < 1.0
 
 
 def test_siglip_passes_take_turns_on_mps():
