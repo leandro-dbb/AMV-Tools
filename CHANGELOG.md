@@ -4,6 +4,23 @@ All notable changes to AMV Tools are documented here.
 
 ## Unreleased
 
+### Windows : premier vrai test sur Windows 11 + RTX 3090
+
+- **Premier lancement sur un Windows neuf** : le moteur CUDA échouait
+  (« Échec de l'installation », `c10.dll` introuvable) faute de Microsoft
+  Visual C++ Redistributable. L'installation le détecte maintenant et
+  l'installe (téléchargement officiel Microsoft, Windows demande
+  l'autorisation une fois) ; refus ou hors ligne : message clair avec le lien.
+- Le message d'erreur de validation n'est plus illisible sur un Windows
+  français (« spÃ©cifiÃ© » → « spécifié »).
+- Plus de bandeau « GPU indisponible » juste après l'installation : le
+  réglage automatique attend la fin de la configuration initiale avant de
+  charger PyTorch.
+- La carte de profondeur (finition) s'exporte dans un dossier avec accents
+  (`Vidéos\Exports été`).
+- Bench complet utilisable sous Windows ; pilote Playwright pour tester
+  l'appli installée à distance. [Rapport](docs/reports/windows-rtx3090.md).
+
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 
 - **Plus de coupes trouvées à l'image près.** Une fois TransNetV2 téléchargé
