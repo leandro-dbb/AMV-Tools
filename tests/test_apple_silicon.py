@@ -486,3 +486,39 @@ def test_terminated_coreml_worker_cleans_its_temporary_program(tmp_path):
     w._proc.join(10)
     assert not w._proc.is_alive()
     assert not compiled.exists()
+
+
+def test_siglip_passes_take_turns_on_mps():
+    # Relaunch on the M1 Pro, search typed at once: the sidecar's search
+    # warm-up and the search ran SigLIP on MPS at the same time and the
+    # sidecar died (SIGSEGV in a Metal kernel, "Failed to fetch" in the app).
+    import threading
+    import time
+
+    import torch
+
+    from backend.models.device import DeviceInfo
+    from backend.models.siglip2 import SigLIP2Model
+
+    running, overlaps = [0], []
+
+    class _Model:
+        def get_text_features(self, **_):
+            running[0] += 1
+            overlaps.append(running[0])
+            time.sleep(0.05)
+            running[0] -= 1
+            return torch.ones(1, 4)
+
+    def processor(**_):
+        return {"input_ids": torch.zeros(1, 64, dtype=torch.long)}
+
+    dev = DeviceInfo(backend="mps", name="mps", torch_device=torch.device("cpu"), dtype=torch.float32)
+    m = SigLIP2Model(dev, idle_offload_seconds=0)
+    m._model, m._processor = _Model(), processor
+    threads = [threading.Thread(target=m.embed_text, args=(q,)) for q in ("warm-up", "beerus mange")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert overlaps == [1, 1]
