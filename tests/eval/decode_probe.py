@@ -100,6 +100,7 @@ def main() -> None:
     p.add_argument("--steps", default="ffmpeg,nvc_raw,nvc,onepass,single")
     p.add_argument("--proxies", type=int, default=0, help="1: the passes also write the 240p proxy copy")
     p.add_argument("--repeat", type=int, default=1)
+    p.add_argument("--direct", action="store_true", help="with --proxies 1: encode the proxies themselves")
     p.add_argument("--json")
     a = p.parse_args()
     from backend.indexing import cutnet, onepass
@@ -107,6 +108,8 @@ def main() -> None:
     if a.proxies:
         tmp = tempfile.mkdtemp(prefix="amv-probe-")
         onepass.set_proxy_cache(Path(tmp))
+        if a.direct:
+            onepass.set_proxy_direct({"bitrate": 500_000})
     n = _frames(a.video)
     out = {"video": a.video, "frames": n, "platform": sys.platform, "cutnet": cutnet.enabled(),
            "proxies": bool(a.proxies), "steps": {}}

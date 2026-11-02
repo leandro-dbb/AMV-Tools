@@ -36,6 +36,15 @@ All notable changes to AMV Tools are documented here.
   l'utilisateur (recherche, aperçu, export, finition…) interrompt aussitôt
   le bench de fond, qui reprend là où il s'était arrêté après 15 s de
   calme, en priorité basse (la première recherche attendait > 90 s).
+- **Aperçus au survol (NVIDIA) : une seule session NVENC par épisode.** Le
+  décodage d'indexation encode directement les proxys (240p, 15 i/s, débit
+  du réglage de qualité) avec une image IDR au début de chaque plan ; la
+  passe des proxys ne fait plus que découper ce flux, sans décoder ni
+  réencoder (un ffmpeg en copie). RTX 3090 sous Linux : proxys d'un épisode
+  5,1 → 0,7 s, indexation complète 71,2 → 65,5 s ; qualité un peu meilleure
+  (PSNR 30,0 contre 29,6 dB, une génération d'encodage en moins), même
+  taille. Avec la sous-segmentation (ses bornes viennent après le décodage)
+  ou si une borne ne tombe pas sur une IDR, l'ancien chemin est gardé.
 
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 

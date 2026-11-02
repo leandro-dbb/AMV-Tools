@@ -782,6 +782,7 @@ class AppState:
                 from .indexing import onepass
                 cache_dir = onepass._proxy_cache_dir
                 onepass.set_proxy_cache(None)
+                onepass.set_proxy_direct(None)
                 if overlap is not None:
                     overlap.shutdown(wait=True)
                 t = getattr(self, "_early_proxy_thread", None)
@@ -823,12 +824,22 @@ class AppState:
         video's 240p proxy source (see ``onepass.set_proxy_cache``)."""
         from .indexing import onepass
         onepass.set_proxy_cache(None)
+        onepass.set_proxy_direct(None)
         try:
             from .export.ffmpeg import _hw_h264_encoder
             from .paths import user_data_dir
             if (self._settings["indexing"]["generate_proxies"] and onepass.available()
                     and _hw_h264_encoder() == "h264_nvenc"):
                 onepass.set_proxy_cache(user_data_dir() / "proxies" / "_source")
+                # the NVDEC tensor pass encodes the proxies themselves (one
+                # NVENC session per episode, the proxy pass only cuts them);
+                # sub-segment boundaries come after the decode: 240p copy then
+                from .export.ffmpeg import _PROXY_BITRATES
+                if (not self._settings["indexing"].get("sub_segmentation")
+                        and os.environ.get("AMV_PROXY_DIRECT", "1") != "0"):
+                    rate = _PROXY_BITRATES.get(self._settings["indexing"]["proxy_quality"],
+                                               _PROXY_BITRATES["medium"])
+                    onepass.set_proxy_direct({"bitrate": int(rate.rstrip("k")) * 1000})
         except Exception as exc:  # proxies then decode the source, as before
             log.debug("proxy source cache unavailable: %s", exc)
 
@@ -982,10 +993,14 @@ class AppState:
                                               source_cache=source_cache, chunks=chunks)
                 batched_s = _time.perf_counter() - t0
                 if source_cache is not None:
-                    from .indexing.onepass import proxy_source_for
+                    from .indexing.onepass import proxy_direct_for, proxy_source_for
                     small = proxy_source_for(video_path, source_cache)
                     if small is not None:
                         small.unlink(missing_ok=True)   # one 240p copy at a time on disk
+                    direct = proxy_direct_for(video_path, source_cache)
+                    if direct is not None:
+                        direct[0].unlink(missing_ok=True)
+                        direct[0].with_suffix(".json").unlink(missing_ok=True)
             except Exception as e:
                 log.warning(
                     "batched proxy gen failed for video %s, falling back to per-scene: %s",
@@ -1066,11 +1081,25 @@ class AppState:
             # does not cut on — most scenes of a video ended up without a
             # proxy (measured: 18 % produced on a 4-min extract).
             prof = _ffmpeg_hw_profile()
-            from .indexing.onepass import proxy_source_for
+            from .indexing.onepass import direct_split_ok, proxy_direct_for, proxy_source_for
             small = proxy_source_for(video_path, source_cache) if source_cache is not None else None
+            direct = proxy_direct_for(video_path, source_cache) if source_cache is not None else None
+            if direct is not None and not (direct[1].get("bitrate") == int(bitrate.rstrip("k")) * 1000
+                                           and direct_split_ok(breaks, direct[1])):
+                log.info("hover proxies of %s: the stream made while indexing does not fit these "
+                         "shots; encoding them again", Path(video_path).name)
+                direct = None
             src_path = video_path
             chunkable = False
-            if small is not None and hw_encoder == "h264_nvenc":
+            if direct is not None:
+                # the proxies were encoded by the indexing decode, an IDR
+                # frame on each shot's first frame: cut them, no decode and
+                # no encode (one ffmpeg reading ~0.1 GB)
+                src_path = str(direct[0])
+                decode_args = ["-r", str(direct[1]["proxy_fps"])]    # raw H.264 at 15 fps
+                scale_args = []
+                encode_args = ["-c:v", "copy"]
+            elif small is not None and hw_encoder == "h264_nvenc":
                 # 240p copy written by the indexing decode: NVDEC ->
                 # NVENC with the cut key frames, no 1080p decode again.
                 src_path = str(small)
@@ -1153,6 +1182,14 @@ class AppState:
                 split = ["-force_key_frames", local_times, "-f", "segment", "-segment_times", local_times,
                          "-segment_time_delta", "0.034"] \
                     if local_times else ["-f", "segment", "-segment_time", "86400"]
+                if direct is not None:
+                    cmds.append([
+                        _ffmpeg_path(), "-hide_banner", "-nostats", "-loglevel", "error",
+                        *decode_args, "-i", src_path, "-an", "-sn", "-c:v", "copy",
+                        "-f", "segment", "-segment_times", local_times, "-segment_time_delta", "0.034",
+                        "-reset_timestamps", "1", str(pattern),
+                    ])
+                    continue
                 cmds.append([
                     _ffmpeg_path(),
                     "-hide_banner", "-nostats", "-loglevel", "error",

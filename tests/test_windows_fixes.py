@@ -264,7 +264,7 @@ def test_middleware_marks_search_requests(monkeypatch, tmp_path):
     c = TestClient(make_app())
     c.get("/api/status")
     assert seen == []
-    c.post("/api/search", json={"query": "beerus"})
+    c.get("/api/scene/987654/thumbnail")         # a user request (404 here: cheap)
     assert seen == ["begin", "end"]
 
 
@@ -299,3 +299,193 @@ def test_interrupted_measures_raise_skip_instead_of_storing_a_partial_result():
     finally:
         st_mod.get_state = orig
     assert stop2["n"] < 10            # stopped within a batch, not after 256 images
+
+
+# ── 1. hover proxies encoded by the indexing decode (one NVENC session) ─────
+def _slots_for(fps, n_frames, pfps=15):
+    """Source frame of each 15 fps slot, as nvc_pass picks them."""
+    out, j = [], 0
+    while True:
+        src = int(round(j * fps / pfps))
+        if src >= n_frames:
+            return out
+        out.append(src)
+        j += 1
+
+
+class _FakeScanner:
+    def __init__(self, fps, lookahead=40):
+        self.fps, self.n = fps, 0
+        self.cuts_ms = [0]
+        self.detector = type("D", (), {"lookahead": lookahead})()
+
+    def ts(self, idx):
+        return int((idx / self.fps) * 1000)
+
+    def first_at(self, t_ms):
+        i = max(0, int(t_ms * self.fps / 1000.0))
+        while i > 0 and self.ts(i - 1) >= t_ms:
+            i -= 1
+        while self.ts(i) < t_ms:
+            i += 1
+        return i
+
+
+@pytest.fixture
+def direct_writer(tmp_path, monkeypatch):
+    from backend.indexing import nvc_pass, onepass
+    monkeypatch.setattr(onepass, "_proxy_cache_dir", tmp_path)
+    monkeypatch.setattr(onepass, "_proxy_direct", {"bitrate": 500_000})
+    encoded = []
+
+    class FakeNvc:
+        class NV_ENC_PIC_PARAMS:
+            encodePicFlags = 0
+            inputTimeStamp = 0
+
+        class NV_ENC_PIC_FLAGS:
+            FORCEIDR = 4
+
+    def fake_encode(self, frame, idr=False):
+        encoded.append((self.n, idr, int(frame)))
+        if idr:
+            self.idr.append(self.n)
+        self.n += 1
+
+    monkeypatch.setattr(nvc_pass, "_module", lambda: FakeNvc)
+    monkeypatch.setattr(nvc_pass._ProxyWriter, "_encode", fake_encode)
+    monkeypatch.setattr(nvc_pass._ProxyWriter, "_open", lambda self: setattr(self, "enc", object()))
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda: type("S", (), {"synchronize": lambda s: None})())
+    return nvc_pass, encoded
+
+
+def test_direct_proxies_put_an_idr_on_each_shots_first_slot_once_decided(direct_writer, monkeypatch):
+    """Frames are held until the detector cannot cut before them any more;
+    the first 15 fps frame of every shot is an IDR; the stream end drains."""
+    import torch
+    nvc_pass, encoded = direct_writer
+    fps = 24000 / 1001
+    n_frames = 2400
+    cuts = [37, 38 + 24, 500, 1201, 2390]               # source frames that start a shot
+    sc = _FakeScanner(fps)
+    w = nvc_pass._ProxyWriter("ep.mkv", 426, 240, fps)
+    assert w.direct
+    slots = _slots_for(fps, n_frames)
+    batch = nvc_pass._BATCH
+    j = 0
+    for first in range(0, n_frames, batch):
+        sc.n = min(n_frames, first + batch)
+        # the detector reports a cut ``lookahead`` frames late
+        for c in cuts:
+            if c + sc.detector.lookahead < sc.n and sc.ts(c) not in sc.cuts_ms:
+                sc.cuts_ms.append(sc.ts(c))
+        picks = []
+        while j < len(slots) and slots[j] < sc.n:
+            picks.append(slots[j])
+            j += 1
+        if picks:
+            w.write(torch.tensor(picks), picks)
+        w.release(sc)
+        # never encoded a frame the detector could still cut before
+        if encoded:
+            assert slots[encoded[-1][0]] < sc.n - sc.detector.lookahead
+    for c in cuts:
+        if sc.ts(c) not in sc.cuts_ms:
+            sc.cuts_ms.append(sc.ts(c))
+    sc.cuts_ms.append(int(n_frames / fps * 1000))        # finish() appends the duration
+    w.release(sc, final=True)
+    assert [e[0] for e in encoded] == list(range(len(slots)))
+    expect = {0} | {next(k for k, s in enumerate(slots) if s >= c) for c in cuts}
+    assert {e[0] for e in encoded if e[1]} == expect
+    meta = {"fps": fps, "proxy_fps": 15, "idr": w.idr, "slots": w.n}
+    from backend.indexing import onepass
+    assert onepass.direct_split_ok([sc.ts(c) for c in cuts], meta)
+
+
+def test_direct_split_check_refuses_a_missing_or_early_key():
+    from backend.indexing import onepass
+    fps = 24000 / 1001
+    slots = _slots_for(fps, 2400)
+    first_slot = lambda c: next(k for k, s in enumerate(slots) if s >= c)   # noqa: E731
+    cuts = [100, 700, 1500]
+    edges = [int(c / fps * 1000) for c in cuts]
+    meta = {"fps": fps, "proxy_fps": 15, "slots": len(slots), "idr": [first_slot(c) for c in cuts]}
+    assert onepass.direct_split_ok(edges, meta)
+    assert not onepass.direct_split_ok(edges + [int(1900 / fps * 1000)], meta)        # shot without IDR
+    late = dict(meta, idr=[first_slot(100), first_slot(700) + 1, first_slot(1500)])     # IDR one slot late
+    assert not onepass.direct_split_ok(edges, late)
+    assert onepass.direct_split_ok(edges + [int(2400 / fps * 1000)], meta)              # the stream's end
+
+
+def test_proxy_pass_cuts_the_direct_stream_without_reencoding(state, tmp_path, monkeypatch):
+    """With a direct stream that fits the shots: one ffmpeg, stream copy,
+    no forced key frames, no decoder; one that doesn't fit: the old pass."""
+    import json
+    import subprocess as sp
+    from pathlib import Path
+
+    from backend.export import ffmpeg as exp
+    from backend.indexing import cuts as cuts_mod
+    from backend.indexing import onepass
+    fps = 24000 / 1001
+    video = tmp_path / "ep.mkv"
+    video.write_bytes(b"v")
+    cache = tmp_path / "src"
+    cache.mkdir()
+    base = cache / onepass._proxy_source_name(str(video))
+    base.with_suffix(".direct.h264").write_bytes(b"h264")
+    frames = [i * 48 for i in range(1, 9)]                  # 9 shots of 48 frames
+    scenes = [(k + 1, int(a / fps * 1000), int(b / fps * 1000))
+              for k, (a, b) in enumerate(zip([0] + frames, frames + [432]))]
+    slots = _slots_for(fps, 432)
+    idr = [next(k for k, s in enumerate(slots) if s >= c) for c in frames]
+    meta = {"fps": fps, "proxy_fps": 15, "slots": len(slots), "idr": idr, "bitrate": 500_000}
+    base.with_suffix(".direct.json").write_text(json.dumps(meta))
+    cmds = []
+
+    class FakePopen:
+        def __init__(self, cmd, **kw):
+            self.returncode = 0
+            if "segment" not in cmd:
+                return
+            cmds.append(cmd)
+            times = cmd[cmd.index("-segment_times") + 1].split(",")
+            for k in range(len(times) + 1):
+                Path(cmd[-1] % k).write_bytes(b"seg")
+
+        def communicate(self):
+            return b"", b""
+
+    monkeypatch.setattr(exp, "_hw_h264_encoder", lambda: "h264_nvenc")
+    monkeypatch.setattr(cuts_mod, "_ffmpeg_hw_profile", lambda: {"name": "cuda", "input_args": []})
+    monkeypatch.setattr(cuts_mod, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(onepass, "has_decoder", lambda name: True)
+    monkeypatch.setattr(sp, "Popen", FakePopen)
+    proxies = tmp_path / "proxies"
+    proxies.mkdir()
+    state._proxy_children = {}
+    done: set = set()
+    n = state._proxies_batched(str(video), scenes, proxies, "medium", done, source_cache=cache, chunks=3)
+    assert n == 9 and len(cmds) == 1
+    c = cmds[0]
+    assert c[c.index("-c:v") + 1] == "copy" and "-force_key_frames" not in c and "-hwaccel" not in c
+    # a quality setting other than the one encoded: the old pass
+    cmds.clear()
+    done = set()
+    state._proxies_batched(str(video), scenes, proxies, "high", done, source_cache=cache, chunks=3)
+    assert cmds and "copy" not in cmds[0]
+
+
+def test_proxy_writer_without_proxies_is_a_no_op(monkeypatch):
+    """Proxies off (the default "precise" profile): the writer must still
+    answer release() — it raised AttributeError and failed the NVDEC pass."""
+    from backend.indexing import nvc_pass, onepass
+    monkeypatch.setattr(onepass, "_proxy_cache_dir", None)
+    monkeypatch.setattr(onepass, "_proxy_direct", {"bitrate": 500_000})
+    w = nvc_pass._ProxyWriter("ep.mkv", 426, 240, 23.976)
+    assert not w.ok and not w.direct
+    w.release(_FakeScanner(23.976))
+    w.release(_FakeScanner(23.976), final=True)
+    w.finish_encode()
+    w.close(ok=True)

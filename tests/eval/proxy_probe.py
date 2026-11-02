@@ -46,6 +46,9 @@ def main() -> None:
     p.add_argument("--variants", default="default,c1,c6,async")
     p.add_argument("--keep", help="folder for the 240p copy (reused when present)")
     p.add_argument("--repeat", type=int, default=1)
+    p.add_argument("--direct", action="store_true",
+                   help="the decode encodes the proxies themselves (onepass.set_proxy_direct)")
+    p.add_argument("--psnr", type=int, default=0, help="PSNR of N proxies against the source (240p, 15 fps)")
     a = p.parse_args()
     os.environ.setdefault("AMV_AUTOTUNE", "0")
     from backend.db import schema
@@ -55,8 +58,11 @@ def main() -> None:
     cache = Path(a.keep or tempfile.mkdtemp(prefix="amv-pxprobe-"))
     cache.mkdir(parents=True, exist_ok=True)
     onepass.set_proxy_cache(cache)
+    if a.direct:
+        onepass.set_proxy_direct({"bitrate": 500_000})
     scenes_file = cache / "scenes.txt"
-    if onepass.proxy_source_for(a.video, cache) is None or not scenes_file.exists():
+    have = onepass.proxy_direct_for(a.video, cache) if a.direct else onepass.proxy_source_for(a.video, cache)
+    if have is None or not scenes_file.exists():
         t0 = time.perf_counter()
         scenes, _ = nvc_pass.detect_cuts_and_medians(a.video, 0.40)
         scenes_file.write_text("\n".join(f"{s} {e}" for s, e in scenes))
@@ -83,13 +89,38 @@ def main() -> None:
                         n, err = 0, repr(exc)[:200]
                     dt = time.perf_counter() - t0
                     size = sum(f.stat().st_size for f in Path(out).glob("scene_*.mp4"))
-                print(f"  {name:9s} {dt:6.2f} s  {n}/{len(rows)} proxies  {size / 1e6:.1f} MB {err}", flush=True)
+                    q = _psnr(a.video, rows, Path(out), a.psnr) if a.psnr else ""
+                print(f"  {name:9s} {dt:6.2f} s  {n}/{len(rows)} proxies  {size / 1e6:.1f} MB {q} {err}", flush=True)
             finally:
                 for k, v in old.items():
                     if v is None:
                         os.environ.pop(k, None)
                     else:
                         os.environ[k] = v
+
+
+def _psnr(video: str, rows, out: Path, k: int) -> str:
+    """Mean PSNR (dB) and frame counts of ``k`` proxies spread over the
+    video against the source scaled the same way (240p, 15 fps)."""
+    import re
+    import subprocess
+    from backend.indexing import cuts
+    vals, frames = [], []
+    for sid, s, e in rows[:: max(1, len(rows) // k)][:k]:
+        f = out / f"scene_{sid}.mp4"
+        if not f.exists():
+            continue
+        r = subprocess.run([cuts._ffmpeg_path(), "-hide_banner", "-nostats", "-i", str(f),
+                            "-ss", f"{s / 1000:.3f}", "-t", f"{(e - s) / 1000:.3f}", "-i", video,
+                            "-filter_complex", "[1:v]fps=15,scale=-2:240[r];[0:v][r]psnr", "-f", "null", "-"],
+                           capture_output=True, text=True)
+        m = re.search(r"average:([0-9.]+|inf)", r.stderr)
+        n = re.findall(r"frame=\s*(\d+)", r.stderr)
+        if m and m.group(1) != "inf":
+            vals.append(float(m.group(1)))
+        if n:
+            frames.append(int(n[-1]))
+    return f"PSNR {sum(vals) / max(1, len(vals)):.2f} dB over {len(vals)} ({sum(frames)} frames)"
 
 
 if __name__ == "__main__":

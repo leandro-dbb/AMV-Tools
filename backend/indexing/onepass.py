@@ -114,6 +114,68 @@ def set_proxy_cache(directory) -> None:
     _proxy_cache_dir = directory
 
 
+# Hover proxies made by the indexing decode itself (``nvc_pass``): the 240p
+# frames are encoded once, at the proxies' bitrate, with an IDR frame on
+# the first 15 fps frame of every shot, so the proxy pass only cuts that
+# stream (``-c copy``) — no decode and no second encode. {"bitrate": bps}
+# while a queue runs with proxies on and without sub-segmentation (its
+# boundaries come after the decode); None = the 240p copy above.
+_proxy_direct: Optional[dict] = None
+
+
+def set_proxy_direct(opts: Optional[dict]) -> None:
+    global _proxy_direct
+    _proxy_direct = opts
+
+
+def proxy_direct_for(video_path: str, directory=None):
+    """(H.264 stream Path, meta dict) of the proxies encoded by the indexing
+    decode for ``video_path``, or None."""
+    import json
+    from pathlib import Path
+    d = directory if directory is not None else _proxy_cache_dir
+    if d is None:
+        return None
+    base = Path(d) / _proxy_source_name(video_path)
+    h264, meta = base.with_suffix(".direct.h264"), base.with_suffix(".direct.json")
+    try:
+        if h264.is_file() and h264.stat().st_size > 0 and meta.is_file():
+            return h264, json.loads(meta.read_text())
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def direct_split_ok(edges_ms, meta: dict) -> bool:
+    """Whether cutting the direct proxy stream at ``edges_ms`` with the
+    segment muxer (first key frame at or after ``edge - 34 ms``) lands, for
+    every edge, on the 15 fps frame that starts the shot — the one the
+    indexing decode made an IDR (a shot decided too late for it, or two
+    cuts a frame apart, fail here: the proxies are then made the old way)."""
+    import bisect
+    fps, pfps = float(meta["fps"]), float(meta["proxy_fps"])
+    keys = sorted(set(meta["idr"]) | {0})
+    n_slots = int(meta["slots"])
+    for e in edges_ms:
+        if e <= 0:
+            continue
+        c = max(0, int(e * fps / 1000.0))         # first frame with int(i / fps * 1000) >= e
+        while c > 0 and int((c - 1) / fps * 1000) >= e:
+            c -= 1
+        while int(c / fps * 1000) < e:
+            c += 1
+        j = max(0, int(c * pfps / fps) - 2)       # first slot showing frame c or later
+        while int(round(j * fps / pfps)) < c:
+            j += 1
+        if j >= n_slots:
+            continue                              # the end of the stream: nothing to split off
+        lo = e / 1000.0 - 0.034
+        k = next((x for x in keys[bisect.bisect_left(keys, max(0, int(lo * pfps) - 1)):] if x / pfps >= lo), None)
+        if k != j:
+            return False
+    return True
+
+
 def _proxy_source_name(video_path: str) -> str:
     import hashlib
     import os
