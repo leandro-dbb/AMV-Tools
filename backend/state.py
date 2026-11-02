@@ -571,6 +571,15 @@ class AppState:
         searches."""
         def run():
             try:
+                from .paths import user_data_dir
+                if not (user_data_dir() / ".setup_complete").exists():
+                    # First launch: detecting the device imports torch, the
+                    # CPU build of the bootstrap that the onboarding is about
+                    # to replace with the CUDA one. Loaded here, it stayed in
+                    # this process: the app ran on the CPU ("forced fallback")
+                    # until the next start (seen on Linux; on a fresh Windows
+                    # this import failed without VC++, so it went unnoticed).
+                    return
                 dev = self.device
                 if getattr(dev, "backend", None) not in ("cuda", "mps") or (getattr(dev, "vram_gb", None) or 0) < 8:
                     return

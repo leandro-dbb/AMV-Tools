@@ -17,6 +17,18 @@ export function requestCharacterSearch(characterId: number) {
   window.dispatchEvent(new CustomEvent<SearchPlusRequest>(SEARCHPLUS_EVENT, { detail: { kind: 'character', characterId } }));
 }
 
+// The Search tab unmounts on every tab switch while App keeps the last
+// request: which one already ran is remembered here, not in the tab — a ref
+// there restarted empty on each return to Search, which replayed the last
+// "similar shots" and could overwrite the text search being typed.
+let handledNonce: number | null = null;
+
+export function claimSearchRequest(nonce: number): boolean {
+  if (nonce === handledNonce) return false;
+  handledNonce = nonce;
+  return true;
+}
+
 export const MOTION_TYPES: MotionType[] = [
   'static', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'zoom_in', 'zoom_out', 'shake',
 ];

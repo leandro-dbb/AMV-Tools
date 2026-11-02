@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import type { SceneResult, SearchFilters } from '../api/types';
 import { useT } from '../i18n';
 import TimelineExportDialog from './TimelineExportDialog';
-import { filtersActive, searchDefaults } from '../searchplus';
+import { claimSearchRequest, filtersActive, searchDefaults } from '../searchplus';
 import type { SearchPlusRequest } from '../searchplus';
 import SearchFiltersPanel from './SearchFiltersPanel';
 import SourcePreview from './SourcePreview';
@@ -139,10 +139,8 @@ export default function SearchTab({ onOpenScene, hoverDelayMs, request }: Props)
   }, [threshold, sort]);
 
   // Requests from other tabs (Tags, Derush, MiniEditor, Characters).
-  const lastNonce = useRef<number | null>(null);
   useEffect(() => {
-    if (!request || request.nonce === lastNonce.current) return;
-    lastNonce.current = request.nonce;
+    if (!request || !claimSearchRequest(request.nonce)) return;
     if (request.req.kind === 'similar') {
       runSimilar(request.req.sceneId, { excludeSameVideo: true, sameGroup: false });
     } else {

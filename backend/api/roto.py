@@ -195,7 +195,10 @@ def _edit_response(p: RotoProject, t: int, ms: int, **extra) -> dict:
 
 
 def _scene_name(scene: dict) -> str:
-    stem = Path(scene.get("filepath") or "shot").stem
+    # Series + episode, without the release group, quality and CRC of the
+    # file name (as the clip export names it).
+    from ..export.naming import split_title
+    stem = " ".join(p for p in split_title(Path(scene.get("filepath") or "shot").stem) if p)
     idx = scene.get("scene_index")
     return f"{stem}_scene{int(idx):04d}" if idx is not None else stem
 
