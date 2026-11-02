@@ -5,6 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
+import { syncExtraArgs } from './syncExtra';
 
 const isDev = !app.isPackaged;
 const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
@@ -235,9 +236,7 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
   const noDev = useUv && !isDev && noSync.length === 0 ? ['--no-dev'] : [];
   // A (repair / update) sync keeps the chosen backend's extra: without it uv
   // reinstalled the CPU torch over a working CUDA install.
-  const backend = installedBackend();
-  const extra = useUv && noSync.length === 0 && backend
-    ? ['--extra', backend, ...(backend === 'dml' ? ['--python', '3.12'] : [])] : [];
+  const extra = useUv && noSync.length === 0 ? syncExtraArgs(process.platform, installedBackend()) : [];
   const args = useUv
     ? ['run', ...noSync, ...noDev, ...extra, '--project', projectRoot, 'python', serverPath, '--port', String(apiPort)]
     : [serverPath, '--port', String(apiPort)];
