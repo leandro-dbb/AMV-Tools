@@ -20,13 +20,13 @@ export const finishStrings: Dict = {
   },
   'finish.kind.interpolate': { en: 'Slow-mo / 60 fps', fr: 'Ralenti / 60 fps' },
   'finish.kind.interpolate.desc': {
-    en: 'RIFE 4.25 frame interpolation',
-    fr: 'Interpolation d\'images RIFE 4.25',
+    en: 'RIFE frame interpolation (version picked by the model tier)',
+    fr: 'Interpolation d\'images RIFE (version choisie par le palier de modèles)',
   },
   'finish.kind.depth': { en: 'Depth map', fr: 'Profondeur' },
   'finish.kind.depth.desc': {
-    en: 'Depth Anything V2 — for parallax / 3D in After Effects',
-    fr: 'Depth Anything V2 — pour parallaxe / 3D dans After Effects',
+    en: 'Depth Anything — for parallax / 3D in After Effects',
+    fr: 'Depth Anything — pour parallaxe / 3D dans After Effects',
   },
   'finish.kind.matte': { en: 'Cutout', fr: 'Détourage' },
   'finish.kind.matte.desc': {
