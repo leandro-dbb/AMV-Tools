@@ -470,7 +470,8 @@ class _ProxyWriter:
                 self.n += 1
                 self._mux(self.enc.Encode(_GpuNV12(frames[i], self.w, self.h), pp))
         except Exception as exc:
-            log.debug("proxy copy encode failed: %s", exc)
+            # the proxy pass then decodes the 1080p source again: say so
+            log.warning("240p proxy copy not written (NVENC: %s); the proxies will decode the source", exc)
             self.ok = False
 
     def finish_encode(self) -> None:
@@ -501,5 +502,8 @@ class _ProxyWriter:
                                capture_output=True, creationflags=flags)
             if r.returncode == 0 and self.tmp.is_file():
                 self.tmp.replace(self.dst)
+            else:
+                log.warning("240p proxy copy not muxed (ffmpeg %s: %s)", r.returncode,
+                            (r.stderr or b"").decode("utf-8", "replace")[-300:])
         self.raw.unlink(missing_ok=True)
         self.tmp.unlink(missing_ok=True)

@@ -34,6 +34,8 @@ WINDOW, STEP, PAD = 100, 50, 25
 # windows per forward pass (GPU); a probability then comes up to
 # BATCH * STEP + PAD frames late
 BATCH = {"cuda": 4, "mps": 1, "cpu": 1, "coreml": 1}
+if os.environ.get("AMV_CUTNET_BATCH", "").isdigit():      # measurements only
+    BATCH["cuda"] = max(1, int(os.environ["AMV_CUTNET_BATCH"]))
 
 _lock = threading.Lock()
 _cache: dict = {}
@@ -169,6 +171,8 @@ class Stream:
         self.next_win = 0             # padded-stream start of the next window
         self.single: list[float] = []
         self.many: list[float] = []
+        if asynchronous is None and os.environ.get("AMV_CUTNET_ASYNC") in ("0", "1"):   # measurements
+            asynchronous = os.environ["AMV_CUTNET_ASYNC"] == "1"
         self.asynchronous = (self.dev != "cpu") if asynchronous is None else asynchronous
         self.lag = self.batch * STEP if self.asynchronous else 0
         self._pending = None          # (thread, box) of the pass in flight

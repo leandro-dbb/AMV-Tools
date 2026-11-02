@@ -970,13 +970,17 @@ class AppState:
         """
         from .export.ffmpeg import generate_proxy
 
+        import time as _time
         scenes_sorted = sorted(scenes, key=lambda x: x[1])
         done: set[int] = set()
         count = 0
+        t0 = _time.perf_counter()
+        batched_s = None
         if use_batched and len(scenes_sorted) >= 2:
             try:
                 count = self._proxies_batched(video_path, scenes_sorted, proxies_dir, quality, done,
                                               source_cache=source_cache, chunks=chunks)
+                batched_s = _time.perf_counter() - t0
                 if source_cache is not None:
                     from .indexing.onepass import proxy_source_for
                     small = proxy_source_for(video_path, source_cache)
@@ -991,12 +995,15 @@ class AppState:
         from .indexing import proxy_source
         proxy_source.discard(video_path)
 
+        t1 = _time.perf_counter()
+        single = 0
         for sid, s_ms, e_ms in scenes_sorted:
             if sid in done:
                 continue
             if self._cancel_event.is_set():
                 return count
             out = proxies_dir / f"scene_{sid}.mp4"
+            single += 1
             try:
                 generate_proxy(video_path, s_ms, e_ms, str(out), quality=quality)
                 with schema.get_conn(self.primary_db) as conn:
@@ -1004,6 +1011,11 @@ class AppState:
                 count += 1
             except Exception as e:
                 log.warning("proxy gen failed for scene %s: %s", sid, e)
+        # one line per video: which path made its proxies, and how fast
+        log.info("hover proxies of %s: %d/%d made, one pass %s, %d one ffmpeg each (%.1f s)",
+                 Path(video_path).name, count, len(scenes_sorted),
+                 f"{len(done)} in {batched_s:.1f} s" if batched_s is not None else "not used",
+                 single, _time.perf_counter() - t1)
         return count
 
     def _proxies_batched(
@@ -1106,6 +1118,14 @@ class AppState:
             # else needs the CPU — the last video of a queue (NVIDIA).
             bounds_at = [0]
             n_chunks = chunks if chunkable else 1
+            # measurements (tests/eval/proxy_probe.py): chunk count, extra
+            # encoder/decoder arguments
+            if chunkable and os.environ.get("AMV_PROXY_CHUNKS", "").isdigit():
+                n_chunks = max(1, int(os.environ["AMV_PROXY_CHUNKS"]))
+            if os.environ.get("AMV_PROXY_ENC_ARGS"):
+                encode_args = encode_args + os.environ["AMV_PROXY_ENC_ARGS"].split()
+            if os.environ.get("AMV_PROXY_DEC_ARGS") is not None and chunkable:
+                decode_args = os.environ["AMV_PROXY_DEC_ARGS"].split()
             for j in range(1, n_chunks):
                 target = edges[-1] * j / n_chunks
                 cand = [e for e in edges if e > bounds_at[-1]]
