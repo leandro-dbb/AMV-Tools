@@ -82,6 +82,20 @@ def test_models_status_endpoint(client):
     assert {m["key"] for m in body["models"]} == {"siglip", "wd_tagger", "birefnet", "sam2", "transnetv2"}
 
 
+def test_cutnet_download_starts_the_autotune(client, monkeypatch):
+    # Downloaded from Settings > Diagnostic: the cut network's cost used to be
+    # measured only at the next launch ("not measured yet" until then).
+    from backend import autotune
+    from backend.api import models as models_api
+    started = []
+    monkeypatch.setattr(autotune, "start_background", lambda *a, **k: started.append(1) or True)
+    monkeypatch.setattr(models_api, "download_for_key", lambda _s, key: {"ok": True, "key": key})
+    assert client.post("/api/models/download", json={"key": "transnetv2"}).json()["ok"] is True
+    assert started == [1]
+    assert client.post("/api/models/download", json={"key": "siglip"}).json()["ok"] is True
+    assert started == [1]
+
+
 def test_models_download_unknown_key(client):
     body = client.post("/api/models/download", json={"key": "nope"}).json()
     assert body["ok"] is False

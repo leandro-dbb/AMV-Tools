@@ -51,6 +51,7 @@ export const reliabilityStrings: Dict = {
   'settings.diagnostic.model.enabled': { en: 'enabled', fr: 'activé' },
   'settings.diagnostic.model.disabled': { en: 'disabled', fr: 'désactivé' },
   'settings.diagnostic.model.retry': { en: 'Retry download', fr: 'Réessayer le téléchargement' },
+  'settings.diagnostic.model.download': { en: 'Download', fr: 'Télécharger' },
   'settings.diagnostic.model.retrying': { en: 'Downloading…', fr: 'Téléchargement…' },
   'settings.diagnostic.model.downloaded': { en: 'Download complete.', fr: 'Téléchargement terminé.' },
   'settings.diagnostic.model.error': { en: 'Download failed: {error}', fr: 'Échec du téléchargement : {error}' },
