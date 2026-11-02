@@ -55,7 +55,7 @@ All notable changes to AMV Tools are documented here.
   l'appli installée à distance. [Rapport](docs/reports/windows-rtx3090.md).
 - Nom des clips exportés : le nom de l'épisode n'apparaît plus deux fois
   (`Dragon_Ball_Super_-_Beerus_01_scene_468.mp4` au lieu de
-  `…B3FEF9B7_SubsPlease_…B3FEF9B7_scene_468.mp4`) : `{anime}` reçoit le
+  `…ABCD1234_Groupe_…ABCD1234_scene_468.mp4`) : `{anime}` reçoit le
   titre de la série, `{episode}` le numéro d'épisode.
 - Ralenti : le dialogue propose « Télécharger » quand le modèle manque,
   comme l'upscale et la profondeur. Il vérifiait RIFE 4.25 alors que le

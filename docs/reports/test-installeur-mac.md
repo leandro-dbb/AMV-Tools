@@ -39,7 +39,7 @@ dossier temporaire, voir § 6).
 | Téléchargement | `.dmg` copié par `scp`, puis marqué en quarantaine **comme un téléchargement Safari** (`com.apple.quarantine`) pour que Gatekeeper réagisse comme chez un testeur. |
 | Double-clic / glisser | `open` sur le `.dmg` (même chemin que le double-clic), copie par le **Finder** (AppleScript `duplicate`) vers `~/Applications` : la quarantaine suit, comme avec un glisser. |
 | Lancement | `open ~/Applications/AMV Tools.app` dans la session graphique de Léandro (pas de lancement SSH). Un port de débogage (`--remote-debugging-port`) a été ajouté pour piloter la page avec Playwright (`connectOverCDP`) ; vrais clics dans l'interface. |
-| Captures | `screencapture` échoue en SSH (permission « Enregistrement de l'écran ») : lancé **dans le Terminal déjà ouvert**, qui a la permission (fenêtre ciblée par son numéro pour ne pas capturer le reste de l'écran). Captures de l'appli : capture interne de la page. Dossier : `~/dev/amv-install-captures/mac/` (hors dépôt). |
+| Captures | `screencapture` échoue en SSH (permission « Enregistrement de l'écran ») : lancé **dans le Terminal déjà ouvert**, qui a la permission (fenêtre ciblée par son numéro pour ne pas capturer le reste de l'écran). Captures de l'appli : capture interne de la page. Dossier hors dépôt. |
 | Limites | Aucune appli n'a l'autorisation Accessibilité et `sudo` demande un mot de passe : impossible de cliquer dans une fenêtre système (dialogue Gatekeeper, Réglages, sélecteur de dossier). Les deux boîtes natives de l'appli (« Ajouter un dossier », « Enregistrer sous ») ont été remplacées par l'appel d'API que l'appli fait juste après. |
 
 ## 1. Premier lancement et mode d'emploi pour les testeurs — vérifié en réel

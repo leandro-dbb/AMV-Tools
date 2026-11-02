@@ -7,7 +7,7 @@ import pytest
 
 # ── 7. exported clip names ──────────────────────────────────────────────────
 @pytest.mark.parametrize("display, anime, episode", [
-    ("[SubsPlease] Dragon Ball Super - Beerus - 01 (1080p) [B3FEF9B7]", "Dragon Ball Super - Beerus", "01"),
+    ("[Groupe] Dragon Ball Super - Beerus - 01 (1080p) [ABCD1234]", "Dragon Ball Super - Beerus", "01"),
     ("Black Clover S02E04 1080p", "Black Clover", "S02E04"),
     ("[Erai-raws] Shingeki no Kyojin - The Final Season - 28v2 [1080p]",
      "Shingeki no Kyojin - The Final Season", "28"),
@@ -22,11 +22,11 @@ def test_split_title(display, anime, episode):
 
 def test_exported_clip_name_has_the_episode_once(tmp_path, monkeypatch):
     """The default template ``{anime}_{episode}_scene_{id}`` got the whole
-    file name twice: ``…B3FEF9B7_SubsPlease_…B3FEF9B7_scene_468.mp4``."""
+    file name twice: ``…ABCD1234_Groupe_…ABCD1234_scene_468.mp4``."""
     from backend.api import export as api_export
     seen = {}
     monkeypatch.setattr(api_export, "export_scene", lambda src, s, e, target, **kw: seen.setdefault("t", target))
-    scene = {"id": 468, "display_name": "[SubsPlease] Dragon Ball Super - Beerus - 01 (1080p) [B3FEF9B7]",
+    scene = {"id": 468, "display_name": "[Groupe] Dragon Ball Super - Beerus - 01 (1080p) [ABCD1234]",
              "filepath": "x.mkv", "start_ms": 0, "end_ms": 1000}
     settings = {"naming_template": "{anime}_{episode}_scene_{scene_id}", "codec": "auto", "crf": 18,
                 "audio": "copy", "resolution": "source"}

@@ -13,12 +13,12 @@ est en revanche **~1,7× plus lente que sous Linux sur la même carte**
 (×6 à ×8) ; le réseau de coupes coûte **+10 %** sous Windows (+4,8 % sous
 Linux).
 
-Captures : `/home/leandro/dev/amv-win-captures/` (83 images, nommées par
+Captures : hors dépôt (83 images, nommées par
 étape : `a01-…` premier lancement → `a11-…` roto).
 
 ## 1. La VM
 
-VM 501 « Windows-AMV-Test » sur le Proxmox :
+VM de test « Windows-AMV-Test » (Proxmox, sur la machine de la RTX 3090) :
 
 | Réglage | Valeur |
 |---|---|
@@ -38,8 +38,7 @@ VM 501 « Windows-AMV-Test » sur le Proxmox :
   officiels vérifiés.
 - Installation **sans intervention** (ISO `autounattend` construite avec
   genisoimage) : partitionnement GPT automatique, pilote `vioscsi` injecté,
-  compte local `amv` (mot de passe aléatoire, uniquement dans
-  `~/.hermes/amv-win.secret` sur le VPS) en ouverture de session
+  compte local `amv` (mot de passe aléatoire, conservé hors dépôt) en ouverture de session
   automatique ; au premier logon : pilotes VirtIO réseau/balloon/série,
   qemu-guest-agent, OpenSSH Server (clé du VPS, mot de passe refusé, shell
   PowerShell), réseau privé, **Windows Update, Delivery Optimization et
@@ -57,22 +56,11 @@ VM 501 « Windows-AMV-Test » sur le Proxmox :
   redémarrage de 04:49. Sous charge : SM à 1500 MHz, 111 W max observé. Le
   mode persistance n'existe pas sous Windows (avertissement sans effet).
 
-### Coupures de debian-nas
+### Machine hôte
 
-| | Heure (Paris) |
-|---|---|
-| Coupure 1 : `qm shutdown 401` (propre, 37 s) | 02:26:09 → arrêtée 02:26:47 |
-| Retour 1 (restauration automatique : ma session a été coupée à 04:33 ; 501 arrêtée proprement 04:33:07–04:33:27, puis `qm start 401`) | 04:33:39 ; vérifié à 04:48 : `gpu-clock-cap` actif, 250 W, Nextcloud 200, Jellyfin et HyperQwen healthy |
-| Coupure 2 (courte, pour finir le bench : la carte était nécessaire) | 04:48:51 → 501 démarrée 04:49:13 |
-| Retour 2 (restauration par mes soins) | 05:35:17 (détail ci-dessous) |
-
-Restauration finale : `qm shutdown 501` lancé à 05:34:13 (arrêt propre),
-`qm start 401` à 05:34:44, SSH de debian-nas à 05:35:17. Vérifié à 05:39:48 :
-`systemctl is-active gpu-clock-cap` → `active` ; `nvidia-smi` : RTX 3090
-revenue, pilote 580.196.07, limite 250 W, SM à 1500 MHz sous charge
-(bridée) ; conteneurs `hyperqwen-single-1` (healthy), `jellyfin` (healthy),
-`nextcloud`, `nextcloud-db`, `nextcloud-redis` Up ; Nextcloud répond 200.
-Coupure totale : 2 h 07 puis 46 min.
+La carte ne sert qu'à une VM à la fois : la VM Linux habituelle de la
+machine GPU a été arrêtée pendant le test (deux fenêtres), puis relancée
+et vérifiée (bridage de la carte, services) à la fin.
 
 ## 2. Résultats des tests (parcours réel, installeur 0.5.0-beta.2)
 
@@ -80,8 +68,9 @@ L'appli tourne dans la session interactive (ouverture de session
 automatique), lancée par une tâche planifiée « interactive » et pilotée par
 Playwright `_electron` dans cette session (`app/e2e/windows/driver.mjs` :
 étapes envoyées par SSH, une capture à chaque étape). Le dossier d'épisodes
-est volontairement piégé : `C:\Users\amv\Vidéos\Épisodes test\[SubsPlease]
-Dragon Ball Super - Beerus - 01 (1080p) [B3FEF9B7].mkv`, exports dans
+est volontairement piégé : `C:\Users\amv\Vidéos\Épisodes test\[Groupe]
+Dragon Ball Super - Beerus - 01 (1080p) [ABCD1234].mkv` (nom de fichier
+de fansub réel, ici anonymisé), exports dans
 `…\Vidéos\Exports AMV été`.
 
 | Test | Résultat | Captures |
@@ -202,7 +191,7 @@ VPS.
   manque (l'upscale et la profondeur l'ont).
 - Cache uv de 7,7 Go jamais purgé après l'installation.
 - Nom des clips exportés : le nom de l'épisode apparaît deux fois
-  (`…B3FEF9B7_SubsPlease_…B3FEF9B7_scene_468.mp4`), à vérifier (sans doute
+  (`…ABCD1234_Groupe_…ABCD1234_scene_468.mp4`), à vérifier (sans doute
   aussi sous Linux).
 - Hypothèse écartée : une DLL torch verrouillée pendant la réinstallation
   CUDA (testé : uv la remplace sans erreur).
@@ -212,26 +201,12 @@ VPS.
 
 ## 7. Relancer la VM
 
-La VM 501 est arrêtée, `onboot 0`, et garde tout (Windows activé en
-évaluation jusqu'à fin janvier 2027, pilote NVIDIA, bridage au démarrage,
-AMV Tools installé et indexé, sources dans `C:\amv\src` avec leur venv,
-épisode et extraits annotés dans `C:\amv`). Les ISO Windows et virtio
-restent dans `local:iso` ; l'ISO de réponse a été supprimée.
-
-1. `qm shutdown 401 --timeout 300` (la carte ne peut servir qu'à une VM ;
-   la RAM de l'hôte ne suffit pas aux deux), vérifier `qm status 401`.
-2. `qm start 501`. Le bridage 250 W / 1500 MHz s'applique tout seul au
-   démarrage (vérifier `C:\amv\gpu-cap.log` avant toute charge).
-3. Adresse : `qm guest cmd 501 network-get-interfaces` (DHCP). SSH :
-   `ssh amv@<adresse>` avec la clé du VPS (mot de passe : `~/.hermes/amv-win.secret`).
-   Téléchargements depuis la VM : `scp -O` (le mode SFTP du serveur SSH
-   Windows tronque les fichiers à 200 Ko).
-4. Appli pilotée : `C:\amv\in\driver-start.ps1` (pilote Playwright dans la
-   session interactive), étapes envoyées dans `C:\amv\driver\cmd` ; bench :
-   `C:\amv\in\run-task.ps1 -Name Bench -Cmd "powershell -File
-   C:\amv\in\bench.ps1 0-a 1-a"`.
-5. Fin : `qm shutdown 501 --timeout 180` puis `qm start 401`, et vérifier
-   `gpu-clock-cap`, `nvidia-smi`, les conteneurs et Nextcloud.
+La VM est arrêtée et garde tout (Windows d'évaluation jusqu'à fin
+janvier 2027, pilote NVIDIA, bridage de la carte au démarrage, AMV Tools
+installé et indexé, sources et extraits annotés dans `C:\amv`). La
+procédure de relance et d'accès (SSH, pilotage Playwright, bench) est
+tenue hors dépôt. Téléchargements depuis la VM : `scp -O` (le mode SFTP
+du serveur SSH Windows tronque les fichiers à 200 Ko).
 
 Réglage propre au test laissé dans la VM : l'élévation des administrateurs
 ne demande plus de confirmation (`ConsentPromptBehaviorAdmin = 0`), pour
@@ -251,14 +226,11 @@ propre (`/S`, dossier de données neuf), puis le build Windows
 (`electron-builder --win dir` sur le VPS, NSIS impossible sans Wine)
 des commits suivants copié par-dessus pour vérifier leurs correctifs.
 
-### Coupure de debian-nas
+### Machine hôte
 
-| | Heure (Paris) |
-|---|---|
-| `qm shutdown 401` | 15:38:05 → arrêtée 15:38:37 |
-| `qm start 501`, SSH, bridage vérifié avant toute charge (tâche de démarrage 15:39:26 : 250 W, 210–1500 MHz) | 15:38:48 → 15:42:09 |
-| Restauration (`qm shutdown 501`, `qm start 401`) | `qm shutdown 501` 18:16:27 (arrêt propre), `qm start 401` 18:16:58 |
-| debian-nas de retour, vérifications | SSH 18:17:35 ; vérifié 18:22:29 : `gpu-clock-cap` actif, 3090 à 250 W (P8 au repos), `hyperqwen-single-1` et `jellyfin` healthy, `nextcloud`, `nextcloud-db`, `nextcloud-redis` Up, Nextcloud répond 200. Coupure totale : 2 h 20 |
+Même procédure que la nuit : VM Linux de la machine GPU arrêtée de
+15 h 38 à 18 h 17 (2 h 20), bridage vérifié avant toute charge,
+services vérifiés au retour.
 
 ### Tableau avant / après
 

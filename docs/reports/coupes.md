@@ -45,9 +45,8 @@ souples apprennent par cœur nos 4 extraits de réglage (§ 4).
 
 ## 1. Plus de vérité terrain
 
-Il n'y a que trois épisodes sur le NAS (`/srv/data/media/attente` : DBS
-Beerus 01 et 02, Black Clover S02E04 ; `anime`, `series`, `movies` sont
-vides) : **pas de vieil anime 4:3 disponible**, la variété vient des
+Il n'y a que trois épisodes dans la médiathèque de test (DBS Beerus 01
+et 02, Black Clover S02E04) : **pas de vieil anime 4:3 disponible**, la variété vient des
 passages choisis (dialogues sombres, combats rapides, flashs, magie).
 
 Cinq nouveaux extraits de 150 s (copies du flux sans réencodage, à partir
@@ -315,8 +314,7 @@ plans, pas par un test d'écoute ou de pertinence de recherche.)
 - `tests/eval/cuts_eval.py` : mesure des vrais chemins (`sw`, `pyav`,
   `single_pass`, `hw`, `onepass`, `nvc`) sur les 7 extraits, à l'image
   exacte, par jeu.
-- Médias (non commités, > 1 Mo) : NAS `/tmp/cutsgt`, VPS
-  `~/dev/amv-testdata/cuts-new` et `Séries test`.
+- Médias (non commités, > 1 Mo) : hors dépôt, sur les machines de test.
 
 ## 8. Performances
 
