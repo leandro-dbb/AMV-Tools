@@ -152,6 +152,7 @@ def detect_cuts_with_medians(
     medians: dict[int, Image.Image] = {}
     buf: deque[tuple[int, np.ndarray]] = deque()   # (ts, rgb) still eligible
     sample_idx = -1
+    last: list[tuple[int, np.ndarray]] = []        # the latest sample
     # a cut is confirmed a few frames after it happened (flash look-ahead,
     # the cut network's windows)
     late_ms = int((detector.lookahead + stride) * 1000 / fps) + 1
@@ -161,14 +162,18 @@ def detect_cuts_with_medians(
         if end - start < cuts._MIN_SCENE_MS:
             return
         target = start + (end - start) // 2
-        inside = [item for item in buf if start <= item[0] < end] or list(buf)
+        # No sample of its own: a cut on the last frames, then a tail where
+        # the container (audio) outlasts the video. The last picture stands
+        # for it; a scene left out of on_scene made the pipeline decode the
+        # whole file again for sub-segmentation (+2 min on an HEVC episode).
+        inside = [item for item in buf if start <= item[0] < end] or list(buf) or last[:1]
         if inside:
             pick = min(inside, key=lambda item: abs(item[0] - target))[1]
             medians[target] = Image.fromarray(pick)
             if on_median is not None:
                 on_median(target, medians[target])
             if on_scene is not None:
-                on_scene(start, end, [item for item in buf if start <= item[0] < end] or list(buf))
+                on_scene(start, end, inside)
 
     def add(found: list[int]) -> None:
         nonlocal buf
@@ -196,6 +201,7 @@ def detect_cuts_with_medians(
             if frame_sink is not None:
                 frame_sink(ts_ms, gray)
             buf.append((ts_ms, np.ascontiguousarray(arr[:_RGB_H, :_RGB_W])))
+            last[:] = [buf[-1]]
             # every frame of the group goes to the cut detector (the last
             # group may be padded past the end of the video)
             for i in range(stride):
