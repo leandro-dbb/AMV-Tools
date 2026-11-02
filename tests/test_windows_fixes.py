@@ -511,3 +511,24 @@ def test_windows_leaves_the_prune_to_electron(fake_uv, monkeypatch):
     assert not fake_uv.exists()                     # uv was not run in-process
     (user_data_dir() / ".setup_complete").write_text("cu130")
     assert uvcache.prune_after_update() is None     # already pending
+
+
+def test_autotune_does_not_measure_with_the_torch_the_install_replaced(quiet_autotune, monkeypatch):
+    """After the engine install the sidecar still has the old (CPU) torch
+    loaded while the installed one is the CUDA build: measured there, the
+    choices were CPU ones stored under the CUDA fingerprint, for good."""
+    import importlib.metadata
+    import sys
+    import types
+    autotune = quiet_autotune
+    calls = []
+    monkeypatch.setattr(autotune, "run", lambda **kw: calls.append(1) or {})
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(__version__="2.11.0+cpu"))
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "2.11.0+cu130")
+    from backend.paths import user_data_dir
+    (user_data_dir() / ".setup_complete").write_text("cu130")
+    autotune._background(False, 0.0)
+    assert not calls and autotune.status()["state"] == "postponed"
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "2.11.0+cpu")
+    autotune._background(False, 0.0)
+    assert calls == [1]

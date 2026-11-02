@@ -198,6 +198,28 @@ def run(measure: Optional[dict[str, Callable]] = None, cancelled: Optional[Calla
     return entry
 
 
+def _stale_torch() -> Optional[str]:
+    """Why this process cannot measure for the installed torch, if it can't:
+    the engine install replaces torch (CPU -> CUDA) under a sidecar that
+    already imported the old one; measured there (Windows VM, after a real
+    install), the cut network and the batches ran on the CPU and the stored
+    choices — cut network "manual" — were filed under the new torch's
+    fingerprint, for good."""
+    import sys
+    mod = sys.modules.get("torch")
+    if mod is None:
+        return None
+    try:
+        import importlib.metadata
+        installed = importlib.metadata.version("torch")
+    except Exception:
+        return None
+    loaded = str(getattr(mod, "__version__", ""))
+    if loaded and installed and loaded != installed:
+        return f"torch {loaded} loaded, {installed} installed: measured at the next start"
+    return None
+
+
 def _must_yield() -> bool:
     """Indexing / a re-embed runs, or the user is using the app."""
     return _busy() or yielding.active()
@@ -220,6 +242,11 @@ def _background(force: bool, delay: float) -> None:
             return
         if not force and not needs_run(_current_entry()):
             _status.update(state="done", step=None)
+            return
+        stale = _stale_torch()
+        if stale:
+            _status.update(state="postponed", step=None, error=stale)
+            log.info("autotune postponed: %s", stale)
             return
         progress: dict[str, Any] = {}
         while True:
