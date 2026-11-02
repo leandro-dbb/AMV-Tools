@@ -40,3 +40,14 @@ def test_nvidia_smi_parsing(monkeypatch):
     gpus = gpu_probe._nvidia_gpus()
     assert gpus == [{"vendor": "nvidia", "name": "NVIDIA GeForce RTX 3090", "driver": "580.95.05",
                      "vram_gb": 24.0, "compute_cap": 8.6}]
+
+
+def test_probe_names_the_apple_chip(monkeypatch):
+    # The setup screen showed "Detected on this PC: no usable GPU" on an M1 Pro:
+    # macOS has no adapter list, the chip name is the GPU to show.
+    monkeypatch.setattr(gpu_probe.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gpu_probe.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(gpu_probe, "_run", lambda cmd: "Apple M1 Pro\n" if cmd[0] == "sysctl" else None)
+    out = gpu_probe.probe()
+    assert out["recommended"] == "mps"
+    assert out["adapters"] == [{"name": "Apple M1 Pro", "vendor": "apple"}]
