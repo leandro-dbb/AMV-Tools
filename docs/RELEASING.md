@@ -84,7 +84,8 @@ fork without secrets still builds.
 3. Publish when the smoke test on a clean machine passes.
 
 Unsigned Windows installers trigger SmartScreen; macOS unsigned builds require
-the usual right-click → Open workaround. Signed/notarized builds are the
+the System Settings → Privacy & Security → *Open Anyway* step (see the README;
+right-click → Open no longer works since macOS 15). Signed/notarized builds are the
 recommended path for end users.
 
 ## 5. Manual/local packaging
