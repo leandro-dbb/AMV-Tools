@@ -530,7 +530,8 @@ project's GitHub Releases page.
    warn you. Choose `More info -> Run anyway`.
 4. On first launch, pick the backend that matches your hardware, your indexing
    preference (fast/accurate) and your language. The app downloads the chosen
-   PyTorch backend on demand, usually 1-3 GB — a slow connection is fine, the
+   PyTorch backend on demand: about 4.5-5 GB for NVIDIA CUDA 13 (measured), a
+   few hundred MB for CPU — a slow connection is fine, the
    bootstrap waits for it.
 
 > [!IMPORTANT]
@@ -562,9 +563,11 @@ signed by a known developer:
   no longer offers a way in. Alternative in Terminal, before the first
   launch: `xattr -dr com.apple.quarantine "/Applications/AMV Tools.app"`
   (adapt the path if you copied it to `~/Applications`).
-- **Linux**: `chmod +x` the AppImage and run it (it needs `libfuse2`; on
-  Ubuntu 24.04 `libfuse2t64`), or install the `.deb`
-  (`sudo apt install ./amv-tools_<version>_amd64.deb`).
+- **Linux**: `chmod +x` the AppImage and run it. It needs `libfuse2` (on
+  Ubuntu 24.04 `libfuse2t64`) and `fusermount` (package `fuse3`), present on
+  most desktops; without the latter it stops at once on *fuse: failed to exec
+  fusermount* (`sudo apt install fuse3`). Or install the `.deb`
+  (`sudo apt install ./amv-tools_<version>_amd64.deb`), which needs neither.
 
 On Apple Silicon (`--extra mps`) indexing, search, export,
 finishing and Mask Mode have been benchmarked and checked end-to-end on an

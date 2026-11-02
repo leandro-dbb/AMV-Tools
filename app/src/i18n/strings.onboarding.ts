@@ -6,8 +6,8 @@ export const onboardingStrings: Dict = {
   'onboarding.title': { en: 'Welcome to AMV Tools', fr: 'Bienvenue dans AMV Tools' },
   'onboarding.tagline': { en: 'One-time setup', fr: 'Configuration initiale' },
   'onboarding.intro': {
-    en: 'Pick the acceleration backend that matches your hardware. This downloads ~1-3 GB of PyTorch wheels.',
-    fr: 'Choisissez le backend d\'accélération adapté à votre matériel. Environ 1 à 3 Go de paquets PyTorch seront téléchargés.',
+    en: 'Pick the acceleration backend that matches your hardware. This downloads PyTorch and its runtimes: a few hundred MB for CPU, about 5 GB for NVIDIA CUDA.',
+    fr: 'Choisissez le backend d\'accélération adapté à votre matériel. PyTorch et ses bibliothèques seront téléchargés : quelques centaines de Mo pour le CPU, environ 5 Go pour NVIDIA CUDA.',
   },
   'onboarding.introChangePrefix': {
     en: 'You can change it later from ',
@@ -18,14 +18,14 @@ export const onboardingStrings: Dict = {
   'onboarding.opt.cu130-trt.title': { en: 'NVIDIA CUDA 13 + TensorRT', fr: 'NVIDIA CUDA 13 + TensorRT' },
   'onboarding.opt.cu130-trt.subtitle': { en: 'RTX 20xx and newer · fastest', fr: 'RTX 20xx et plus récentes · le plus rapide' },
   'onboarding.opt.cu130-trt.detail': {
-    en: 'SigLIP on CUDA with TensorRT JIT acceleration + wd-tagger on CUDA via ONNX. ~3.5 GB total download (PyTorch + TensorRT + dual CUDA 12/13 runtimes). Pick this if you want maximum speed.',
-    fr: 'SigLIP sur CUDA avec accélération JIT TensorRT + wd-tagger sur CUDA via ONNX. Environ 3,5 Go à télécharger au total (PyTorch + TensorRT + runtimes CUDA 12/13). Choisissez cette option pour une vitesse maximale.',
+    en: 'SigLIP on CUDA with TensorRT JIT acceleration + wd-tagger on CUDA via ONNX. Over 5 GB to download (PyTorch + TensorRT + CUDA 12 and 13 runtimes). Pick this if you want maximum speed.',
+    fr: 'SigLIP sur CUDA avec accélération JIT TensorRT + wd-tagger sur CUDA via ONNX. Plus de 5 Go à télécharger (PyTorch + TensorRT + runtimes CUDA 12 et 13). Choisissez cette option pour une vitesse maximale.',
   },
   'onboarding.opt.cu130.title': { en: 'NVIDIA CUDA 13', fr: 'NVIDIA CUDA 13' },
   'onboarding.opt.cu130.subtitle': { en: 'RTX 20xx and newer', fr: 'RTX 20xx et plus récentes' },
   'onboarding.opt.cu130.detail': {
-    en: 'SigLIP + wd-tagger both on CUDA. ~2.5 GB total download. No TensorRT — slightly slower for SigLIP but a smaller install and faster first launch.',
-    fr: 'SigLIP + wd-tagger tous deux sur CUDA. Environ 2,5 Go à télécharger au total. Sans TensorRT — SigLIP est légèrement plus lent, mais l\'installation est plus légère et le premier lancement plus rapide.',
+    en: 'SigLIP + wd-tagger both on CUDA. About 4.5-5 GB to download (PyTorch + CUDA 12 and 13 runtimes). No TensorRT — slightly slower for SigLIP but a smaller install and faster first launch.',
+    fr: 'SigLIP + wd-tagger tous deux sur CUDA. Environ 4,5 à 5 Go à télécharger (PyTorch + runtimes CUDA 12 et 13). Sans TensorRT — SigLIP est légèrement plus lent, mais l\'installation est plus légère et le premier lancement plus rapide.',
   },
   'onboarding.opt.cu126.title': { en: 'NVIDIA CUDA 12.6', fr: 'NVIDIA CUDA 12.6' },
   'onboarding.opt.cu126.subtitle': { en: 'GTX 10xx · older drivers', fr: 'GTX 10xx · pilotes plus anciens' },
