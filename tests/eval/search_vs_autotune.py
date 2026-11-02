@@ -30,6 +30,7 @@ def main() -> None:
     p.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     p.add_argument("--python", default=sys.executable)
     p.add_argument("--after", type=float, default=25.0)
+    p.add_argument("--at-step", help="search once the bench is at this step instead (e.g. batch_size)")
     p.add_argument("--autotune", default="1")
     p.add_argument("--query", default="Beerus endormi")
     p.add_argument("--json")
@@ -43,11 +44,19 @@ def main() -> None:
     out = {"autotune": a.autotune, "sidecar_ready_s": round(t_start, 1), "after_s": a.after}
     try:
         time.sleep(max(0.0, a.after - t_start))
-        out["autotune_state_before"] = sc.get("/api/autotune").get("state")
+        if a.at_step:
+            deadline = time.time() + 600
+            while time.time() < deadline and sc.get("/api/autotune").get("step") != a.at_step:
+                time.sleep(0.2)
+            time.sleep(1.0)
+        st0 = sc.get("/api/autotune")
+        out["autotune_state_before"] = st0.get("state")
+        out["autotune_step_before"] = st0.get("step")
+        t_search = time.time()
         lat = []
         for q in (a.query, "gros plan visage"):
             t0 = time.perf_counter()
-            res = sc.post("/api/search", {"query": q, "top_k": 50})
+            res = sc.post("/api/search", {"query": q, "top_k": 50, "threshold": 0.0})
             lat.append(round(time.perf_counter() - t0, 2))
             n = len(res.get("results", res) if isinstance(res, dict) else res)
             out.setdefault("results", []).append(n)
@@ -61,6 +70,7 @@ def main() -> None:
                 break
             time.sleep(2)
         out["autotune_final"] = st.get("state")
+        out["autotune_done_after_search_s"] = round(time.time() - t_search, 1)
         out["autotune_entry_settings"] = sorted(((st.get("entry") or {}).get("settings") or {}).keys())
     finally:
         sc.stop()

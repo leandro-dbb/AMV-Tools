@@ -266,3 +266,36 @@ def test_middleware_marks_search_requests(monkeypatch, tmp_path):
     assert seen == []
     c.post("/api/search", json={"query": "beerus"})
     assert seen == ["begin", "end"]
+
+
+def test_interrupted_measures_raise_skip_instead_of_storing_a_partial_result():
+    """A decode or a batch cut short for the user must not become the
+    stored measurement."""
+    from backend.autotune import bench
+    calls = {"n": 0}
+    stop = {"on": False}
+
+    def one():
+        calls["n"] += 1
+        stop["on"] = True
+        raise RuntimeError("decode cancelled")
+
+    with pytest.raises(bench.Skip):
+        bench.time_parallel(one, [1, 2], lambda: stop["on"], jobs=2)
+
+    class Fake:
+        def embed_images(self, imgs):
+            stop2["n"] += 1
+    stop2 = {"n": 0}
+    from types import SimpleNamespace
+    import backend.state as st_mod
+    fake_state = SimpleNamespace(device=SimpleNamespace(backend="cuda", vram_gb=24.0),
+                                 get_tagger=lambda: Fake(), get_siglip=lambda: Fake())
+    orig = st_mod.get_state
+    st_mod.get_state = lambda: fake_state
+    try:
+        with pytest.raises(bench.Skip):
+            bench.measure_batch([object()] * 256, lambda: stop2["n"] >= 4)
+    finally:
+        st_mod.get_state = orig
+    assert stop2["n"] < 10            # stopped within a batch, not after 256 images

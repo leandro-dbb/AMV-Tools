@@ -110,6 +110,8 @@ def time_parallel(run_one: Callable[[], None], candidates, cancelled: Callable[[
                 for f in [pool.submit(run_one) for _ in range(jobs)]:
                     f.result()
         except Exception as exc:
+            if cancelled():               # decodes stopped for the user: not a failure
+                raise Skip("cancelled") from exc
             log.warning("autotune: %d parallel decodes failed (%s)", n, exc)
             out[n] = None
             break
@@ -393,9 +395,13 @@ def measure_batch(frames: list, cancelled: Callable[[], bool]) -> dict:
             siglip.embed_images(imgs[:b])                    # warm-up at this shape
             t0 = time.perf_counter()
             for k in range(0, len(imgs), b):
+                if cancelled():           # a search waits for the GPU: stop at once
+                    raise Skip("cancelled")
                 tagger.embed_images(imgs[k:k + b])
                 siglip.embed_images(imgs[k:k + b])
             measures[b] = round((time.perf_counter() - t0) / len(imgs), 5)
+        except Skip:
+            raise
         except Exception as exc:          # out of memory: larger ones won't fit either
             log.warning("autotune: batch %d failed (%s)", b, exc)
             measures[b] = None
