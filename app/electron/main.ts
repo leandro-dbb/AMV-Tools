@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
@@ -18,6 +18,12 @@ let apiPort = 0;
 const SIDECAR_STOP_GRACE_MS = 3000;
 let sidecarStopping: Promise<void> | null = null;
 let sidecarStopped = false;
+// The running sidecar has opened its port: an exit from then on, other than
+// a quit or a stop we asked for, is a crash (restartAfterCrash).
+let sidecarUp = false;
+let appQuitting = false;
+let sidecarRestarts = 0;
+const MAX_SIDECAR_RESTARTS = 2;
 // Per-launch secret: the sidecar refuses requests without it (backend/security.py),
 // so other local web pages cannot drive it. Renderer gets it via the preload.
 // AMV_TOKEN is a test-only override: the Windows smoke workflow launches the
@@ -125,7 +131,36 @@ function lockStamp(): { current: string | null; file: string } {
   }
 }
 
+// Windows: the sidecar cannot prune the app's uv cache while it runs (the
+// venv's DLLs it loaded are hard links of cache files, which Windows refuses
+// to delete); it leaves a marker and the prune runs here, before Python
+// starts (backend/uvcache.py). Never fatal: the next start retries.
+function pruneUvCacheIfPending(): void {
+  if (isDev || process.platform !== 'win32') return;
+  const userDataPath = app.getPath('userData');
+  const marker = path.join(userDataPath, '.uv-cache-prune-pending');
+  if (!fs.existsSync(marker)) return;
+  const { uvExe } = resolvePythonRoot();
+  if (!fs.existsSync(uvExe)) return;
+  const msg = '[main] freeing disk space: pruning the package cache once';
+  console.log(msg);
+  emitBootstrap({ kind: 'line', line: msg, stream: 'stdout' });
+  const r = spawnSync(uvExe, ['cache', 'prune', '--ci', '--force'], {
+    env: { ...process.env, UV_CACHE_DIR: path.join(userDataPath, '.uv_cache') },
+    timeout: 10 * 60_000, windowsHide: true, encoding: 'utf8',
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split(/\r?\n/).slice(-1)[0] ?? '';
+  console.log(`[main] uv cache prune exit ${r.status}: ${out}`);
+  emitBootstrap({ kind: 'line', line: `uv cache prune: ${out}`, stream: 'stdout' });
+  if (r.status === 0) {
+    try {
+      fs.renameSync(marker, path.join(userDataPath, '.uv-cache-pruned'));
+    } catch {}
+  }
+}
+
 async function startSidecar(): Promise<number> {
+  pruneUvCacheIfPending();
   const stamp = lockStamp();
   const synced = (() => { try { return fs.readFileSync(stamp.file, 'utf8').trim(); } catch { return ''; } })();
   const depsChanged = !isDev && !!stamp.current && synced !== stamp.current
@@ -228,6 +263,9 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
       AMV_DATA_DIR: userDataPath,
       AMV_TOKEN: apiToken,
       UV_CACHE_DIR: isDev ? path.join(runtimeUvRoot, 'uv_cache') : path.join(userDataPath, '.uv_cache'),
+      // Packaged app: the sidecar empties this private cache once the venv is
+      // installed or updated (backend/uvcache.py); a dev checkout keeps its own.
+      AMV_UV_CACHE_PRUNE: isDev ? '0' : '1',
       UV_PYTHON_INSTALL_DIR: path.join(runtimeUvRoot, 'python'),
       ...(isDev ? {} : { UV_PROJECT_ENVIRONMENT: path.join(userDataPath, '.venv') }),
       PATH: `${bundledUvRoot}${path.delimiter}${runtimeUvRoot}${path.delimiter}${process.env.PATH ?? ''}`,
@@ -268,12 +306,16 @@ async function launchSidecar(forceSync: boolean): Promise<number> {
   // later exits (normal quit) reject into an already-settled race: no-ops.
   let rejectOnExit: ((err: Error) => void) | null = null;
   const exited = new Promise<never>((_, reject) => { rejectOnExit = reject; });
-  pyProc.on('exit', (code) => {
+  const proc = pyProc;
+  pyProc.on('exit', (code, signal) => {
     console.log(`[main] sidecar exited with code ${code}`);
     const err: SidecarExitError = new Error(`Sidecar exited with code ${code} before opening port ${apiPort}`);
     err.moduleNotFound = sawModuleNotFound;
     err.usedNoSync = noSync.length > 0;
     rejectOnExit?.(err);
+    if (proc === pyProc && sidecarUp && !appQuitting && !sidecarStopping) {
+      restartAfterCrash(proc, code ?? signal ?? 'unknown');
+    }
   });
 
   // uv is completely silent while it downloads a single big wheel (piped
@@ -318,6 +360,36 @@ function waitUntilReady(
     };
     tick();
   });
+}
+
+// The sidecar died while the app was in use (M1 Pro: a native crash in
+// PyTorch's MPS backend): every request then failed with "Failed to fetch"
+// and nothing said why. Start it again behind the startup screen, a couple
+// of times at most, then show the error.
+function restartAfterCrash(proc: ChildProcess, code: number | string) {
+  sidecarUp = false;
+  killSidecarGroup(proc);     // its workers (Core ML, ffmpeg) go with it
+  console.error(`[main] the backend stopped unexpectedly (${code})`);
+  bootstrapPhase = 'starting';
+  // the reloaded page shows the startup screen; events sent before it
+  // listens would be lost
+  const afterReload = (evt: BootstrapEvent) => {
+    mainWindow?.webContents.once('did-finish-load', () => emitBootstrap(evt));
+    mainWindow?.webContents.reload();
+  };
+  if (sidecarRestarts >= MAX_SIDECAR_RESTARTS) {
+    bootstrapPhase = 'error';
+    afterReload({ kind: 'error', message: `The Python backend stopped unexpectedly (${code}) and was already restarted ${sidecarRestarts} times. Restart AMV Tools; if it happens again, send the report from Settings > Diagnostic.` });
+    return;
+  }
+  sidecarRestarts += 1;
+  afterReload({ kind: 'line', line: `[main] the backend stopped unexpectedly (${code}) — restarting it`, stream: 'stderr' });
+  startSidecar()
+    .then((port) => {
+      sidecarUp = true;
+      emitBootstrap({ kind: 'ready', port });
+    })
+    .catch((err) => emitBootstrap({ kind: 'error', message: String(err?.message ?? err) }));
 }
 
 function venvPath(): string {
@@ -504,6 +576,7 @@ app.whenReady().then(async () => {
   watchSmokeControlDir();
   startSidecar()
     .then((port) => {
+      sidecarUp = true;
       emitBootstrap({ kind: 'ready', port });
       captureSmokeShot('ready');
     })
@@ -523,6 +596,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
+  appQuitting = true;
   if (sidecarStopped || !pyProc) return;
   event.preventDefault();
   void stopSidecar().finally(() => {

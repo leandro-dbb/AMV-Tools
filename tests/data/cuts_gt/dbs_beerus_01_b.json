@@ -1,0 +1,195 @@
+{
+ "video": "dbs01_b.mkv",
+ "source": "DBS Beerus 01 episode, from 600 s (stream copy, starts on a keyframe)",
+ "split": "tune",
+ "fps": "24000/1001",
+ "n_frames": 3630,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 166,
+   "t_ms": 6924,
+   "note": "cut from the POV tunnel behind the comet to an outside view where the comet body fills the frame (166-168 almost all white), planets revealed from 169"
+  },
+  {
+   "frame": 348,
+   "t_ms": 14514
+  },
+  {
+   "frame": 382,
+   "t_ms": 15933
+  },
+  {
+   "frame": 474,
+   "t_ms": 19770
+  },
+  {
+   "frame": 527,
+   "t_ms": 21980
+  },
+  {
+   "frame": 583,
+   "t_ms": 24316
+  },
+  {
+   "frame": 648,
+   "t_ms": 27027
+  },
+  {
+   "frame": 727,
+   "t_ms": 30322
+  },
+  {
+   "frame": 776,
+   "t_ms": 32366
+  },
+  {
+   "frame": 889,
+   "t_ms": 37079
+  },
+  {
+   "frame": 1044,
+   "t_ms": 43544
+  },
+  {
+   "frame": 1271,
+   "t_ms": 53011
+  },
+  {
+   "frame": 1374,
+   "t_ms": 57307
+  },
+  {
+   "frame": 1502,
+   "t_ms": 62646
+  },
+  {
+   "frame": 1567,
+   "t_ms": 65357
+  },
+  {
+   "frame": 1766,
+   "t_ms": 73657
+  },
+  {
+   "frame": 1797,
+   "t_ms": 74950
+  },
+  {
+   "frame": 1834,
+   "t_ms": 76493
+  },
+  {
+   "frame": 1848,
+   "t_ms": 77077,
+   "note": "new shot starts dark (foot on the brake pedal in shadow)"
+  },
+  {
+   "frame": 1856,
+   "t_ms": 77411,
+   "note": "start of a shaky smoke shot (car tail, KAIO plate); camera shakes and Goku revealed inside it, no cut until 1886"
+  },
+  {
+   "frame": 1886,
+   "t_ms": 78662,
+   "note": "start of a long rocking in-car shot (1886-1919), King Kai swings around; framing jumps inside it are not cuts"
+  },
+  {
+   "frame": 1920,
+   "t_ms": 80080
+  },
+  {
+   "frame": 1970,
+   "t_ms": 82165
+  },
+  {
+   "frame": 2029,
+   "t_ms": 84626
+  },
+  {
+   "frame": 2081,
+   "t_ms": 86795
+  },
+  {
+   "frame": 2212,
+   "t_ms": 92259
+  },
+  {
+   "frame": 2313,
+   "t_ms": 96471
+  },
+  {
+   "frame": 2358,
+   "t_ms": 98348
+  },
+  {
+   "frame": 2391,
+   "t_ms": 99725
+  },
+  {
+   "frame": 2438,
+   "t_ms": 101685
+  },
+  {
+   "frame": 2470,
+   "t_ms": 103020
+  },
+  {
+   "frame": 2521,
+   "t_ms": 105147
+  },
+  {
+   "frame": 2814,
+   "t_ms": 117367,
+   "note": "start of a stepped upward tilt following the sundae glass to Beerus' mouth (2814-2904), treated as one shot"
+  },
+  {
+   "frame": 2905,
+   "t_ms": 121163
+  },
+  {
+   "frame": 2931,
+   "t_ms": 122247
+  },
+  {
+   "frame": 2972,
+   "t_ms": 123957
+  },
+  {
+   "frame": 3088,
+   "t_ms": 128795
+  },
+  {
+   "frame": 3186,
+   "t_ms": 132883
+  },
+  {
+   "frame": 3235,
+   "t_ms": 134926
+  },
+  {
+   "frame": 3402,
+   "t_ms": 141892
+  },
+  {
+   "frame": 3552,
+   "t_ms": 148148
+  }
+ ],
+ "dissolves": [],
+ "ambiguous": [
+  {
+   "frame": 81,
+   "why": "CG comet flight 0-165: camera flies through Saturn's ring (80 ring fills the lower half, 81 open space with the comet head at about the same place). Probably a continuous fly-past where the ring leaves frame in one step, but it may be a hidden cut"
+  },
+  {
+   "frame": 757,
+   "why": "kitchen shot 727-775: after a hold (753-756) the camera starts a fast lateral track in large 2-4-frame steps (757, 759, 761, 763, 765, 769). Background and staging continue, so judged one shot, but the first step at 757 is big enough to read as a cut"
+  }
+ ],
+ "method": "Viewed all 37 100-frame filmstrips in order; zoomed frame by frame at 320 px on every doubtful passage (comet/Saturn CG flight 24-93, explosion 102-125, white comet pass 158-181, curtain pan 444-467, kitchen track 753-776, King Kai lean 1656-1679, Goku appearing 1813-1836, smoke/car shake 1846-1891, rocking in-car shot 1890-1921, chef reaction 2519-2542, sundae tilt 2812-2907, boar head shake 3298-3321, finger tap 3529-3552). Checked every hard cut on triplet sheets (n-2..n+1). Candidate outlines used only as hints. No dissolves in this extract.",
+ "notable_non_cuts": "0-165 one continuous CG flight behind the comet (camera rolls from vertical to horizontal, passes Saturn, explosion at 104-111 when it hits a planet); 169-347 pan from green planet to yellow planet, then the magenta energy rings grow (same shot); 446-473 throne/curtain slides in front during a pan; 727-775 and 348-381 kitchen tracking shots with characters crossing; 1667-1669 King Kai leans toward the camera; 1826-1833 Goku appears in front of the camera (1826 one-frame flicker, 1827 empty road, then legs), same background; 1856-1885 smoke and camera shake on the car, Goku revealed; 1886-1919 rocking car interior with framing jumps (1889, 1895, 1897, 1905, 1913); 2279-2281 eye blink; 2521-2540 chef jumps up; 2814-2904 stepped tilt following the glass (2818, 2821, 2827, 2830, 2833, 2836, 2842, 2892, 2895 are steps, not cuts); 3302-3315 boar head shake + stepped push-in; 3532-3551 Beerus' finger taps, purple energy ring; 3595-3615 star flash on the planet; the DBS logo overlay appearing in the corner around 1213-1270",
+ "annotator": "Claude agent, by eye on contact sheets (2026-10-31); independent of any detector"
+}

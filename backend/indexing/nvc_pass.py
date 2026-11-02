@@ -65,6 +65,13 @@ def available() -> bool:
     return os.environ.get("AMV_NVC_PASS", "1") != "0" and _module() is not None
 
 
+def _buffers() -> int:
+    """Decode buffers of ``_BATCH`` frames: the decode loop fills one while
+    the worker downsizes and scans the others (``AMV_NVC_BUFFERS``)."""
+    v = os.environ.get("AMV_NVC_BUFFERS", "")
+    return max(2, min(8, int(v))) if v.isdigit() else 2
+
+
 def _torch_cuda_handles(torch) -> tuple[int, int]:
     """(CUcontext, CUstream) torch uses on this thread, as integers."""
     import ctypes
@@ -228,9 +235,14 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         ctx, _stream = _torch_cuda_handles(torch)
         # the decoder (and the copies out of its surfaces) get their own
         # stream: its synchronisations must not wait behind the downsizing
-        dec_stream = torch.cuda.Stream()
+        # (high priority: the cut network's passes, on a low-priority stream,
+        # must not hold up the decode -> downsize -> scan chain)
+        dec_stream = torch.cuda.Stream(priority=-1)
+        extra = {}
+        if os.environ.get("AMV_NVC_LATENCY") == "low":     # measurements (display order kept)
+            extra["latency"] = nvc.DisplayDecodeLatencyType.LOW
         dec = nvc.CreateDecoder(gpuid=0, codec=dmx.GetNvCodecId(), cudacontext=ctx,
-                                cudastream=int(dec_stream.cuda_stream), usedevicememory=True)
+                                cudastream=int(dec_stream.cuda_stream), usedevicememory=True, **extra)
     except Exception as exc:
         log.debug("PyNvVideoCodec cannot open %s: %s", path, exc)
         return None
@@ -248,15 +260,24 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
     matrix, full_range = onepass._color_info(path)
     gray_lut = None if full_range else onepass._TV_TO_PC
     sc = onepass._Scanner(fps, threshold, frame_sink,
-                          lambda b: onepass._nv12_to_rgb_gpu(b, matrix, full_range), cancelled, gray_lut)
+                          lambda b: onepass._nv12_to_rgb_gpu(b, matrix, full_range), cancelled, gray_lut,
+                          (matrix, full_range))
 
-    proxy = _ProxyWriter(path, pxw, onepass.PROXY_SOURCE_H)
-    # two decode buffers: the decode loop fills one while a worker thread
-    # downsizes, downloads and scans the other
-    buffers = [torch.empty((_BATCH, H * 3 // 2, W), dtype=sample, device=dev) for _ in range(2)]
-    free = [threading.Semaphore(1), threading.Semaphore(1)]
+    # the cut network's frames and colour histograms: made on the GPU for
+    # the whole batch (no per-frame work on the CPU, the frames stay there)
+    net_rgb = None
+    if sc.color_info is not None:
+        net_rgb = onepass.SmallRgbGpu(torch, dev, matrix, full_range, gray_lut)
+        sc.color_info = None
+
+    proxy = _ProxyWriter(path, pxw, onepass.PROXY_SOURCE_H, fps)
+    # decode buffers: the decode loop fills one while a worker thread
+    # downsizes, downloads and scans the others
+    nbuf = _buffers()
+    buffers = [torch.empty((_BATCH, H * 3 // 2, W), dtype=sample, device=dev) for _ in range(nbuf)]
+    free = [threading.Semaphore(1) for _ in range(nbuf)]
     import queue as _queue
-    work: _queue.Queue = _queue.Queue(maxsize=2)
+    work: _queue.Queue = _queue.Queue(maxsize=nbuf)
     stacked = torch.zeros((_BATCH, sh * 3 // 2, fw), dtype=torch.uint8, device=dev)
     staging = torch.empty((_BATCH, onepass.FRAME_BYTES), dtype=torch.uint8).pin_memory()
     staging_np = staging.numpy()
@@ -264,22 +285,70 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
     out_idx = 0            # CFR frame index (ffmpeg -fps_mode cfr numbering)
     next_px = 0            # next 15 fps proxy slot
 
-    def flush(batch, n: int):
-        nonlocal next_px
-        if n == 0:
-            return
+    def downsize(batch, n: int):
         y = batch[:n, :H]
         uv = batch[:n, H:].view(n, H // 2, W // 2, 2)
         st = stacked[:n]
         st[:, :fh] = s_big(y)
         st[:, fh:sh, :gw] = s_gray(y)
         st[:, sh:sh + fh // 2] = s_uv(uv).reshape(n, fh // 2, fw)
+        return net_rgb(st) if net_rgb is not None else None
+
+    # Windows: the ~200 small kernels of a batch's downsizing, launched one
+    # by one from the scan thread, cost far more under WDDM than on Linux
+    # and made that thread the bottleneck of the pass. Full batches replay
+    # them as one CUDA graph per decode buffer (the same kernels: the same
+    # bits; AMV_NVC_GRAPH=0/1 forces).
+    genv = os.environ.get("AMV_NVC_GRAPH")
+    use_graph = genv == "1" if genv in ("0", "1") else sys.platform == "win32"
+    if use_graph and net_rgb is not None:
+        net_rgb.no_sync = True
+    graphs: dict = {}
+
+    def downsize_full(k: int):
+        """Full batch in buffer ``k``: graph replay (captured on first use),
+        or None when capture is off or failed (eager path)."""
+        if not use_graph:
+            return None
+        g = graphs.get(k)
+        if g is None:
+            try:
+                for _ in range(2):                 # warm-up: allocator, cuBLAS
+                    downsize(buffers[k], _BATCH)
+                torch.cuda.current_stream().synchronize()
+                cg = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(cg, stream=torch.cuda.current_stream(), capture_error_mode="thread_local"):
+                    out = downsize(buffers[k], _BATCH)
+                g = graphs[k] = (cg, out)
+            except Exception as exc:
+                log.info("NVDEC pass: no CUDA graph for the downsizing (%s); eager", exc)
+                graphs[k] = False
+                return None
+        if g is False:
+            return None
+        g[0].replay()
+        out = g[1]
+        # the graph's outputs are overwritten by the next replay
+        return (out[0].clone(), out[1].clone()) if out is not None else "none"
+
+    def flush(batch, n: int, k: int = -1):
+        nonlocal next_px
+        if n == 0:
+            return
+        net = downsize_full(k) if n == _BATCH and k >= 0 else None
+        if net is None:
+            net = downsize(batch, n)
+        elif net == "none":
+            net = None
+        st = stacked[:n]
         # wait for the GPU on a blocking event (the thread sleeps) instead of
         # the copy's own synchronisation, which spins a core while it waits
         ev = torch.cuda.Event(blocking=True)
         ev.record(torch.cuda.current_stream())
         ev.synchronize()
         staging[:n].copy_(st.reshape(n, -1))
+        if net is not None:
+            sc.detector.push_net(net[0], net[1].cpu().numpy())
         host = staging_np[:n]
         done = 0
         while done < n:
@@ -302,15 +371,25 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
             sel = batch[picks]
             py = s_py(sel[:, :H])
             puv = s_puv(sel[:, H:].view(len(picks), H // 2, W // 2, 2)).reshape(len(picks), -1, pxw)
-            proxy.write(torch.cat([py, puv], 1))
+            proxy.write(torch.cat([py, puv], 1), [first + p for p in picks])
+        proxy.release(sc)
 
-    work_stream = torch.cuda.Stream()
+    work_stream = torch.cuda.Stream(priority=-1)
+    finished: dict = {}
 
     def worker():
         while True:
             item = work.get()
             if item is None:
                 with torch.cuda.stream(work_stream):
+                    if not errors:
+                        try:
+                            # the last decisions, then the held proxy frames
+                            # (encoded on this thread, like the others)
+                            finished["scan"] = sc.finish(duration_ms)
+                            proxy.release(sc, final=True)
+                        except BaseException as exc:
+                            errors.append(exc)
                     proxy.finish_encode()
                 return
             k, n, ready = item
@@ -318,7 +397,7 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
                 if not errors:
                     with torch.cuda.stream(work_stream):
                         work_stream.wait_event(ready)
-                        flush(buffers[k], n)
+                        flush(buffers[k], n, k)
             except BaseException as exc:   # surfaced by the decode loop
                 errors.append(exc)
             finally:
@@ -333,7 +412,7 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         ready = torch.cuda.Event()
         ready.record(dec_stream)
         work.put((cur, filled, ready))
-        cur, filled = 1 - cur, 0
+        cur, filled = (cur + 1) % nbuf, 0
         free[cur].acquire()
         if errors:
             raise errors[0]
@@ -379,7 +458,7 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
             pass
         proxy.close(ok=False)
         raise
-    cuts_ms, medians, n_frames = sc.finish(duration_ms)
+    cuts_ms, medians, n_frames = finished["scan"] if "scan" in finished else sc.finish(duration_ms)
     proxy.close(ok=n_frames > 0)
     if n_frames == 0:
         raise RuntimeError("PyNvVideoCodec decoded no frame")
@@ -408,22 +487,59 @@ class _GpuNV12:
 
 
 class _ProxyWriter:
-    """The proxies' 240p/15 fps copy, encoded by NVENC straight from the GPU
-    frames (PyNvVideoCodec) and muxed to MP4 (constant QP 20, GOP 30, like
-    the ffmpeg pass's copy)."""
+    """The proxies' 240p/15 fps frames, encoded by NVENC straight from the
+    GPU frames (PyNvVideoCodec).
 
-    def __init__(self, video_path: str, w: int, h: int):
+    Copy mode: a 240p copy (constant QP 20, GOP 30, like the ffmpeg pass's
+    copy) that the proxy pass decodes and re-encodes at every shot.
+
+    Direct mode (``onepass._proxy_direct``): the hover proxies themselves —
+    the proxies' bitrate, an IDR frame on the first 15 fps frame of every
+    shot, no other key frame — so the proxy pass only cuts the stream
+    (``-c copy``). A frame is encoded once the cut detector can no longer
+    put a cut before it (``margin`` frames later, ~60 MB of 240p frames
+    held on the GPU); the IDR positions go to a JSON file next to the
+    stream, and the proxy pass checks every shot edge against them
+    (``onepass.direct_split_ok``)."""
+
+    def __init__(self, video_path: str, w: int, h: int, fps: float = 0.0):
         self.ok = False
         self.enc = self.mux = None
+        self.direct = None
+        self.pending: list = []
+        self._q = self._th = None
+        self.threaded = False
         d = onepass._proxy_cache_dir
         if d is None:
             return
         Path(d).mkdir(parents=True, exist_ok=True)
-        self.dst = Path(d) / onepass._proxy_source_name(video_path)
-        self.raw = self.dst.with_suffix(".part.h264")
-        self.tmp = self.dst.with_suffix(".part.mkv")
+        base = Path(d) / onepass._proxy_source_name(video_path)
+        self.direct = dict(onepass._proxy_direct) if onepass._proxy_direct and fps > 0 else None
+        if self.direct:
+            self.dst = base.with_suffix(".direct.h264")
+            self.meta_path = base.with_suffix(".direct.json")
+            self.raw = base.with_suffix(".part.direct.h264")
+            self.meta_path.unlink(missing_ok=True)
+        else:
+            self.dst = base
+            self.raw = base.with_suffix(".part.h264")
+        self.tmp = base.with_suffix(".part.mkv")
         self.dst.unlink(missing_ok=True)
-        self.w, self.h, self.n = w, h, 0
+        self.w, self.h, self.n, self.fps = w, h, 0, fps
+        self.pending: list = []        # (source frame index, (n, h*3/2, w) tensor, row)
+        self.idr: list[int] = []       # slots encoded as IDR frames (direct mode)
+        self.prev_src = -1
+        self.sub = 0                   # frames handed to the encoder so far
+        # Windows: NVENC's per-frame calls cost far more there (WDDM) and,
+        # made on the scan thread, they slowed the whole decode pass (20 %
+        # of that thread, which the decode loop waited for): an encoder
+        # thread of its own takes them (AMV_PROXY_ENC_THREAD=0/1 forces)
+        env = os.environ.get("AMV_PROXY_ENC_THREAD")
+        self.threaded = env == "1" if env in ("0", "1") else sys.platform == "win32"
+        self._q = None
+        self._th = None
+        self.cut_frames: list[int] = []
+        self._cuts_seen = 1            # cuts_ms[0] is the start, not a cut
         self.nvc = _module()
         self.ok = self.nvc is not None
         self.mux = None
@@ -434,34 +550,141 @@ class _ProxyWriter:
         another thread, crashed)."""
         import torch
         ctx, stream = _torch_cuda_handles(torch)
-        self.enc = self.nvc.CreateEncoder(self.w, self.h, "NV12", False, codec="h264", preset="P1",
-                                          rc="constqp", constqp="20", gop="30", fps=str(PROXY_FPS),
-                                          cudacontext=ctx, cudastream=stream)
+        if self.direct:
+            # what the proxy pass's ffmpeg asked NVENC for: P1, low latency,
+            # VBR at the proxy quality's bitrate; key frames only where forced
+            bps = int(self.direct["bitrate"])
+            self.enc = self.nvc.CreateEncoder(self.w, self.h, "NV12", False, codec="h264", preset="P1",
+                                              tuning_info="low_latency", rc="vbr", bitrate=str(bps),
+                                              maxbitrate=str(2 * bps), gop="100000", idrperiod="100000",
+                                              repeatspspps="1", fps=str(PROXY_FPS),
+                                              cudacontext=ctx, cudastream=stream)
+        else:
+            self.enc = self.nvc.CreateEncoder(self.w, self.h, "NV12", False, codec="h264", preset="P1",
+                                              rc="constqp", constqp="20", gop="30", fps=str(PROXY_FPS),
+                                              cudacontext=ctx, cudastream=stream)
         self.mux = open(self.raw, "wb")
 
     def _mux(self, packets) -> None:
         for pk in packets:
             self.mux.write(bytes(pk["data"]) if isinstance(pk, dict) else bytes(pk))
 
-    def write(self, frames) -> None:
-        """frames: (n, h*3/2, w) uint8 CUDA tensor."""
-        try:
+    def _encode(self, frame, idr: bool = False) -> None:
+        pp = self.nvc.NV_ENC_PIC_PARAMS()
+        pp.inputTimeStamp = self.n
+        if idr:
+            pp.encodePicFlags = int(self.nvc.NV_ENC_PIC_FLAGS.FORCEIDR)
+            self.idr.append(self.n)
+        self.n += 1
+        self._mux(self.enc.Encode(_GpuNV12(frame, self.w, self.h), pp))
+
+    def _submit(self, items) -> None:
+        """Encode ``(frames, row, idr)`` in order: here (after waiting for
+        the frames), or on the encoder thread (which waits for them)."""
+        import torch
+        if not self.threaded:
             if self.enc is None:
                 self._open()
-            frames = frames.contiguous()
-            import torch
             torch.cuda.current_stream().synchronize()   # frames ready for NVENC
-            for i in range(frames.shape[0]):
-                pp = self.nvc.NV_ENC_PIC_PARAMS()
-                pp.inputTimeStamp = self.n
-                self.n += 1
-                self._mux(self.enc.Encode(_GpuNV12(frames[i], self.w, self.h), pp))
+            for frames, i, idr in items:
+                self._encode(frames[i], idr)
+            return
+        if self._th is None:
+            import queue
+            self._q = queue.Queue(maxsize=64)
+            self._th = threading.Thread(target=self._enc_loop, daemon=True, name="proxy-nvenc")
+            self._th.start()
+        ev = torch.cuda.Event(blocking=True)
+        ev.record(torch.cuda.current_stream())
+        self._q.put((ev, items))
+
+    def _enc_loop(self) -> None:
+        try:
+            while True:
+                job = self._q.get()
+                if job is None:
+                    break
+                ev, items = job
+                if not self.ok:
+                    continue
+                if self.enc is None:
+                    self._open()       # on this thread: its context and stream
+                ev.synchronize()
+                for frames, i, idr in items:
+                    self._encode(frames[i], idr)
+            if self.enc is not None and self.mux is not None:
+                self._mux(self.enc.EndEncode())
+                self.mux.close()
+                self.mux = None
         except Exception as exc:
-            log.debug("proxy copy encode failed: %s", exc)
+            log.warning("hover proxies / 240p copy not encoded (NVENC: %s); the proxies will decode "
+                        "the source", exc)
             self.ok = False
+            while True:          # unblock the producer
+                try:
+                    if self._q.get_nowait() is None:
+                        break
+                except Exception:
+                    break
+
+    def write(self, frames, srcs=None) -> None:
+        """frames: (n, h*3/2, w) uint8 CUDA tensor; srcs: the CFR source
+        frame index of each (direct mode: held until :meth:`release`)."""
+        try:
+            frames = frames.contiguous()
+            if self.direct:
+                if self.enc is None and not self.threaded:
+                    self._open()
+                self.pending.extend((int(s), frames, i) for i, s in enumerate(srcs))
+                return
+            self._submit([(frames, i, False) for i in range(frames.shape[0])])
+            self.sub += frames.shape[0]
+        except Exception as exc:
+            # the proxy pass then decodes the 1080p source again: say so
+            log.warning("240p proxy copy not written (NVENC: %s); the proxies will decode the source", exc)
+            self.ok = False
+            self.pending.clear()
+
+    def release(self, sc, final: bool = False) -> None:
+        """Direct mode: encode the held frames the detector is done with
+        (all of them once the stream ended), IDR on each shot's first."""
+        if not self.direct or not self.ok or not self.pending:
+            return
+        try:
+            cuts_ms = sc.cuts_ms[:-1] if final else sc.cuts_ms   # finish() appends the duration
+            for ms in cuts_ms[self._cuts_seen:]:
+                self.cut_frames.append(sc.first_at(ms))
+            self._cuts_seen = len(cuts_ms)
+            limit = float("inf") if final else sc.n - (sc.detector.lookahead + 6 * _BATCH)
+            k = 0
+            while k < len(self.pending) and self.pending[k][0] < limit:
+                k += 1
+            if not k:
+                return
+            import bisect
+            items = []
+            for src, frames, i in self.pending[:k]:
+                # a shot starts on a frame in (previous slot's frame, this one]
+                a = bisect.bisect_right(self.cut_frames, self.prev_src)
+                idr = self.sub == 0 or (a < len(self.cut_frames) and self.cut_frames[a] <= src)
+                items.append((frames, i, idr))
+                self.sub += 1
+                self.prev_src = src
+            del self.pending[:k]
+            self._submit(items)
+        except Exception as exc:
+            log.warning("hover proxies not encoded during the decode (NVENC: %s); "
+                        "the proxy pass will decode the source", exc)
+            self.ok = False
+            self.pending.clear()
 
     def finish_encode(self) -> None:
         """EndEncode, on the encoding thread."""
+        if self._th is not None:
+            self._q.put(None)
+            self._th.join()
+            self._th = None
+            return
         if self.enc is None or self.mux is None:
             return
         try:
@@ -480,6 +703,15 @@ class _ProxyWriter:
             except Exception:
                 pass
             self.ok = False
+        if self.direct:
+            if ok and self.ok and self.n and not self.pending and self.raw.is_file():
+                import json
+                self.raw.replace(self.dst)
+                self.meta_path.write_text(json.dumps({
+                    "fps": self.fps, "proxy_fps": PROXY_FPS, "slots": self.n, "idr": self.idr,
+                    "bitrate": int(self.direct["bitrate"])}))
+            self.raw.unlink(missing_ok=True)
+            return
         if ok and self.ok and self.n and self.raw.is_file():
             # raw stream -> MKV at 15 fps (timestamps from 0), no re-encode
             flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -488,5 +720,8 @@ class _ProxyWriter:
                                capture_output=True, creationflags=flags)
             if r.returncode == 0 and self.tmp.is_file():
                 self.tmp.replace(self.dst)
+            else:
+                log.warning("240p proxy copy not muxed (ffmpeg %s: %s)", r.returncode,
+                            (r.stderr or b"").decode("utf-8", "replace")[-300:])
         self.raw.unlink(missing_ok=True)
         self.tmp.unlink(missing_ok=True)

@@ -35,6 +35,10 @@ export const timelineStrings: Dict = {
     en: 'Final Cut Pro: File > Import > XML…, select the .fcpxml file. The clips stay linked to the originals.',
     fr: 'Final Cut Pro : Fichier > Importer > XML…, sélectionnez le fichier .fcpxml. Les clips restent liés aux originaux.',
   },
+  'timeline.finalcut.unsupported': {
+    en: 'Final Cut Pro does not import MKV/WebM files: {count} source(s) of this timeline would stay offline. Convert them to .mov or .mp4 first (a remux without re-encoding is enough), then use File > Relink Files in Final Cut.',
+    fr: 'Final Cut Pro n\'importe pas les fichiers MKV/WebM : {count} source(s) de cette timeline resteraient hors ligne. Convertissez-les d\'abord en .mov ou .mp4 (un remux sans réencodage suffit), puis utilisez Fichier > Relier les fichiers dans Final Cut.',
+  },
   'timeline.import.other': {
     en: 'OTIO: Resolve (File > Import > Timeline) and Kdenlive (OpenTimelineIO import). EDL CMX3600: universal cut list, one frame rate, file paths only in comments (relink by clip name).',
     fr: 'OTIO : Resolve (Fichier > Importer > Timeline) et Kdenlive (import OpenTimelineIO). EDL CMX3600 : liste de coupes universelle, une seule cadence, chemins seulement en commentaire (reliez par nom de clip).',

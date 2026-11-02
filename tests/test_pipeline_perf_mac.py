@@ -148,3 +148,26 @@ def test_parallel_exports_only_for_videotoolbox(monkeypatch):
     assert derush._parallel_exports("h264_videotoolbox") == 3
     for codec in ("libx265", "prores_ks", "libsvtav1", "libx264"):
         assert derush._parallel_exports(codec) == 1
+
+
+def test_last_scene_past_the_video_still_streamed(tmp_path, data_dir, software_decode):
+    # Black Clover S02E04: a cut on the last video frames, then 6 s where only
+    # the audio goes on. That last scene had no sample: no median, no
+    # on_scene, and the pipeline decoded the whole episode again to
+    # sub-segment it (+2 min 18 on an M1 Pro).
+    clip = tmp_path / "audio-tail.mkv"
+    subprocess.run([ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1:r=25",
+                    "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=1:r=25",
+                    "-f", "lavfi", "-i", "color=c=green:s=320x240:d=0.08:r=25",
+                    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+                    "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0,format=yuv420p[v]",
+                    "-map", "[v]", "-map", "3:a", "-t", "4", "-c:v", "libx264", "-c:a", "aac", str(clip)],
+                   check=True)
+    streamed = []
+    scenes, medians = single_pass.detect_cuts_with_medians(
+        str(clip), threshold=0.30, on_scene=lambda s, e, samples: streamed.append((s, e, len(samples))))
+    assert len(scenes) == 3 and scenes[-1][0] == 2000
+    assert [(s, e) for s, e, _n in streamed] == scenes
+    assert all(n >= 1 for _s, _e, n in streamed)
+    assert sorted(medians) == [s + (e - s) // 2 for s, e in scenes]

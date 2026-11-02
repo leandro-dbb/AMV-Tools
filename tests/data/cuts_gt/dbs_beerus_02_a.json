@@ -1,0 +1,214 @@
+{
+ "video": "dbs02_a.mkv",
+ "source": "DBS Beerus 02 episode, from 300 s (stream copy, starts on a keyframe)",
+ "split": "test",
+ "fps": "24000/1001",
+ "n_frames": 3638,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 47,
+   "t_ms": 1960
+  },
+  {
+   "frame": 214,
+   "t_ms": 8926
+  },
+  {
+   "frame": 254,
+   "t_ms": 10594
+  },
+  {
+   "frame": 288,
+   "t_ms": 12012
+  },
+  {
+   "frame": 557,
+   "t_ms": 23232
+  },
+  {
+   "frame": 595,
+   "t_ms": 24816
+  },
+  {
+   "frame": 734,
+   "t_ms": 30614
+  },
+  {
+   "frame": 837,
+   "t_ms": 34910,
+   "note": "cut to a bright, hazy yellow shot (staff descending), not a flash: the Whis shot does not come back"
+  },
+  {
+   "frame": 866,
+   "t_ms": 36119
+  },
+  {
+   "frame": 928,
+   "t_ms": 38705
+  },
+  {
+   "frame": 956,
+   "t_ms": 39873,
+   "note": "first frame of the new shot is a blurred smear of Goku's hair; 956-996 is one shot (head turning to camera on 3s)"
+  },
+  {
+   "frame": 997,
+   "t_ms": 41583
+  },
+  {
+   "frame": 1071,
+   "t_ms": 44670
+  },
+  {
+   "frame": 1213,
+   "t_ms": 50592
+  },
+  {
+   "frame": 1223,
+   "t_ms": 51009
+  },
+  {
+   "frame": 1237,
+   "t_ms": 51593
+  },
+  {
+   "frame": 1350,
+   "t_ms": 56306
+  },
+  {
+   "frame": 1388,
+   "t_ms": 57891,
+   "note": "new shot starts very dark (Beerus' back close-up), camera then pulls back through the door"
+  },
+  {
+   "frame": 1489,
+   "t_ms": 62104
+  },
+  {
+   "frame": 1598,
+   "t_ms": 66650
+  },
+  {
+   "frame": 1685,
+   "t_ms": 70279
+  },
+  {
+   "frame": 1860,
+   "t_ms": 77578
+  },
+  {
+   "frame": 1862,
+   "t_ms": 77661
+  },
+  {
+   "frame": 1864,
+   "t_ms": 77744
+  },
+  {
+   "frame": 1877,
+   "t_ms": 78287,
+   "note": "cut from the Kamehameha whiteout (1872-1876) to the beam over the house"
+  },
+  {
+   "frame": 1893,
+   "t_ms": 78954
+  },
+  {
+   "frame": 1937,
+   "t_ms": 80789
+  },
+  {
+   "frame": 1961,
+   "t_ms": 81790
+  },
+  {
+   "frame": 1988,
+   "t_ms": 82916
+  },
+  {
+   "frame": 2012,
+   "t_ms": 83917
+  },
+  {
+   "frame": 2089,
+   "t_ms": 87129
+  },
+  {
+   "frame": 2133,
+   "t_ms": 88964
+  },
+  {
+   "frame": 2176,
+   "t_ms": 90757
+  },
+  {
+   "frame": 2276,
+   "t_ms": 94928
+  },
+  {
+   "frame": 2350,
+   "t_ms": 98015
+  },
+  {
+   "frame": 2504,
+   "t_ms": 104438
+  },
+  {
+   "frame": 2619,
+   "t_ms": 109234,
+   "note": "cut to a smoke close-up that clears to reveal King Kai (same shot until 2742)"
+  },
+  {
+   "frame": 2743,
+   "t_ms": 114406
+  },
+  {
+   "frame": 2961,
+   "t_ms": 123498
+  },
+  {
+   "frame": 3004,
+   "t_ms": 125292
+  },
+  {
+   "frame": 3169,
+   "t_ms": 132174
+  },
+  {
+   "frame": 3186,
+   "t_ms": 132883
+  },
+  {
+   "frame": 3298,
+   "t_ms": 137554
+  },
+  {
+   "frame": 3422,
+   "t_ms": 142726,
+   "note": "followed by a slow tilt up on Beerus until the end"
+  }
+ ],
+ "dissolves": [],
+ "ambiguous": [
+  {
+   "frame": 1225,
+   "why": "Frieza knocked away past the camera: extreme close-up of his back (1223-1224) jumps to a wide view of him from behind (1225), same sky; most likely one shot with him flying away from the lens, but it could be a cut"
+  },
+  {
+   "frame": 1814,
+   "end": 1829,
+   "why": "stepped push-in on Goku charging the Kamehameha: the framing jumps at 1814, 1817, 1820, 1823, 1826, 1829 (3-frame holds, same background) while he turns; treated as one shot, not cuts"
+  },
+  {
+   "frame": 1997,
+   "end": 2009,
+   "why": "stepped zoom-in on Goku turning around (2-frame holds at 1997, 1999, 2001, 2003, 2005, 2007, 2009, same background and beam); 1996->1997 also changes his pose; treated as one shot, not cuts"
+  }
+ ],
+ "method": "",
+ "notable_non_cuts": "401-412 Beerus moves in the bath (same shot); 595-630 Beerus rises from the water with a stepped camera move; 866-899 tilt up on the beam of light; 900-910 Goku's image fades in INSIDE the beam (a projection superimposed on the same shot, not a transition); 957-981 Goku's head turns to camera on 3s with a push-in (big jumps at 957, 960, 969, 972, 975, 978, 981); 997-1070 tilt up from Goku's belt to his face; 1218-1222 and 1232-1236 punch flashes/auras in the Frieza flashback; 1685-1768 slow pull-back on Goku's face; 1769-1771 Goku's hands sweep into the lens then the camera pulls back (1772-1801); 1802 Goku swings his hands to his side (pose change, same background); 1864-1876 the Kamehameha ball grows to a full whiteout (no cut until 1877); 1938-1960 camera follows the beam; 2187-2210 explosion grows to fill the frame with smoke; 2535-2540 shockwave/dust rushing at the camera, the same wide shot comes back at 2541; 2548-2575 wind gusts; 2636-2645 smoke clears; 2933-2939 King Kai's arm passes in front of the camera; 3050-3090 and 3280-3286 King Kai turning/moving with small reframes; 3388-3421 pan/tilt up to the tree; 3422-3637 tilt up on Beerus.",
+ "annotator": "Claude agent, by eye on contact sheets (2026-10-31); independent of any detector"
+}

@@ -8,6 +8,7 @@ import { useI18n, useT, type Lang } from '../i18n';
 import DiagnosticSection from './DiagnosticSection';
 import FinishModelsSection from './FinishModelsSection';
 import ModelTiersSection from './ModelTiersSection';
+import { usePreciseCuts } from './PreciseCutsHint';
 
 // mirrors backend/models/auto_roto.HELD_DEFAULT ("auto" value of mask_keep_held)
 const KEEP_HELD_DEFAULT = true;
@@ -189,6 +190,7 @@ function recommendedBatchMps(vramGb: number): number {
 function IndexingSection({ settings, patch, runtimeDevice, gpuName, vramGb }: { settings: AppSettings; patch: Patch; runtimeDevice?: string; gpuName?: string; vramGb?: number | null }) {
   const t = useT();
   const s = settings.indexing;
+  const preciseCuts = usePreciseCuts();
   const isCpu = s.device === 'cpu';
   const cpuRuntime = isCpu || runtimeDevice === 'cpu';
   const mps = runtimeDevice === 'mps';
@@ -279,6 +281,9 @@ function IndexingSection({ settings, patch, runtimeDevice, gpuName, vramGb }: { 
       </Row>
       <Row label={t('settings.indexing.sceneThreshold.label')} hint={t('settings.indexing.sceneThreshold.hint')}>
         <Slider value={Math.round(s.scene_detect_threshold * 100)} min={10} max={60} step={1} onChange={(v) => patch('indexing', { scene_detect_threshold: v / 100 })} />
+      </Row>
+      <Row label={t('settings.indexing.preciseCuts.label')} hint={preciseCuts.hint}>
+        <Toggle on={preciseCuts.auto || !!s.precise_cuts} onChange={(v) => !preciseCuts.auto && patch('indexing', { precise_cuts: v })} />
       </Row>
     </>
   );

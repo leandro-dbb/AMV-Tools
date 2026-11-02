@@ -40,6 +40,9 @@ DEFAULT_SETTINGS = {
         "proxy_quality": "medium",
         "auto_skip_indexed": True,
         "scene_detect_threshold": 0.40,
+        # The TransNetV2 cut network where the automatic tuning found it too
+        # slow to run by itself (indexing/cutnet.py ``wanted``).
+        "precise_cuts": False,
     },
     "models": {
         # Model tier (backend/models/tiers.py): "auto" (by VRAM / unified

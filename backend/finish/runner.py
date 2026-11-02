@@ -457,6 +457,18 @@ def _run_interpolate(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> 
 
 
 # ── depth ───────────────────────────────────────────────────────────────────
+
+def write_png16(path: Path, img: np.ndarray, index: int = 0) -> None:
+    """PNG through Python's file API: OpenCV's imwrite cannot open a path
+    with non-ASCII characters on Windows (C:\\Users\\…\\Vidéos\\Exports été
+    made every depth export fail with "could not write depth frame 0")."""
+    import cv2
+    ok, buf = cv2.imencode(".png", img)
+    if not ok:
+        raise OSError(f"could not encode depth frame {index}")
+    Path(path).write_bytes(buf.tobytes())
+
+
 def _depth_credit(p: dict) -> str:
     """Model label + license for the PNG sequence's README.txt."""
     from .registry import MODELS
@@ -530,8 +542,7 @@ def _run_depth(ctx, clip: ClipInfo, stem: str, out_dir: Path, p: dict) -> str:
         ctx.on_cancel_cleanup(lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
         def write_png(i: int) -> None:
             d16 = (to_output_res(depth[i], clip.width, clip.height) * 65535.0).round().astype(np.uint16)
-            if not cv2.imwrite(str(tmp_dir / f"{stem}_depth_{i:05d}.png"), d16):
-                raise OSError(f"could not write depth frame {i}")
+            write_png16(tmp_dir / f"{stem}_depth_{i:05d}.png", d16, i)
 
         # PNG deflate and the cubic upsize release the GIL: 4 writers
         # (M1 Pro, 120 1080p frames: 4.5 s -> 1.2 s; 5 s clip on NVIDIA:

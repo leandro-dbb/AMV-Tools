@@ -54,10 +54,18 @@ def supported(path: str) -> bool:
     return prof is not None and prof["name"] == "software"
 
 
-def _command(path: str, fps: float, profile: dict, proxy_out=None) -> list[str]:
+def _command(path: str, fps: float, profile: dict, proxy_out=None, color: bool = False) -> list[str]:
     gw, gh = cuts._DIFF_W, cuts._DIFF_H
     k = cuts._FRAME_STRIDE
     gray = profile["scale_vf"].format(w=gw, h=gh) + ",format=gray"
+    # with the cut network: the same 160×90 pictures in colour, tiled the
+    # same way, stacked under the gray row (the gray plane is unchanged)
+    tiles = f"[a]{gray},tile=layout={k}x1,format=rgb24,pad={_W}:{gh}[g];"
+    if color:
+        tiles = (f"[a]split[a1][a2];"
+                 f"[a1]{gray},tile=layout={k}x1,format=rgb24,pad={_W}:{gh}[g];"
+                 f"[a2]{profile['scale_vf'].format(w=gw, h=gh)},format=rgb24,"
+                 f"tile=layout={k}x1,pad={_W}:{gh}[gc];")
     rgb = profile.get("scale_vf_rgb", profile["scale_vf"]).format(w=_RGB_W, h=_RGB_H) + ",format=rgb24"
     proxy_graph, proxy_args = "", []
     if proxy_out is not None:
@@ -70,9 +78,9 @@ def _command(path: str, fps: float, profile: dict, proxy_out=None) -> list[str]:
         f"{'[p]' if proxy_out is not None else ''};"
         # every frame's gray plane, grouped by stride: slot 0 is the sampled
         # frame the detector decides on, slots 1..3 locate the exact cut
-        f"[a]{gray},tile=layout={k}x1,format=rgb24,pad={_W}:{gh}[g];"
+        f"{tiles}"
         f"[b]select='not(mod(n\\,{k}))',{rgb},pad={_W}:{_RGB_H}[c];"
-        f"[c][g]vstack=inputs=2[out]"
+        + (f"[c][g][gc]vstack=inputs=3[out]" if color else f"[c][g]vstack=inputs=2[out]") +
         f"{proxy_graph}"
     )
     return [
@@ -125,7 +133,9 @@ def detect_cuts_with_medians(
 
     gw, gh = cuts._DIFF_W, cuts._DIFF_H
     stride = cuts._FRAME_STRIDE
-    frame_bytes = _W * (_RGB_H + gh) * 3
+    detector = shotdetect.ShotDetector(threshold)
+    color = detector.wants_color
+    frame_bytes = _W * (_RGB_H + gh * (2 if color else 1)) * 3
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     proxy_out = None
     if proxy_source:
@@ -134,7 +144,7 @@ def detect_cuts_with_medians(
             proxy_out = _ps.temp_path(path)
         except Exception as exc:
             log.debug("no proxy source for %s: %s", path, exc)
-    proc = subprocess.Popen(_command(path, fps, profile, proxy_out), stdout=subprocess.PIPE,
+    proc = subprocess.Popen(_command(path, fps, profile, proxy_out, color), stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, creationflags=flags,
                             bufsize=frame_bytes * 4)
 
@@ -142,23 +152,28 @@ def detect_cuts_with_medians(
     medians: dict[int, Image.Image] = {}
     buf: deque[tuple[int, np.ndarray]] = deque()   # (ts, rgb) still eligible
     sample_idx = -1
-    detector = shotdetect.ShotDetector(threshold)
-    # a cut is confirmed a few frames after it happened (flash look-ahead)
-    late_ms = int((shotdetect.LOOKAHEAD + stride) * 1000 / fps) + 1
+    last: list[tuple[int, np.ndarray]] = []        # the latest sample
+    # a cut is confirmed a few frames after it happened (flash look-ahead,
+    # the cut network's windows)
+    late_ms = int((detector.lookahead + stride) * 1000 / fps) + 1
     n_expected = int(round(duration_ms * fps / 1000.0))
 
     def close_scene(start: int, end: int) -> None:
         if end - start < cuts._MIN_SCENE_MS:
             return
         target = start + (end - start) // 2
-        inside = [item for item in buf if start <= item[0] < end] or list(buf)
+        # No sample of its own: a cut on the last frames, then a tail where
+        # the container (audio) outlasts the video. The last picture stands
+        # for it; a scene left out of on_scene made the pipeline decode the
+        # whole file again for sub-segmentation (+2 min on an HEVC episode).
+        inside = [item for item in buf if start <= item[0] < end] or list(buf) or last[:1]
         if inside:
             pick = min(inside, key=lambda item: abs(item[0] - target))[1]
             medians[target] = Image.fromarray(pick)
             if on_median is not None:
                 on_median(target, medians[target])
             if on_scene is not None:
-                on_scene(start, end, [item for item in buf if start <= item[0] < end] or list(buf))
+                on_scene(start, end, inside)
 
     def add(found: list[int]) -> None:
         nonlocal buf
@@ -179,18 +194,21 @@ def detect_cuts_with_medians(
                 break
             sample_idx += 1
             ts_ms = int((sample_idx * cuts._FRAME_STRIDE / fps) * 1000)
-            arr = np.frombuffer(raw, dtype=np.uint8).reshape(_RGB_H + gh, _W, 3)
-            group = arr[_RGB_H:, :gw * stride, 0]
+            arr = np.frombuffer(raw, dtype=np.uint8).reshape(_RGB_H + gh * (2 if color else 1), _W, 3)
+            group = arr[_RGB_H:_RGB_H + gh, :gw * stride, 0]
+            cgroup = arr[_RGB_H + gh:, :gw * stride] if color else None
             gray = np.ascontiguousarray(group[:, :gw])
             if frame_sink is not None:
                 frame_sink(ts_ms, gray)
             buf.append((ts_ms, np.ascontiguousarray(arr[:_RGB_H, :_RGB_W])))
+            last[:] = [buf[-1]]
             # every frame of the group goes to the cut detector (the last
             # group may be padded past the end of the video)
             for i in range(stride):
                 if sample_idx * stride + i >= max(n_expected, (sample_idx * stride) + 1) and i > 0:
                     break
-                add(detector.push(group[:, i * gw:(i + 1) * gw]))
+                add(detector.push(group[:, i * gw:(i + 1) * gw],
+                                  None if cgroup is None else cgroup[:, i * gw:(i + 1) * gw]))
             # Drop samples that can no longer be the nearest to the median of
             # the open scene (that median only moves forward as it grows; the
             # cut closing it may be confirmed ``late_ms`` after it happened).

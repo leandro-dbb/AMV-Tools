@@ -1,0 +1,369 @@
+{
+ "video": "dbs02_b.mkv",
+ "source": "DBS Beerus 02 episode, from 900 s (stream copy, starts on a keyframe)",
+ "split": "test",
+ "fps": "24000/1001",
+ "n_frames": 3623,
+ "time_base": "1/1000",
+ "stream_start_time_ms": 0,
+ "convention": "frame n = first frame of new shot, 0-based decode order",
+ "hard_cuts": [
+  {
+   "frame": 58,
+   "t_ms": 2419
+  },
+  {
+   "frame": 153,
+   "t_ms": 6381
+  },
+  {
+   "frame": 222,
+   "t_ms": 9259
+  },
+  {
+   "frame": 362,
+   "t_ms": 15098,
+   "note": "hard cut into a dust-filled shot; Goku emerges from the dust later in the same shot"
+  },
+  {
+   "frame": 407,
+   "t_ms": 16975
+  },
+  {
+   "frame": 431,
+   "t_ms": 17976
+  },
+  {
+   "frame": 437,
+   "t_ms": 18227
+  },
+  {
+   "frame": 439,
+   "t_ms": 18310
+  },
+  {
+   "frame": 450,
+   "t_ms": 18769
+  },
+  {
+   "frame": 464,
+   "t_ms": 19353,
+   "note": "chin close-up, then a fast zoom-out (465-467) inside the same shot"
+  },
+  {
+   "frame": 485,
+   "t_ms": 20229,
+   "note": "hard cut to black (485-486)"
+  },
+  {
+   "frame": 487,
+   "t_ms": 20312,
+   "note": "cut from black to a stylized white-on-black Goku image (489-490 is the same layout with a glow effect)"
+  },
+  {
+   "frame": 491,
+   "t_ms": 20479,
+   "note": "cut hidden under a yellow flash: 491-494 is the flash-covered start of the Goku aura shot that clears at 495"
+  },
+  {
+   "frame": 513,
+   "t_ms": 21396
+  },
+  {
+   "frame": 537,
+   "t_ms": 22397,
+   "note": "hard cut to black (537-538)"
+  },
+  {
+   "frame": 539,
+   "t_ms": 22481,
+   "note": "cut from black to a stylized silhouette (541-544 light pillar / inverted frames are the same stylized shot)"
+  },
+  {
+   "frame": 545,
+   "t_ms": 22731
+  },
+  {
+   "frame": 583,
+   "t_ms": 24316
+  },
+  {
+   "frame": 693,
+   "t_ms": 28904
+  },
+  {
+   "frame": 761,
+   "t_ms": 31740,
+   "note": "framing jumps from a small Beerus to a big close-up of his head/shoulder"
+  },
+  {
+   "frame": 781,
+   "t_ms": 32574
+  },
+  {
+   "frame": 873,
+   "t_ms": 36411
+  },
+  {
+   "frame": 903,
+   "t_ms": 37663
+  },
+  {
+   "frame": 945,
+   "t_ms": 39414
+  },
+  {
+   "frame": 1010,
+   "t_ms": 42125
+  },
+  {
+   "frame": 1132,
+   "t_ms": 47214
+  },
+  {
+   "frame": 1215,
+   "t_ms": 50676
+  },
+  {
+   "frame": 1232,
+   "t_ms": 51385
+  },
+  {
+   "frame": 1241,
+   "t_ms": 51760,
+   "note": "start of the punch flurry (orbiting camera, see ambiguous)"
+  },
+  {
+   "frame": 1281,
+   "t_ms": 53428
+  },
+  {
+   "frame": 1330,
+   "t_ms": 55472
+  },
+  {
+   "frame": 1388,
+   "t_ms": 57891
+  },
+  {
+   "frame": 1442,
+   "t_ms": 60143,
+   "note": "first frame of the rock/debris shot after the stylized impact frames 1436-1441"
+  },
+  {
+   "frame": 1453,
+   "t_ms": 60602
+  },
+  {
+   "frame": 1498,
+   "t_ms": 62479,
+   "note": "new angle looking up the rock face as Beerus leaps out"
+  },
+  {
+   "frame": 1542,
+   "t_ms": 64314,
+   "note": "angle change from a side view to a view from below/behind Goku"
+  },
+  {
+   "frame": 1558,
+   "t_ms": 64982
+  },
+  {
+   "frame": 1605,
+   "t_ms": 66942
+  },
+  {
+   "frame": 1712,
+   "t_ms": 71405
+  },
+  {
+   "frame": 1771,
+   "t_ms": 73865
+  },
+  {
+   "frame": 1835,
+   "t_ms": 76535
+  },
+  {
+   "frame": 1891,
+   "t_ms": 78870
+  },
+  {
+   "frame": 1926,
+   "t_ms": 80330
+  },
+  {
+   "frame": 2012,
+   "t_ms": 83917
+  },
+  {
+   "frame": 2041,
+   "t_ms": 85127,
+   "note": "front close-up blur -> Goku seen from behind (green-tinted), followed by a fast zoom-out to the wide shot at 2045"
+  },
+  {
+   "frame": 2129,
+   "t_ms": 88797
+  },
+  {
+   "frame": 2143,
+   "t_ms": 89381
+  },
+  {
+   "frame": 2190,
+   "t_ms": 91341
+  },
+  {
+   "frame": 2267,
+   "t_ms": 94553
+  },
+  {
+   "frame": 2317,
+   "t_ms": 96638
+  },
+  {
+   "frame": 2434,
+   "t_ms": 101518
+  },
+  {
+   "frame": 2472,
+   "t_ms": 103103
+  },
+  {
+   "frame": 2579,
+   "t_ms": 107566
+  },
+  {
+   "frame": 2779,
+   "t_ms": 115907
+  },
+  {
+   "frame": 2811,
+   "t_ms": 117242
+  },
+  {
+   "frame": 2945,
+   "t_ms": 122831
+  },
+  {
+   "frame": 2964,
+   "t_ms": 123624
+  },
+  {
+   "frame": 3005,
+   "t_ms": 125334
+  },
+  {
+   "frame": 3034,
+   "t_ms": 126543
+  },
+  {
+   "frame": 3126,
+   "t_ms": 130380
+  },
+  {
+   "frame": 3200,
+   "t_ms": 133467
+  },
+  {
+   "frame": 3268,
+   "t_ms": 136303
+  },
+  {
+   "frame": 3393,
+   "t_ms": 141516
+  }
+ ],
+ "dissolves": [],
+ "ambiguous": [
+  {
+   "frame": 184,
+   "why": "debris fly-through: the jagged dust/rock texture turns into round cloud puffs between 183 and 184; most likely the same continuous camera push into the dust (rocks keep continuity), but it could be a cut"
+  },
+  {
+   "frame": 452,
+   "end": 462,
+   "why": "stepped push-in on Goku's face with 2-frame holds (450-451 face, 452, 454, 456, 458, 460, 462 each closer, 462 slightly rotated); every step could be counted as a cut"
+  },
+  {
+   "frame": 478,
+   "end": 482,
+   "why": "Goku goes from arms raised (477) to arms flexed out while the framing pulls back in 2-frame steps (478, 480, 482); a stepped pull-back with a pose change, or a cut at 478"
+  },
+  {
+   "frame": 763,
+   "end": 765,
+   "why": "after the cut at 761: stepped push-in with 2-frame holds while Beerus turns his head toward the camera (763, 765)"
+  },
+  {
+   "frame": 890,
+   "end": 898,
+   "why": "stepped push-in with 2-frame holds while Goku crosses his arms (890, 892, 894, 896, 898)"
+  },
+  {
+   "frame": 905,
+   "end": 917,
+   "why": "stepped pull-back with 2-frame holds from the symbol close-up (903) to a full-body shot (905, 907, 909, 911, 913, 914, 917); 917 also shifts Goku to the right"
+  },
+  {
+   "frame": 949,
+   "end": 953,
+   "why": "Beerus zips around Goku: background turns from grey to pink and the angle jumps every 2 frames (949 crouch, 951 close, 953 wider); probably an orbiting camera, maybe quick cuts"
+  },
+  {
+   "frame": 1242,
+   "end": 1280,
+   "why": "punch flurry with a camera orbiting the two fighters: a new angle every 2 frames on an abstract yellow/pink aura background, including 180-degree flips (e.g. 1244, 1252, 1256, 1270, 1276); probably one animated shot, but each jump could be counted as a cut"
+  },
+  {
+   "frame": 1436,
+   "end": 1441,
+   "why": "stylized impact frames (white-on-black blob at the fighters' position, then inverted at 1440) ending the wide shot 1388; the real cut is at 1442, but 1436 could also be counted as a cut to an impact frame"
+  },
+  {
+   "frame": 1480,
+   "why": "Beerus slides back: framing jumps about 1.5x closer from a low angle with a rock appearing at right (Goku still at the right edge); stepped push-in or cut"
+  },
+  {
+   "frame": 1500,
+   "why": "after Beerus leaps out of frame top (1498-1499) the picture becomes a dark rock close-up, then continues as a camera rush through rocks and dust (1500-1515) up to Goku flying; continuous camera move or cut"
+  },
+  {
+   "frame": 1556,
+   "why": "stepped push-in (about 1.3x) on Goku seen from below/behind while he throws a punch; same angle as 1542-1555"
+  },
+  {
+   "frame": 1560,
+   "end": 1562,
+   "why": "Goku seen from far below: 1558 far, 1560 close with the foot toward camera, 1562 far again flying away; 2-frame holds, a stepped camera or quick cuts"
+  },
+  {
+   "frame": 1584,
+   "end": 1604,
+   "why": "the camera orbits Goku and Beerus in 2-frame steps (1584 behind/below, 1590 front, 1596 side, 1602 reverse with Beerus in front, 1604); probably one shot with an orbiting camera"
+  },
+  {
+   "frame": 2013,
+   "end": 2027,
+   "why": "after the cut at 2012 (Goku close-up, 1 frame): eyes close-up (2013), mouth close-up (2015), then a stepped pull-back with 2-frame holds (2017, 2019, 2021, 2023, 2025, 2027) to a medium shot"
+  },
+  {
+   "frame": 2034,
+   "end": 2040,
+   "why": "stepped push-in into Goku's face (2034, 2036) then blurred whip frames over his body (2037-2040) before the cut at 2041"
+  },
+  {
+   "frame": 3565,
+   "end": 3591,
+   "why": "stepped push-in on Goku with 2-frame holds (3565, 3567, 3569, 3571, 3573, 3589, 3591), same angle as the long 3393 shot"
+  },
+  {
+   "frame": 3598,
+   "end": 3612,
+   "why": "extreme close-up of an eye (3598), then of the mouth (3600), then a stepped pull-back on the screaming face (3602, 3604, ..., 3612); a stepped camera or a chain of cuts"
+  }
+ ],
+ "method": "Viewed all 37 100-frame filmstrips in order (frames 0-3622); every action/flash passage gone through frame by frame at 320 px; every hard cut checked on an n-2..n+1 triplet sheet or on consecutive frames of a zoom sheet. Rule: hard cut = camera angle or composition changes; ambiguous = stepped zooms on 2-frame holds, orbit jumps, changes under impact frames; not a cut = a flash after which the same composition continues.",
+ "notable_non_cuts": "149-152 Goku dragged out of a Beerus close-up (motion blur, same framing); 153-221 continuous camera push through the debris (180 big rocks fly at camera); 362-406 dust clears to reveal Goku, with small stepped push-ins 401/403/405; 407-430 tilt up over the hair into white; 489 glow version of the 487 layout; 495 yellow flash clears onto the aura shot; 541-544 light pillar / inverted silhouette inside the stylized shot started at 539; 583-692 tilt up Goku's torso with many lightning flashes; 729-736 dust blows across Beerus who turns (733); 1033-1034 Beerus head move; 1281-1329 and 1835-1890 handheld-style shots of Beerus dodging fists (arms whip past the lens); 1330-1387 and 1771-1834 shots of Goku punching toward the camera from Beerus's point of view (1345-1348/1802-1805 fist close to the lens, 1363-1366/1822-1823 blur whooshes); 1388-1435 wide shot; 1462-1469 white light beams; 1478 Beerus knocked back (same camera); 1516 Goku flies out of the clouds; 1721-1767 King Kai shot with repeated white dust flashes; 1930-1931 white flash then the same planet shot with camera shake (1932-2011); 2045 end of the fast zoom-out started at 2041; 2271 aura vanishes; 2552/2945 and 3011-3019 Goku's hand and head-scratch animation; 3550-3562 small push-in steps; 3615-3622 aura flash (white 3617-3618, black background 3619, yellow 3620) on the same screaming Goku",
+ "annotator": "Claude agent, by eye on contact sheets (2026-10-31); independent of any detector"
+}

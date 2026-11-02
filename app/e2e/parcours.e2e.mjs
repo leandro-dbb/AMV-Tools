@@ -128,7 +128,13 @@ test('4. éditeur, panier de dérush, export de clips et de timelines', async ()
   // was reachable). A trial click fails if something covers the entry.
   await win.getByRole('button', { name: /^Finition/ }).first().click();
   await win.getByRole('button', { name: /^Profondeur/ }).click({ trial: true });
-  await win.getByRole('button', { name: /^Finition/ }).first().click();
+  // Regression (M1 Pro, 1440×900): the dialog was laid out inside the
+  // editor's blurred header, its title and first options above the window.
+  await win.getByRole('button', { name: /^Upscale/ }).click();
+  await expect(win.getByText(/^Finition — Upscale$/)).toBeInViewport({ ratio: 1 });
+  await expect(win.getByRole('button', { name: /Ajouter à la file/ })).toBeInViewport({ ratio: 1 });
+  await win.keyboard.press('Escape');
+  await expect(win.getByText(/^Finition — Upscale$/)).toHaveCount(0);
   await win.getByRole('button', { name: /^Exporter .* s$/ }).click();
   await expect(win.getByText(/Exporté :/)).toBeVisible({ timeout: 120_000 });
   await capture(win, 'e2e-04-editeur-export');

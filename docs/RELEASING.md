@@ -23,8 +23,8 @@ Release. A human still reviews the draft and publishes it.
 3. Commit, then tag and push:
 
    ```bash
-   git tag v0.5.0-beta.2
-   git push origin v0.5.0-beta.2
+   git tag v0.5.0-beta.3
+   git push origin v0.5.0-beta.3
    ```
 
 Pushing the tag runs `.github/workflows/build.yml`. Everyday push/PR validation
@@ -84,7 +84,8 @@ fork without secrets still builds.
 3. Publish when the smoke test on a clean machine passes.
 
 Unsigned Windows installers trigger SmartScreen; macOS unsigned builds require
-the usual right-click → Open workaround. Signed/notarized builds are the
+the System Settings → Privacy & Security → *Open Anyway* step (see the README;
+right-click → Open no longer works since macOS 15). Signed/notarized builds are the
 recommended path for end users.
 
 ## 5. Manual/local packaging

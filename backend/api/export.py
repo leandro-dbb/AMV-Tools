@@ -45,12 +45,8 @@ def _suffix_for_codec(codec: str) -> str:
 def _export_one(scene: dict, settings: dict, output_dir: Path,
                 start_ms: int | None = None, end_ms: int | None = None,
                 output_path: str | None = None) -> str:
-    name = settings["naming_template"].format(
-        anime=_sanitize(scene["display_name"]),
-        episode=_sanitize(scene["display_name"]),
-        scene_id=scene["id"],
-        tags="",
-    )
+    from ..export.naming import clip_stem
+    name = clip_stem(settings["naming_template"], scene["display_name"], scene["id"])
     suffix = _suffix_for_codec(settings["codec"])
     target = output_path or str(output_dir / f"{_sanitize(name)}{suffix}")
     return export_scene(

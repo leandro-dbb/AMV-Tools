@@ -376,7 +376,18 @@ def _detect_cuts_via_ffmpeg_hw(
     `_ffmpeg_hw_profile`), then read 160×90 gray planes from stdout. Returns
     the list of cut timestamps (start of each scene, in ms)."""
     w, h = _DIFF_W, _DIFF_H
-    frame_bytes = w * h
+    detector = shotdetect.ShotDetector(threshold)
+    # With the cut network the detector also takes the colour picture: the
+    # gray plane (same filters as without, then gray→rgb24 which copies it
+    # to the three channels) is stacked over the rgb24 picture. The colour
+    # branch is scaled from the full picture (one conversion, full chroma),
+    # like the frames the network's decision was fitted on.
+    color = detector.wants_color
+    frame_bytes = w * h * (6 if color else 1)
+    scale = profile["scale_vf"].format(w=w, h=h)
+    vf = scale + ",format=gray"
+    if color:
+        vf = f"split[g][c];[g]{scale},format=gray,format=rgb24[g2];[c]{scale},format=rgb24[c2];[g2][c2]vstack"
 
     # The profile's scale_vf resizes (on-device when the build allows it),
     # `format=gray` discards chroma. -an / -sn skip audio + subs (anime MKVs
@@ -393,10 +404,10 @@ def _detect_cuts_via_ffmpeg_hw(
         *profile["input_args"],
         "-i", path,
         "-an", "-sn",
-        "-vf", profile["scale_vf"].format(w=w, h=h) + ",format=gray",
+        "-vf", vf,
         "-fps_mode", "cfr",
         "-f", "rawvideo",
-        "-pix_fmt", "gray",
+        "-pix_fmt", "rgb24" if color else "gray",
         "pipe:1",
     ]
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -411,7 +422,6 @@ def _detect_cuts_via_ffmpeg_hw(
     cuts_ms: List[int] = [0]
     frame_idx = -1
     fps_safe = fps if fps > 0 else 30.0
-    detector = shotdetect.ShotDetector(threshold)
 
     def add(found: List[int]) -> None:
         for c in found:
@@ -429,9 +439,13 @@ def _detect_cuts_via_ffmpeg_hw(
                 # remainder so the reshape doesn't blow up.
                 buf = buf + bytes(frame_bytes - len(buf))
             frame_idx += 1
-            plane = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
+            if color:
+                both = np.frombuffer(buf, dtype=np.uint8).reshape(2 * h, w, 3)
+                plane, rgb = np.ascontiguousarray(both[:h, :, 0]), both[h:]
+            else:
+                plane, rgb = np.frombuffer(buf, dtype=np.uint8).reshape(h, w), None
             # every frame goes to the cut detector; motion analysis samples
-            add(detector.push(plane))
+            add(detector.push(plane, rgb))
             if frame_sink is not None and frame_idx % _FRAME_STRIDE == 0:
                 frame_sink(int((frame_idx / fps_safe) * 1000), plane)
         add(detector.finish())
@@ -508,9 +522,15 @@ def _detect_cuts_via_pyav(path: str, threshold: float,
             plane = small.planes[0]
             stride = plane.line_size or _DIFF_W
             gray = np.frombuffer(plane, dtype=np.uint8).reshape(_DIFF_H, stride)[:, :_DIFF_W].copy()
+            rgb = None
+            if detector.wants_color:
+                try:
+                    rgb = frame.reformat(width=_DIFF_W, height=_DIFF_H, format="rgb24").to_ndarray()
+                except _AV_ERROR:
+                    rgb = None
             times[frame_idx] = ts_ms
-            times.pop(frame_idx - 4 * shotdetect.LOOKAHEAD, None)
-            add(detector.push(gray))
+            times.pop(frame_idx - 4 * detector.lookahead, None)
+            add(detector.push(gray, rgb))
             if frame_sink is not None and frame_idx % _FRAME_STRIDE == 0:
                 frame_sink(ts_ms, gray)
         add(detector.finish())

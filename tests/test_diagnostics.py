@@ -38,7 +38,7 @@ def test_diagnostics_contains_versions_models_disk_and_logs(client, data_dir):
     assert body["data_dir"]["free_gb"] >= 0
 
     models = {m["key"]: m for m in body["models"]}
-    assert set(models) == {"siglip", "wd_tagger", "birefnet", "sam2"}
+    assert set(models) == {"siglip", "wd_tagger", "birefnet", "sam2", "transnetv2"}
     for model in models.values():
         assert {"present", "size_bytes", "loaded", "error"} <= model.keys()
 
@@ -79,7 +79,21 @@ def test_anonymize_handles_windows_paths_and_user_name(monkeypatch):
 
 def test_models_status_endpoint(client):
     body = client.get("/api/models/status").json()
-    assert {m["key"] for m in body["models"]} == {"siglip", "wd_tagger", "birefnet", "sam2"}
+    assert {m["key"] for m in body["models"]} == {"siglip", "wd_tagger", "birefnet", "sam2", "transnetv2"}
+
+
+def test_cutnet_download_starts_the_autotune(client, monkeypatch):
+    # Downloaded from Settings > Diagnostic: the cut network's cost used to be
+    # measured only at the next launch ("not measured yet" until then).
+    from backend import autotune
+    from backend.api import models as models_api
+    started = []
+    monkeypatch.setattr(autotune, "start_background", lambda *a, **k: started.append(1) or True)
+    monkeypatch.setattr(models_api, "download_for_key", lambda _s, key: {"ok": True, "key": key})
+    assert client.post("/api/models/download", json={"key": "transnetv2"}).json()["ok"] is True
+    assert started == [1]
+    assert client.post("/api/models/download", json={"key": "siglip"}).json()["ok"] is True
+    assert started == [1]
 
 
 def test_models_download_unknown_key(client):

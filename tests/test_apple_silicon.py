@@ -415,3 +415,115 @@ def test_sub_segmentation_streams_from_the_single_decode(db_path, clip, monkeypa
     assert [(r[1], r[2], r[3]) for r in rows[1:]] == [(0, 4000, parent[0]), (4000, 8000, parent[0])]
     assert all(r[4] for r in rows) and tagged == 3
     assert tagger.images == 3 and siglip.images == 3
+
+
+def _build_slowly(barrier, tmp):
+    barrier.wait()                       # both processes build at the same time
+    tmp.mkdir()
+    (tmp / "weights.bin").write_bytes(b"x" * 1024)
+
+
+def _cache_in_process(path, barrier, out):
+    import functools
+    import traceback
+
+    from backend.finish.coreml import _cached
+    try:
+        _cached(path, functools.partial(_build_slowly, barrier))
+        out.put("ok")
+    except Exception:
+        out.put(traceback.format_exc())
+
+
+def test_two_processes_build_the_same_coreml_program(tmp_path):
+    # M1 Pro, first upscale after the install: the two Neural Engine
+    # processes converted the same program at once and the second one died
+    # on ENOTEMPTY ("Neural Engine upscale stopped"; 1 of 27 frames on it).
+    import multiprocessing as mp
+    ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+    path = tmp_path / "coreml" / "srvgg-animevideov3-x2-256x256-v1.mlpackage"
+    barrier, out = ctx.Barrier(2), ctx.Queue()
+    procs = [ctx.Process(target=_cache_in_process, args=(path, barrier, out)) for _ in range(2)]
+    for p in procs:
+        p.start()
+    results = [out.get(timeout=30) for _ in procs]
+    for p in procs:
+        p.join(timeout=30)
+    assert results == ["ok", "ok"]
+    assert (path / "weights.bin").stat().st_size == 1024
+    assert [p.name for p in path.parent.iterdir()] == [path.name]      # no partial left
+
+
+class _TempProgram:
+    """Stands for a coremltools MLModel: its compiled copy in the temporary
+    folder is removed when the object goes away."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.mkdir()
+
+    def __del__(self):
+        import shutil
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
+def _temp_program_loader(path):
+    program = _TempProgram(path)
+    return lambda arrays: [arrays[0] + 0 * len(str(program.path))]
+
+
+def test_terminated_coreml_worker_cleans_its_temporary_program(tmp_path):
+    import time
+
+    # Quitting the app terminates the Core ML workers: the cut network's
+    # worker died without finalising and left a 14 MB .mlmodelc in $TMPDIR
+    # after every session.
+    from backend.finish.coreml import Worker
+    compiled = tmp_path / "transnetv2-trunk-fp16-v2_1234.mlmodelc"
+    w = Worker("tests.test_apple_silicon:_temp_program_loader", str(compiled), name="test-cleanup")
+    assert w.wait_ready(60)
+    assert w.call([np.arange(3)])[0].tolist() == [0, 1, 2]
+    assert compiled.exists()
+    t0 = time.monotonic()
+    w._proc.terminate()                     # what backend.shutdown.finish does
+    w._proc.join(10)
+    assert not w._proc.is_alive()
+    assert not compiled.exists()
+    # within the second the sidecar gives its children before kill()
+    assert time.monotonic() - t0 < 1.0
+
+
+def test_siglip_passes_take_turns_on_mps():
+    # Relaunch on the M1 Pro, search typed at once: the sidecar's search
+    # warm-up and the search ran SigLIP on MPS at the same time and the
+    # sidecar died (SIGSEGV in a Metal kernel, "Failed to fetch" in the app).
+    import threading
+    import time
+
+    import torch
+
+    from backend.models.device import DeviceInfo
+    from backend.models.siglip2 import SigLIP2Model
+
+    running, overlaps = [0], []
+
+    class _Model:
+        def get_text_features(self, **_):
+            running[0] += 1
+            overlaps.append(running[0])
+            time.sleep(0.05)
+            running[0] -= 1
+            return torch.ones(1, 4)
+
+    def processor(**_):
+        return {"input_ids": torch.zeros(1, 64, dtype=torch.long)}
+
+    dev = DeviceInfo(backend="mps", name="mps", torch_device=torch.device("cpu"), dtype=torch.float32)
+    m = SigLIP2Model(dev, idle_offload_seconds=0)
+    m._model, m._processor = _Model(), processor
+    threads = [threading.Thread(target=m.embed_text, args=(q,)) for q in ("warm-up", "beerus mange")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert overlaps == [1, 1]

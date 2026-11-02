@@ -25,5 +25,11 @@ def models_status():
 def models_download(body: DownloadBody):
     state = get_state()
     result = download_for_key(state, body.key)
+    if body.key == "transnetv2" and result.get("ok"):
+        # The autotune skipped the cut network while it was missing: measure
+        # what it costs now (Settings > Indexing "Precise cuts" shows it)
+        # instead of at the next launch.
+        from .. import autotune
+        autotune.start_background()
     # Real surfaces are refreshed by the next diagnostics/status poll.
     return result

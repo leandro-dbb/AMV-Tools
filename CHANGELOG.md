@@ -2,6 +2,194 @@
 
 All notable changes to AMV Tools are documented here.
 
+## 0.5.0-beta.3 — 2026-11-02
+
+Third **beta**: everything from 0.5.0-beta.2, plus precise cuts (optional
+TransNetV2 network), the fixes from the first real Windows 11 + NVIDIA test
+and from the macOS installer test on a MacBook M1 Pro. Installers for
+Windows, macOS (Apple Silicon) and Linux, still unsigned.
+[Release report](docs/reports/release-0.5.0-beta.3.md).
+
+**En bref (pour un monteur)**
+
+- **Coupes plus précises** (optionnel) : télécharge TransNetV2 dans
+  Paramètres › Modèles (30 Mo) et l'indexation trouve plus de coupes à
+  l'image près (combats rapides, flashs, plans sombres), pour environ 5 %
+  de temps d'indexation en plus sur carte NVIDIA ou Mac. Sans ce
+  téléchargement, rien ne change.
+- **Windows** : le premier lancement marche sur un Windows neuf (le
+  composant Microsoft Visual C++ manquant est installé, Windows demande
+  l'autorisation une fois) ; plus de faux bandeau « GPU indisponible » ;
+  indexation ~25 % plus rapide sur carte NVIDIA ; aperçus au survol prêts
+  bien plus vite ; la recherche n'attend plus le réglage automatique ;
+  ~1 Go d'espace disque libéré après l'installation ; dossiers avec accents
+  acceptés à l'export de la profondeur.
+- **Mac** : plus de plantage du moteur quand on cherche juste après
+  l'ouverture ; si le moteur tombe quand même, l'appli le relance toute
+  seule ; le premier upscale reste sur le Neural Engine ; indexation HEVC
+  deux fois moins longue sur certains épisodes ; mode d'emploi exact du
+  premier lancement sur macOS 15+.
+- **Export** : les clips exportés ne portent plus deux fois le nom de
+  l'épisode (`Serie_01_scene_468.mp4`) ; export timeline vers Final Cut Pro :
+  avertissement quand les sources sont en MKV/WebM, que Final Cut n'ouvre pas.
+- **Finition** : le ralenti propose « Télécharger » quand son modèle manque,
+  comme l'upscale et la profondeur ; la boîte de finition ne s'ouvre plus à
+  moitié hors de la fenêtre.
+- Toujours là : export timeline vers Premiere Pro, DaVinci Resolve, After
+  Effects, Vegas Pro et Final Cut Pro, synchro musique, upscale AnimeJaNai,
+  profondeur Video Depth Anything, éditeur de détourage (bêta). Le
+  **détourage automatique (Mask Mode auto) reste désactivé par défaut**.
+
+**In short (for an editor)**
+
+- **More precise cuts** (optional): download TransNetV2 in Settings › Models
+  (30 MB) and indexing finds more cuts at the exact frame (fast fights,
+  flashes, dark shots), for about 5 % more indexing time on an NVIDIA card
+  or a Mac. Without that download, nothing changes.
+- **Windows**: first launch works on a fresh Windows (the missing Microsoft
+  Visual C++ component is installed, Windows asks once); no more false
+  "GPU unavailable" banner; indexing ~25 % faster on an NVIDIA card; hover
+  previews ready much sooner; search no longer waits for the automatic
+  tuning; ~1 GB of disk space freed after install; folders with accents
+  accepted by the depth export.
+- **Mac**: the engine no longer crashes when you search right after opening
+  the app; if it ever stops, the app restarts it; the first upscale stays on
+  the Neural Engine; HEVC indexing half as long on some episodes; exact
+  first-launch steps for macOS 15+.
+- **Export**: exported clips no longer carry the episode name twice
+  (`Show_01_scene_468.mp4`); timeline export to Final Cut Pro warns when the
+  sources are MKV/WebM, which Final Cut cannot open.
+- **Finishing**: slow-mo offers "Download" when its model is missing, like
+  upscale and depth; the finishing dialog no longer opens half outside the
+  window.
+- Still there: timeline export to Premiere Pro, DaVinci Resolve, After
+  Effects, Vegas Pro and Final Cut Pro, music sync, AnimeJaNai upscale,
+  Video Depth Anything depth, the cut-out editor (beta). **Automatic cutout
+  (Mask Mode auto) stays off by default.**
+
+### Release review (0.5.0-beta.3)
+
+- Reports and test data: personal paths, the location of a test-machine
+  secret, the host runbook and real episode file names (release groups,
+  CRC) replaced by neutral descriptions; the clip-name test uses an
+  anonymised fansub name.
+
+### macOS : test de l'installeur sur un MacBook M1 Pro (macOS 26)
+
+- **Plus de plantage du moteur à la relance** : une recherche tapée juste
+  après l'ouverture de l'appli tuait le moteur Python (« Failed to fetch »
+  partout) — le préchauffage de la recherche et la recherche faisaient
+  tourner SigLIP sur MPS en même temps, ce que PyTorch ne supporte pas.
+  Même risque pour une recherche pendant l'indexation. Les passes SigLIP
+  sur MPS se suivent maintenant.
+- Si le moteur s'arrête quand même en cours d'utilisation, l'appli le
+  relance derrière l'écran de démarrage (deux fois au plus), puis affiche
+  l'erreur, au lieu de rester bloquée.
+- Indexation HEVC : un épisode dont la vidéo finit avant l'audio (Black
+  Clover S02E04) était décodé deux fois (+2 min 18 sur 3 min 54) à cause
+  de sa dernière scène sans image.
+- Premier upscale : le Neural Engine ne s'arrête plus dès le départ
+  (« Directory not empty » : deux processus préparaient le même programme
+  Core ML) ; jusque-là le GPU faisait 26 images sur 27.
+- Fermer l'appli ne laisse plus de copie de 14 Mo du réseau de coupes dans
+  le dossier temporaire à chaque session.
+- La boîte de finition (upscale, ralenti, profondeur) ne s'ouvre plus à
+  moitié hors de la fenêtre.
+- Export timeline vers Final Cut Pro : avertissement quand les sources sont
+  en MKV/WebM (Final Cut ne les ouvre pas) et la marche à suivre.
+- « Coupes précises » renvoie au bon endroit pour télécharger TransNetV2
+  (Paramètres › Diagnostic, bouton « Télécharger » et plus « Réessayer »),
+  et son coût est mesuré dès le téléchargement.
+- Écran de premier lancement : « Détecté sur cet ordinateur : Apple M1 Pro »
+  au lieu de « Détecté sur ce PC : aucun GPU utilisable ».
+- Le menu Finition ne nomme plus un modèle que le palier n'utilise pas.
+- README : mode d'emploi exact du premier lancement sur macOS 15+
+  (« Terminé », pas « Placer dans la corbeille », puis « Ouvrir quand
+  même ») et désinstallation complète. [Rapport](docs/reports/test-installeur-mac.md).
+
+### Windows : premier vrai test sur Windows 11 + RTX 3090
+
+- **Premier lancement sur un Windows neuf** : le moteur CUDA échouait
+  (« Échec de l'installation », `c10.dll` introuvable) faute de Microsoft
+  Visual C++ Redistributable. L'installation le détecte maintenant et
+  l'installe (téléchargement officiel Microsoft, Windows demande
+  l'autorisation une fois) ; refus ou hors ligne : message clair avec le lien.
+- Le message d'erreur de validation n'est plus illisible sur un Windows
+  français (« spÃ©cifiÃ© » → « spécifié »).
+- Plus de bandeau « GPU indisponible » juste après l'installation : le
+  réglage automatique attend la fin de la configuration initiale avant de
+  charger PyTorch.
+- La carte de profondeur (finition) s'exporte dans un dossier avec accents
+  (`Vidéos\Exports été`).
+- Bench complet utilisable sous Windows ; pilote Playwright pour tester
+  l'appli installée à distance. [Rapport](docs/reports/windows-rtx3090.md).
+- Nom des clips exportés : le nom de l'épisode n'apparaît plus deux fois
+  (`Dragon_Ball_Super_-_Beerus_01_scene_468.mp4` au lieu de
+  `…ABCD1234_Groupe_…ABCD1234_scene_468.mp4`) : `{anime}` reçoit le
+  titre de la série, `{episode}` le numéro d'épisode.
+- Ralenti : le dialogue propose « Télécharger » quand le modèle manque,
+  comme l'upscale et la profondeur. Il vérifiait RIFE 4.25 alors que le
+  profil fait tourner RIFE 4.26 ; il suit maintenant le modèle choisi par
+  le profil (`/api/finish/capabilities` → `defaults`).
+- Premier lancement : le cache uv de l'appli (7,7 Go sous Windows) est
+  purgé une fois le moteur installé, puis après chaque mise à jour des
+  dépendances (`uv cache prune --ci`, en tâche de fond basse priorité) ;
+  les mises à jour ne téléchargent toujours que les paquets qui changent.
+- La recherche n'attend plus le réglage automatique : une requête de
+  l'utilisateur (recherche, aperçu, export, finition…) interrompt aussitôt
+  le bench de fond, qui reprend là où il s'était arrêté après 15 s de
+  calme, en priorité basse (la première recherche attendait > 90 s).
+- **Aperçus au survol (NVIDIA) : une seule session NVENC par épisode.** Le
+  décodage d'indexation encode directement les proxys (240p, 15 i/s, débit
+  du réglage de qualité) avec une image IDR au début de chaque plan ; la
+  passe des proxys ne fait plus que découper ce flux, sans décoder ni
+  réencoder (un ffmpeg en copie). RTX 3090 sous Linux : proxys d'un épisode
+  5,1 → 0,7 s, indexation complète 71,2 → 65,5 s ; qualité un peu meilleure
+  (PSNR 30,0 contre 29,6 dB, une génération d'encodage en moins), même
+  taille. Avec la sous-segmentation (ses bornes viennent après le décodage)
+  ou si une borne ne tombe pas sur une IDR, l'ancien chemin est gardé.
+- **Windows : passe de décodage NVIDIA moins coûteuse.** Sous Windows
+  (WDDM) le fil qui redimensionne et analyse les images limitait la passe
+  (NVDEC n'y était occupé qu'à ~35 %, plancher NVDEC pourtant identique à
+  Linux) : les ~200 petits noyaux GPU de chaque lot de 32 images sont
+  rejoués en un graphe CUDA (mêmes noyaux, mêmes bits ; l'histogramme
+  couleur du réseau n'impose plus de synchronisation), et l'encodage NVENC
+  des aperçus a son propre fil. RTX 3090, épisode avec réseau de coupes :
+  passe 92 → 81 s. Linux et Mac inchangés (`AMV_NVC_GRAPH`,
+  `AMV_PROXY_ENC_THREAD` forcent).
+- Windows : la purge du cache uv se fait au démarrage suivant de l'appli,
+  avant Python (Windows refuse de supprimer le cache d'une DLL chargée).
+- Le réglage automatique ne mesure plus avec le PyTorch que l'installation
+  du moteur vient de remplacer (il désactivait à tort le réseau de coupes
+  après une installation CUDA) : il attend le lancement suivant.
+
+### Détection de coupes : réseau TransNetV2 (optionnel)
+
+- **Plus de coupes trouvées à l'image près.** Une fois TransNetV2 téléchargé
+  (Paramètres › Modèles, 30 Mo), chaque image passe par le réseau et par le
+  détecteur actuel, combinés ; sur les extraits de test (DBS : un épisode
+  jamais vu au réglage ; Black Clover : un autre passage), rappel 68 → 85 %
+  (DBS, combats compris), 91 → 96 % (Black Clover), précision 91-100 %. Sur un épisode entier, 399 → 497 plans.
+  Coût : +4,8 % sur l'indexation d'un épisode sur RTX 3090, +3,8 % sur
+  Mac M1 Pro (Neural Engine ; +6,5 % pour le tout premier épisode après le
+  démarrage), mêmes décisions de coupe sur chaque moteur.
+  Sans GPU, le réseau n'est activé que si l'autotune mesure ≤ 10 % de
+  surcoût ; sinon option « Coupes précises (plus lent) » (Paramètres ›
+  Indexation, éteinte par défaut, temps estimé affiché). Sans le réseau,
+  rien ne change. [Rapport](docs/reports/coupes.md).
+- Cut detection: optional TransNetV2 network (MIT architecture, Apache-2.0
+  weights, downloaded on demand) combined with the hand-made detector by a
+  logistic decision fitted on 4 annotated extracts and measured on 3 others;
+  every decode path hands the detector the 160x90 colour picture when the
+  network is on. 5 new frame-accurate annotated extracts
+  (`tests/data/cuts_gt`), real-path evaluation `tests/eval/cuts_eval.py`.
+- Cut network performance: batched decision, network on its own thread and
+  low-priority CUDA stream, half precision + CUDA graph, its 48x27 frames
+  and colour histograms made on the GPU (NVIDIA); 2D formulation on MPS and
+  Core ML on the Neural Engine (Apple Silicon); autotune settings
+  `cutnet_device` and `cutnet` (auto-on only when it costs ≤ 10 % of the
+  decoding pass), setting `indexing.precise_cuts`.
+
 ## 0.5.0-beta.2 — 2026-10-30
 
 Second **beta**: everything from 0.5.0-beta.1, plus the **roto editor**

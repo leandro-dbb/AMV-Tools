@@ -114,6 +114,68 @@ def set_proxy_cache(directory) -> None:
     _proxy_cache_dir = directory
 
 
+# Hover proxies made by the indexing decode itself (``nvc_pass``): the 240p
+# frames are encoded once, at the proxies' bitrate, with an IDR frame on
+# the first 15 fps frame of every shot, so the proxy pass only cuts that
+# stream (``-c copy``) — no decode and no second encode. {"bitrate": bps}
+# while a queue runs with proxies on and without sub-segmentation (its
+# boundaries come after the decode); None = the 240p copy above.
+_proxy_direct: Optional[dict] = None
+
+
+def set_proxy_direct(opts: Optional[dict]) -> None:
+    global _proxy_direct
+    _proxy_direct = opts
+
+
+def proxy_direct_for(video_path: str, directory=None):
+    """(H.264 stream Path, meta dict) of the proxies encoded by the indexing
+    decode for ``video_path``, or None."""
+    import json
+    from pathlib import Path
+    d = directory if directory is not None else _proxy_cache_dir
+    if d is None:
+        return None
+    base = Path(d) / _proxy_source_name(video_path)
+    h264, meta = base.with_suffix(".direct.h264"), base.with_suffix(".direct.json")
+    try:
+        if h264.is_file() and h264.stat().st_size > 0 and meta.is_file():
+            return h264, json.loads(meta.read_text())
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def direct_split_ok(edges_ms, meta: dict) -> bool:
+    """Whether cutting the direct proxy stream at ``edges_ms`` with the
+    segment muxer (first key frame at or after ``edge - 34 ms``) lands, for
+    every edge, on the 15 fps frame that starts the shot — the one the
+    indexing decode made an IDR (a shot decided too late for it, or two
+    cuts a frame apart, fail here: the proxies are then made the old way)."""
+    import bisect
+    fps, pfps = float(meta["fps"]), float(meta["proxy_fps"])
+    keys = sorted(set(meta["idr"]) | {0})
+    n_slots = int(meta["slots"])
+    for e in edges_ms:
+        if e <= 0:
+            continue
+        c = max(0, int(e * fps / 1000.0))         # first frame with int(i / fps * 1000) >= e
+        while c > 0 and int((c - 1) / fps * 1000) >= e:
+            c -= 1
+        while int(c / fps * 1000) < e:
+            c += 1
+        j = max(0, int(c * pfps / fps) - 2)       # first slot showing frame c or later
+        while int(round(j * fps / pfps)) < c:
+            j += 1
+        if j >= n_slots:
+            continue                              # the end of the stream: nothing to split off
+        lo = e / 1000.0 - 0.034
+        k = next((x for x in keys[bisect.bisect_left(keys, max(0, int(lo * pfps) - 1)):] if x / pfps >= lo), None)
+        if k != j:
+            return False
+    return True
+
+
 def _proxy_source_name(video_path: str) -> str:
     import hashlib
     import os
@@ -179,6 +241,90 @@ def _nv12_to_rgb(buf: bytes, matrix: str = "bt601", full_range: bool = False) ->
 
 
 _GPU_RGB = None   # cached (torch, device) or False
+
+
+def _small_rgb(frame: np.ndarray, gray: np.ndarray, matrix: str = "bt601", full_range: bool = False) -> np.ndarray:
+    """The cut network's 27×48 RGB frame: luma from the detector's 160×90
+    gray plane (already full range), chroma from the 512×288 part of the
+    stacked frame, both area-downscaled (matrix products: cheap enough for
+    every frame)."""
+    from . import cutnet
+    w, h = cutnet.IN_W, cutnet.IN_H
+    plane = frame.reshape(STACK_H * 3 // 2, FRAME_W)
+    yy = shotdetect.area_resize(gray, w, h)
+    uv = shotdetect.area_resize(plane[STACK_H:STACK_H + FRAME_H // 2].reshape(FRAME_H // 2, FRAME_W // 2, 2), w, h) - 128.0
+    kr, kb = _MATRICES.get(matrix, _MATRICES["bt601"])
+    kg = 1.0 - kr - kb
+    cc = 1.0 if full_range else 255.0 / 224.0
+    u, v = uv[..., 0] * cc, uv[..., 1] * cc
+    r = yy + 2.0 * (1.0 - kr) * v
+    b = yy + 2.0 * (1.0 - kb) * u
+    g = yy - (2.0 * kb * (1.0 - kb) * u + 2.0 * kr * (1.0 - kr) * v) / kg
+    return np.clip(np.dstack([r, g, b]).round(), 0, 255).astype(np.uint8)
+
+
+def area_matrix(n_in: int, n_out: int) -> np.ndarray:
+    """(n_out, n_in) weights of an area (box) downscale along one axis — the
+    coverage weights ``cv2.INTER_AREA`` uses."""
+    m = np.zeros((n_out, n_in), dtype=np.float64)
+    sc = n_in / n_out
+    for i in range(n_out):
+        a, b = i * sc, (i + 1) * sc
+        for j in range(int(np.floor(a)), min(n_in, int(np.ceil(b)))):
+            m[i, j] = (min(b, j + 1) - max(a, j)) / sc
+    return m
+
+
+class SmallRgbGpu:
+    """:func:`_small_rgb` and the 64-bin colour histograms for a whole batch
+    of stacked frames still on the CUDA device (separable area downscales
+    as matrix products, float32): the cut network's frames never leave the
+    GPU, only the histogram counts come back (256 bytes a frame)."""
+
+    def __init__(self, torch, device, matrix: str, full_range: bool, gray_lut=None):
+        from . import cutnet
+        f32 = lambda a: torch.tensor(a, dtype=torch.float32, device=device)
+        w, h = cutnet.IN_W, cutnet.IN_H
+        self.torch = torch
+        self.gy, self.gx = f32(area_matrix(GRAY_H, h)), f32(area_matrix(GRAY_W, w).T)
+        self.cy, self.cx = f32(area_matrix(FRAME_H // 2, h)), f32(area_matrix(FRAME_W // 2, w).T)
+        self.lut = None if gray_lut is None else torch.tensor(gray_lut, dtype=torch.uint8, device=device)
+        kr, kb = _MATRICES.get(matrix, _MATRICES["bt601"])
+        self.k = (kr, kb, 1.0 - kr - kb, 1.0 if full_range else 255.0 / 224.0)
+        self.no_sync = False
+
+    def __call__(self, st):
+        """``st``: (n, STACK_H * 3 / 2, FRAME_W) uint8 stacked frames →
+        ((n, 27, 48, 3) uint8, (n, 64) int32 histogram counts), both on the
+        device (queued work: synchronise before reading the counts)."""
+        torch = self.torch
+        n = st.shape[0]
+        gray = st[:, FRAME_H:STACK_H, :GRAY_W]
+        if self.lut is not None:
+            gray = self.lut[gray.long()]
+        yy = self.gy @ gray.float() @ self.gx
+        uv = st[:, STACK_H:STACK_H + FRAME_H // 2].reshape(n, FRAME_H // 2, FRAME_W // 2, 2).float()
+        u = (self.cy @ uv[..., 0] @ self.cx - 128.0)
+        v = (self.cy @ uv[..., 1] @ self.cx - 128.0)
+        kr, kb, kg, cc = self.k
+        u, v = u * cc, v * cc
+        r = yy + 2.0 * (1.0 - kr) * v
+        b = yy + 2.0 * (1.0 - kb) * u
+        g = yy - (2.0 * kb * (1.0 - kb) * u + 2.0 * kr * (1.0 - kr) * v) / kg
+        rgb = torch.stack([r, g, b], dim=-1).round_().clamp_(0, 255).to(torch.uint8)
+        q = (rgb >> 6).long()
+        bins = (q[..., 0] << 4) | (q[..., 1] << 2) | q[..., 2]
+        bins = (bins.reshape(n, -1) + (torch.arange(n, device=st.device) * 64)[:, None]).reshape(-1)
+        if self.no_sync:
+            # the same integer counts without bincount's device -> host
+            # sync (it sizes its output from the maximum): capturable in a
+            # CUDA graph (nvc_pass, Windows)
+            counts = torch.zeros(n * 64, dtype=torch.int64, device=st.device)
+            counts.scatter_add_(0, bins, torch.ones_like(bins))
+            counts = counts.reshape(n, 64).to(torch.int32)
+        else:
+            counts = torch.bincount(bins, minlength=n * 64).reshape(n, 64).to(torch.int32)
+        return rgb, counts
 
 
 def _nv12_to_rgb_gpu(buf: bytes, matrix: str = "bt601", full_range: bool = False) -> Image.Image:
@@ -305,7 +451,8 @@ def detect_cuts_and_medians(
         assert proc.stdout is not None
         cuts_ms, medians, n_frames = scan_stream(getattr(proc.stdout, "raw", proc.stdout), fps, duration_ms, threshold, frame_sink,
                                                  to_rgb=lambda b: _nv12_to_rgb_gpu(b, matrix, full_range),
-                                                 cancelled=cancelled, gray_lut=gray_lut)
+                                                 cancelled=cancelled, gray_lut=gray_lut,
+                                                 color_info=(matrix, full_range))
     finally:
         try:
             if proc.stdout:
@@ -342,7 +489,8 @@ class _Scanner:
     it replaces: the ring of median candidates is the index range
     ``[keep, n)``."""
 
-    def __init__(self, fps: float, threshold: float, frame_sink, to_rgb, cancelled, gray_lut):
+    def __init__(self, fps: float, threshold: float, frame_sink, to_rgb, cancelled, gray_lut,
+                 color_info=None):
         self.fps = fps if fps > 0 else 30.0
         self.threshold = threshold
         self.frame_sink = frame_sink
@@ -358,8 +506,11 @@ class _Scanner:
         self.cuts_ms: list[int] = [0]
         self.medians: dict[int, Image.Image] = {}
         self.detector = shotdetect.ShotDetector(threshold)
-        # a cut is confirmed this late (the detector's flash look-ahead)
-        self.stride_ms = int((shotdetect.LOOKAHEAD + 1) * 1000 / self.fps) + 1
+        # the cut network's colour input: (matrix, full_range) of the stream
+        self.color_info = (color_info or ("bt601", False)) if self.detector.wants_color else None
+        # a cut is confirmed this late (the detector's flash look-ahead, the
+        # cut network's windows)
+        self.stride_ms = int((self.detector.lookahead + 1) * 1000 / self.fps) + 1
 
     # frame index <-> timestamp, exactly as the pipeline computes it
     def ts(self, idx: int) -> int:
@@ -405,7 +556,8 @@ class _Scanner:
             gray = _gray_of(self.frame(idx), self.gray_lut)
             if self.frame_sink is not None and idx % stride == 0:
                 self.frame_sink(self.ts(idx), gray)
-            self._cuts(self.detector.push(gray))
+            rgb = _small_rgb(self.frame(idx), gray, *self.color_info) if self.color_info else None
+            self._cuts(self.detector.push(gray, rgb))
             if idx % stride == 0:
                 self._advance_floor(idx)
         self._advance_floor(end - 1)
@@ -441,9 +593,9 @@ _BLOCK = 32   # frames per pipe read
 
 
 def scan_stream(raw, fps: float, duration_ms: int, threshold: float, frame_sink=None, to_rgb=None,
-                cancelled=None, gray_lut=None) -> tuple[list[int], dict[int, Image.Image], int]:
+                cancelled=None, gray_lut=None, color_info=None) -> tuple[list[int], dict[int, Image.Image], int]:
     """:func:`scan` reading an unbuffered pipe straight into the buffer."""
-    sc = _Scanner(fps, threshold, frame_sink, to_rgb, cancelled, gray_lut)
+    sc = _Scanner(fps, threshold, frame_sink, to_rgb, cancelled, gray_lut, color_info)
     fb = FRAME_BYTES
     eof = False
     while not eof:

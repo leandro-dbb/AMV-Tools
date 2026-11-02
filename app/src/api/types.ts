@@ -218,6 +218,7 @@ export interface AppSettings {
     proxy_quality: 'low' | 'medium' | 'high';
     auto_skip_indexed: boolean;
     scene_detect_threshold: number;
+    precise_cuts?: boolean;
   };
   models: {
     wd_tagger_variant: string;

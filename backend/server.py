@@ -72,12 +72,16 @@ async def _lifespan(app: FastAPI):
     get_state().start_search_warmup()
     from backend import autotune
     autotune.start_background()
+    from backend.indexing import cutnet
+    cutnet.prewarm()
+    from backend import uvcache
+    uvcache.prune_after_update()
     log.info("AMV Tools sidecar ready")
     yield
 
 
 def make_app() -> FastAPI:
-    app = FastAPI(title="AMV Tools sidecar", version="0.5.0b2", lifespan=_lifespan)
+    app = FastAPI(title="AMV Tools sidecar", version="0.5.0b3", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -90,6 +94,10 @@ def make_app() -> FastAPI:
         allow_headers=["*"],
         allow_credentials=False,
     )
+    # User requests (search, previews, exports…) pause the background
+    # autotune (backend/autotune/yielding.py).
+    from backend.autotune.yielding import UserActivityMiddleware
+    app.add_middleware(UserActivityMiddleware)
     # Added last so it wraps CORS: Host / Origin / per-launch token check.
     app.add_middleware(LocalAccessMiddleware)
     for r in ROUTERS:

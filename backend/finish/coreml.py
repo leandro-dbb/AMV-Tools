@@ -61,11 +61,27 @@ def _cached(path: Path, build: Callable[[Path], None]) -> Path:
 
 # ── worker process ──────────────────────────────────────────────────────────
 def _serve(conn, loader: str, args: tuple) -> None:
+    import gc
     import queue
+    import signal
 
+    # The sidecar ends its children with SIGTERM when it quits, and kills
+    # them a second later. Dying on the spot left the copy of the program
+    # that coremltools compiles into the temporary folder (14 MB a load; one
+    # per app session that used the cut network), and a regular Python exit
+    # (torch, coremltools) does not fit in that second: drop the model, which
+    # removes that copy, and leave at once.
+    held: list = []
+
+    def on_term(*_):
+        held.clear()
+        gc.collect()
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, on_term)
     try:
         mod, fn = loader.split(":")
-        handle = getattr(importlib.import_module(mod), fn)(*args)
+        held.append(getattr(importlib.import_module(mod), fn)(*args))
         conn.send(("ready", None, None))
     except Exception as exc:  # pragma: no cover - platform specific
         conn.send(("error", None, repr(exc)))
@@ -92,7 +108,7 @@ def _serve(conn, loader: str, args: tuple) -> None:
             return
         rid, arrays = item
         try:
-            outs = [np.ascontiguousarray(o) for o in handle(arrays)]
+            outs = [np.ascontiguousarray(o) for o in held[0](arrays)]
         except Exception as exc:
             conn.send(("error", rid, repr(exc)))
             return
