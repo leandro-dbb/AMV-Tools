@@ -497,3 +497,17 @@ def test_proxy_writer_without_proxies_is_a_no_op(monkeypatch):
     w.release(_FakeScanner(23.976), final=True)
     w.finish_encode()
     w.close(ok=True)
+
+
+def test_windows_leaves_the_prune_to_electron(fake_uv, monkeypatch):
+    """Windows refused to delete a cache hard link of a DLL the sidecar had
+    loaded (c10.dll, "Accès refusé"): there the sidecar only leaves a marker
+    that Electron acts on before the next start."""
+    from backend import uvcache
+    from backend.paths import user_data_dir
+    monkeypatch.setattr(uvcache.sys, "platform", "win32")
+    assert uvcache.prune_in_background("engine install") is None
+    assert (user_data_dir() / uvcache.PENDING).exists()
+    assert not fake_uv.exists()                     # uv was not run in-process
+    (user_data_dir() / ".setup_complete").write_text("cu130")
+    assert uvcache.prune_after_update() is None     # already pending

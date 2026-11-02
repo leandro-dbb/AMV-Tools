@@ -124,8 +124,23 @@ def wait_idle() -> None:
         pass
 
 
+PENDING = ".uv-cache-prune-pending"
+
+
 def prune_in_background(reason: str) -> Optional[threading.Thread]:
     if not enabled():
+        return None
+    if sys.platform == "win32":
+        # Windows refuses to delete a hard link of a DLL this sidecar has
+        # loaded (measured: "Accès refusé" on torch's c10.dll, the prune
+        # stopped half-way): Electron prunes before the next start instead,
+        # when no Python of this venv runs.
+        try:
+            from .paths import user_data_dir
+            (user_data_dir() / PENDING).write_text(_lock_sha() or reason)
+            log.info("uv cache prune (%s): left to the next app start (Windows)", reason)
+        except OSError as exc:
+            log.debug("uv cache prune marker not written: %s", exc)
         return None
     t = threading.Thread(target=prune, args=(reason,), daemon=True, name="uv-cache-prune")
     t.start()
@@ -148,4 +163,6 @@ def prune_after_update() -> Optional[threading.Thread]:
         done = ""
     if sha is None or done == sha:
         return None
+    if sys.platform == "win32" and (user_data_dir() / PENDING).exists():
+        return None                      # already left to Electron
     return prune_in_background("app update")

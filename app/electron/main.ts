@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
@@ -125,7 +125,36 @@ function lockStamp(): { current: string | null; file: string } {
   }
 }
 
+// Windows: the sidecar cannot prune the app's uv cache while it runs (the
+// venv's DLLs it loaded are hard links of cache files, which Windows refuses
+// to delete); it leaves a marker and the prune runs here, before Python
+// starts (backend/uvcache.py). Never fatal: the next start retries.
+function pruneUvCacheIfPending(): void {
+  if (isDev || process.platform !== 'win32') return;
+  const userDataPath = app.getPath('userData');
+  const marker = path.join(userDataPath, '.uv-cache-prune-pending');
+  if (!fs.existsSync(marker)) return;
+  const { uvExe } = resolvePythonRoot();
+  if (!fs.existsSync(uvExe)) return;
+  const msg = '[main] freeing disk space: pruning the package cache once';
+  console.log(msg);
+  emitBootstrap({ kind: 'line', line: msg, stream: 'stdout' });
+  const r = spawnSync(uvExe, ['cache', 'prune', '--ci', '--force'], {
+    env: { ...process.env, UV_CACHE_DIR: path.join(userDataPath, '.uv_cache') },
+    timeout: 10 * 60_000, windowsHide: true, encoding: 'utf8',
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split(/\r?\n/).slice(-1)[0] ?? '';
+  console.log(`[main] uv cache prune exit ${r.status}: ${out}`);
+  emitBootstrap({ kind: 'line', line: `uv cache prune: ${out}`, stream: 'stdout' });
+  if (r.status === 0) {
+    try {
+      fs.renameSync(marker, path.join(userDataPath, '.uv-cache-pruned'));
+    } catch {}
+  }
+}
+
 async function startSidecar(): Promise<number> {
+  pruneUvCacheIfPending();
   const stamp = lockStamp();
   const synced = (() => { try { return fs.readFileSync(stamp.file, 'utf8').trim(); } catch { return ''; } })();
   const depsChanged = !isDev && !!stamp.current && synced !== stamp.current
