@@ -31,7 +31,8 @@ log = logging.getLogger(__name__)
 
 
 def _sanitize(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "shot"
+    # Unicode-aware like the clip export: "Pokémon" used to become "Pok_mon".
+    return re.sub(r"[^\w.-]+", "_", name).strip("_") or "shot"
 
 
 def final_alpha_work(project, t: int) -> np.ndarray:
