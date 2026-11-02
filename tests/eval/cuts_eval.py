@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -48,9 +49,18 @@ def find_media(gtd: dict, media: list[Path]) -> Path | None:
 
 
 def _pts(path: Path) -> np.ndarray:
-    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts",
-                          "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True).stdout.split()
-    return np.sort(np.array([int(x) for x in out if x.strip().lstrip("-").isdigit()]))
+    if shutil.which("ffprobe"):
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts",
+                              "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True).stdout.split()
+        return np.sort(np.array([int(x) for x in out if x.strip().lstrip("-").isdigit()]))
+    # No ffprobe (Windows: the app only ships ffmpeg): the same packet PTS
+    # from a stream copy into framecrc ("stream, dts, pts, duration, ...").
+    from backend.indexing.cuts import _ffmpeg_path
+    out = subprocess.run([_ffmpeg_path(), "-v", "error", "-i", str(path), "-map", "0:v:0", "-c", "copy",
+                          "-f", "framecrc", "-"], capture_output=True, text=True, check=True).stdout
+    pts = [int(f[2]) for f in (ln.split(",") for ln in out.splitlines() if ln and not ln.startswith("#"))
+           if len(f) > 2 and f[2].strip().lstrip("-").isdigit()]
+    return np.sort(np.array(pts))
 
 
 def gt(gtd: dict, path: Path) -> tuple[list[int], set[int]]:
