@@ -165,3 +165,21 @@ def test_successful_setup_starts_the_autotune(client, data_dir, monkeypatch):
     (data_dir / ".setup_complete").unlink(missing_ok=True)
     r = client.post("/api/setup/install", json={"backend": "cpu"}).json()
     assert r["ok"] and started == [1]
+
+
+def test_depth_png_goes_through_python_file_api(tmp_path, monkeypatch):
+    # Real VM: "could not write depth frame 0" with the export folder under
+    # C:\Users\amv\Vidéos\Exports AMV été — cv2.imwrite cannot open non-ASCII
+    # paths on Windows. Simulate that limitation and check the PNG is written.
+    import cv2
+    import numpy as np
+
+    from backend.finish import runner
+
+    monkeypatch.setattr(cv2, "imwrite", lambda path, img, *a: str(path).isascii())
+    out = tmp_path / "Exports AMV été" / "clip_depth_00000.png"
+    out.parent.mkdir()
+    img = (np.arange(64 * 48, dtype=np.uint16).reshape(48, 64) * 21)
+    runner.write_png16(out, img)
+    back = cv2.imdecode(np.frombuffer(out.read_bytes(), np.uint8), cv2.IMREAD_UNCHANGED)
+    assert back.dtype == np.uint16 and (back == img).all()
