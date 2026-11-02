@@ -65,6 +65,13 @@ def available() -> bool:
     return os.environ.get("AMV_NVC_PASS", "1") != "0" and _module() is not None
 
 
+def _buffers() -> int:
+    """Decode buffers of ``_BATCH`` frames: the decode loop fills one while
+    the worker downsizes and scans the others (``AMV_NVC_BUFFERS``)."""
+    v = os.environ.get("AMV_NVC_BUFFERS", "")
+    return max(2, min(8, int(v))) if v.isdigit() else 2
+
+
 def _torch_cuda_handles(torch) -> tuple[int, int]:
     """(CUcontext, CUstream) torch uses on this thread, as integers."""
     import ctypes
@@ -261,12 +268,13 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         sc.color_info = None
 
     proxy = _ProxyWriter(path, pxw, onepass.PROXY_SOURCE_H)
-    # two decode buffers: the decode loop fills one while a worker thread
-    # downsizes, downloads and scans the other
-    buffers = [torch.empty((_BATCH, H * 3 // 2, W), dtype=sample, device=dev) for _ in range(2)]
-    free = [threading.Semaphore(1), threading.Semaphore(1)]
+    # decode buffers: the decode loop fills one while a worker thread
+    # downsizes, downloads and scans the others
+    nbuf = _buffers()
+    buffers = [torch.empty((_BATCH, H * 3 // 2, W), dtype=sample, device=dev) for _ in range(nbuf)]
+    free = [threading.Semaphore(1) for _ in range(nbuf)]
     import queue as _queue
-    work: _queue.Queue = _queue.Queue(maxsize=2)
+    work: _queue.Queue = _queue.Queue(maxsize=nbuf)
     stacked = torch.zeros((_BATCH, sh * 3 // 2, fw), dtype=torch.uint8, device=dev)
     staging = torch.empty((_BATCH, onepass.FRAME_BYTES), dtype=torch.uint8).pin_memory()
     staging_np = staging.numpy()
@@ -346,7 +354,7 @@ def detect_cuts_and_medians(path: str, threshold: float, frame_sink=None,
         ready = torch.cuda.Event()
         ready.record(dec_stream)
         work.put((cur, filled, ready))
-        cur, filled = 1 - cur, 0
+        cur, filled = (cur + 1) % nbuf, 0
         free[cur].acquire()
         if errors:
             raise errors[0]

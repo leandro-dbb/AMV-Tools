@@ -10,6 +10,7 @@ on that copy for each variant, with the scene edges the decode found:
 * ``c1`` / ``c6``: 1 / 6 chunks side by side
 * ``async``      : NVENC allowed to keep frames in flight (``-delay 8``)
 * ``hwaccel``    : ffmpeg's NVDEC hwaccel instead of ``h264_cuvid``
+* ``sw_cN``      : software decode of the copy, N chunks side by side
 
 Prints wall time and segment count per variant (every variant must make one
 proxy per scene). Written for docs/reports/windows-rtx3090.md.
@@ -31,6 +32,11 @@ VARIANTS = {
     "async": {"AMV_PROXY_ENC_ARGS": "-delay 8"},
     "async_c6": {"AMV_PROXY_ENC_ARGS": "-delay 8", "AMV_PROXY_CHUNKS": "6"},
     "hwaccel": {"AMV_PROXY_DEC_ARGS": "-hwaccel cuda -hwaccel_output_format cuda"},
+    # software decode of the 240p copy, chunks side by side (no NVDEC latency)
+    "sw_c3": {"AMV_PROXY_DEC_ARGS": "-threads 2", "AMV_PROXY_CHUNKS": "3"},
+    "sw_c6": {"AMV_PROXY_DEC_ARGS": "-threads 1", "AMV_PROXY_CHUNKS": "6"},
+    "sw_c8": {"AMV_PROXY_DEC_ARGS": "-threads 1", "AMV_PROXY_CHUNKS": "8"},
+    "sw_c12": {"AMV_PROXY_DEC_ARGS": "-threads 1", "AMV_PROXY_CHUNKS": "12"},
 }
 
 
