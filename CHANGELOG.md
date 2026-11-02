@@ -2,7 +2,7 @@
 
 All notable changes to AMV Tools are documented here.
 
-## Unreleased — Linux installer fixes
+## 0.5.0-beta.4 — Linux installer fixes, signed macOS build
 
 From the first end-to-end test of the Linux installers (AppImage and
 `.deb`, Debian 12 + RTX 3090).
