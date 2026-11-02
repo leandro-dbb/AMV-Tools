@@ -52,3 +52,11 @@ def test_bootstrap_torch_has_wheels_for_every_allowed_python(platform, extra, ta
         assert any(f"-{py}-{py}-" in w and tag in w for w in wheels), (
             f"torch {version} ({platform}, extra={extra}) has no {py} {tag} wheel"
         )
+
+
+def test_sam2_builds_against_the_runtime_torch():
+    """sam2 is an sdist: without match-runtime its isolated build env pulled
+    the PyPI torch (3.2 GB of CUDA wheels on Linux) at the first launch."""
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = cfg["tool"]["uv"]["extra-build-dependencies"]["sam2"]
+    assert {"requirement": "torch", "match-runtime": True} in deps

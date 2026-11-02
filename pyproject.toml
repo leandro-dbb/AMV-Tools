@@ -185,6 +185,14 @@ conflicts = [
   ],
 ]
 
+# sam2 ships only an sdist whose build requires torch. In uv's isolated build
+# env that torch came from PyPI — on Linux the CUDA build plus its nvidia-*
+# wheels: 3.2 GB downloaded only to build sam2, at the very first launch
+# (12 min at 5 MB/s instead of 3). Build it against the runtime's own torch
+# (same wheel, already downloaded).
+[tool.uv.extra-build-dependencies]
+sam2 = [{ requirement = "torch", match-runtime = true }]
+
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu126", extra = "cu126", marker = "sys_platform != 'darwin'" },
