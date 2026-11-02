@@ -74,6 +74,17 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^\w. -]+", "_", name).strip("_ ") or "scene"
 
 
+def _clip_stem(item: dict) -> str:
+    """``<series> <episode>_scene<index>``: the release group, quality and CRC
+    of the file name dropped, as in the editor's clip export (they gave
+    ``Groupe_ Title - 01 _1080p_ _ABCD1234__scene0000.mp4``)."""
+    if item.get("custom_name"):
+        return item["custom_name"]
+    from ..export.naming import split_title
+    title = " ".join(p for p in split_title(item["display_name"]) if p)
+    return f"{title}_scene{item['scene_index']:04d}"
+
+
 # ── listing ─────────────────────────────────────────────────────────────────
 @router.get("/api/derush")
 def derush_list():
@@ -262,7 +273,7 @@ def _export_worker(items: list[dict], export_settings: dict) -> None:
             # exports/derush/<folder>/<custom name | episode_scene>.<ext>
             out_dir = base_dir / "derush" / (_sanitize(it["folder_name"]) if it["folder_name"] else "")
             out_dir.mkdir(parents=True, exist_ok=True)
-            stem = it["custom_name"] or f"{it['display_name']}_scene{it['scene_index']:04d}"
+            stem = _clip_stem(it)
             target = out_dir / f"{_sanitize(stem)}{suffix}"
             n = 1
             while target.exists() or target in reserved:
