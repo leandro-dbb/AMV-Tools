@@ -62,7 +62,13 @@ def _cached(path: Path, build: Callable[[Path], None]) -> Path:
 # ── worker process ──────────────────────────────────────────────────────────
 def _serve(conn, loader: str, args: tuple) -> None:
     import queue
+    import signal
 
+    # The sidecar ends its children with SIGTERM when it quits: exit through
+    # Python instead of dying on the spot, so coremltools removes the copy of
+    # the program it compiled into the temporary folder (14 MB a load; one
+    # was left behind by every app session that used the cut network).
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         mod, fn = loader.split(":")
         handle = getattr(importlib.import_module(mod), fn)(*args)

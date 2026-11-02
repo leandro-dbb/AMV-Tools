@@ -452,3 +452,37 @@ def test_two_processes_build_the_same_coreml_program(tmp_path):
     assert results == ["ok", "ok"]
     assert (path / "weights.bin").stat().st_size == 1024
     assert [p.name for p in path.parent.iterdir()] == [path.name]      # no partial left
+
+
+class _TempProgram:
+    """Stands for a coremltools MLModel: its compiled copy in the temporary
+    folder is removed when the object goes away."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.mkdir()
+
+    def __del__(self):
+        import shutil
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
+def _temp_program_loader(path):
+    program = _TempProgram(path)
+    return lambda arrays: [arrays[0] + 0 * len(str(program.path))]
+
+
+def test_terminated_coreml_worker_cleans_its_temporary_program(tmp_path):
+    # Quitting the app terminates the Core ML workers: the cut network's
+    # worker died without finalising and left a 14 MB .mlmodelc in $TMPDIR
+    # after every session.
+    from backend.finish.coreml import Worker
+    compiled = tmp_path / "transnetv2-trunk-fp16-v2_1234.mlmodelc"
+    w = Worker("tests.test_apple_silicon:_temp_program_loader", str(compiled), name="test-cleanup")
+    assert w.wait_ready(60)
+    assert w.call([np.arange(3)])[0].tolist() == [0, 1, 2]
+    assert compiled.exists()
+    w._proc.terminate()                     # what backend.shutdown.finish does
+    w._proc.join(10)
+    assert not w._proc.is_alive()
+    assert not compiled.exists()
