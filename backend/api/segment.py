@@ -921,11 +921,8 @@ def export_alpha(scene_id: int, body: ExportAlphaRequest):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = ".mov" if body.codec == "prores_4444_alpha" else ".webm"
-    name = settings["naming_template"].format(
-        anime=_sanitize(Path(sess.video_path).stem),
-        episode=_sanitize(Path(sess.video_path).stem),
-        scene_id=sess.scene_id, tags="alpha",
-    )
+    from ..export.naming import clip_stem
+    name = clip_stem(settings["naming_template"], Path(sess.video_path).stem, sess.scene_id, tags="alpha")
     target = body.output_path or str(output_dir / f"{_sanitize(name)}_alpha{suffix}")
 
     # Per-frame hard-mask cleanup: shrink the silhouette, then optionally drop

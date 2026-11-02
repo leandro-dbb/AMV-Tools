@@ -20,6 +20,10 @@ All notable changes to AMV Tools are documented here.
   (`Vidéos\Exports été`).
 - Bench complet utilisable sous Windows ; pilote Playwright pour tester
   l'appli installée à distance. [Rapport](docs/reports/windows-rtx3090.md).
+- Nom des clips exportés : le nom de l'épisode n'apparaît plus deux fois
+  (`Dragon_Ball_Super_-_Beerus_01_scene_468.mp4` au lieu de
+  `…B3FEF9B7_SubsPlease_…B3FEF9B7_scene_468.mp4`) : `{anime}` reçoit le
+  titre de la série, `{episode}` le numéro d'épisode.
 
 ### Détection de coupes : réseau TransNetV2 (optionnel)
 
