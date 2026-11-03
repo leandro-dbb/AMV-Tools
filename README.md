@@ -266,7 +266,7 @@ One 24-min 1080p episode, from start of indexing to searchable:
 | --- | --- |
 | MacBook Pro M1 Pro 16 GB (macOS) | **~2 min** ([PERFORMANCE.md](docs/PERFORMANCE.md)) |
 | Windows 11 + RTX 3090 | **~2 min 15** ([report](docs/reports/windows-rtx3090.md)) |
-| Debian 12 + RTX 3090, VM with 6 vCPU (AppImage) | **~3 min 20 – 3 min 40** (3 min 36 in the [installer test](docs/reports/test-installeurs-linux-mac.md)) |
+| Debian 12 + RTX 3090, VM with 6 vCPU (AppImage) | **~3 min 20** (197–201 s, two runs, Accurate profile, installed AppImage) |
 
 Honest caveat: these runs used real episodes but not strictly identical
 profiles or settings (Accurate profile, with or without the optional TransNetV2
