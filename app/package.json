@@ -2,7 +2,7 @@
   "name": "amv-tools",
   "private": true,
   "version": "0.5.0-beta.4",
-  "description": "Local desktop app for anime scene search, trimming, and alpha export workflows.",
+  "description": "Local-first desktop app for AMV editors: index your anime episodes, find any shot by text or image, derush, sync to music and export timelines to your editor.",
   "author": "AMV Tools contributors",
   "homepage": "https://github.com/leandro-dbb/AMV-Tools",
   "type": "module",
@@ -127,7 +127,7 @@
       "category": "AudioVideo",
       "maintainer": "AMV Tools contributors",
       "synopsis": "Semantic scene browser for anime music video creators",
-      "description": "Local desktop app for anime scene search, trimming, and alpha export workflows.",
+      "description": "Local-first desktop app for AMV editors: index your anime episodes, find any shot by text or image, derush, sync to music and export timelines to your editor.",
       "extraResources": [
         {
           "from": "../.uv/uv",

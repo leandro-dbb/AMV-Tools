@@ -1,889 +1,331 @@
-# AMV Tools
-
 <p align="center">
-  <img src="assets/logo/amv-tools-banner.png" alt="AMV Tools banner" width="900">
+  <img src="assets/logo/amv-tools-banner.png" alt="AMV Tools" width="900">
 </p>
 
 <p align="center">
-  <strong>Find the anime shot in your head, trim it, mask it, export it.</strong><br>
-  A local-first desktop scene browser for AMV editors and anime clip workflows.
+  <a href="https://github.com/leandro-dbb/AMV-Tools/releases/tag/v0.5.0-beta.4"><img src="https://img.shields.io/github/v/release/leandro-dbb/AMV-Tools?include_prereleases&label=release&color=8b5cf6" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-ec4899" alt="Platforms: Windows, macOS, Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/leandro-dbb/AMV-Tools?color=f59e0b" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/runs-100%25%20local-22c55e" alt="Runs 100% locally">
 </p>
+
+<h3 align="center">Stop scrubbing. Start editing.</h3>
+
+<p align="center">
+  <strong>Every shot of every episode, one search away.</strong><br>
+  AMV Tools indexes your anime episodes on your own machine, then lets you find, derush,
+  sync to music and send the shots straight to your editor.
+</p>
+
+<p align="center">
+  <a href="https://github.com/leandro-dbb/AMV-Tools/releases/download/v0.5.0-beta.4/AMV-Tools-promo.mp4">
+    <img src="assets/promo/teaser.webp" alt="AMV Tools promo — click to watch the full video" width="900">
+  </a>
+  <br>
+  <sub>▶ <a href="https://github.com/leandro-dbb/AMV-Tools/releases/download/v0.5.0-beta.4/AMV-Tools-promo.mp4">Watch the full promo (1 min 39, MP4)</a></sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/leandro-dbb/AMV-Tools/releases/tag/v0.5.0-beta.4"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/leandro-dbb/AMV-Tools/releases/tag/v0.5.0-beta.4"><img src="https://img.shields.io/badge/Download-macOS%20(Apple%20Silicon)-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS"></a>
+  <a href="https://github.com/leandro-dbb/AMV-Tools/releases/tag/v0.5.0-beta.4"><img src="https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux"></a>
+</p>
+
+<p align="center"><sub>Free · open source (MIT) · English &amp; French interface · your footage never leaves your disk</sub></p>
 
 > [!WARNING]
-> **AMV Tools is beta software and is not production-ready.** It still has rough
-> edges and bugs: GPU detection can fall back to CPU, model downloads can fail,
-> and several flows break on real-world footage. Use it to experiment, not to
-> ship. The **roto / alpha-matte (Mask Mode)** feature in particular is **far
-> from ready and disabled by default** — matte quality is unreliable. You can
-> opt in from `Settings > Models`, but treat it as an experiment. The **roto
-> editor** (*Cut out this shot*, since 0.5.0-beta.2) is also **beta**: the AI
-> first pass plus your corrections, always available from a shot.
+> **Public beta.** Core flows work on real footage (tested on Windows 11 + RTX 3090,
+> a MacBook M1 Pro and Debian 12 + RTX 3090), but expect rough edges. The
+> **cut-out editor is a beta** and the **automatic Mask Mode stays off by default**.
+> Found a bug? `Settings › Diagnostic › Copy report` and attach it to an
+> [issue](https://github.com/leandro-dbb/AMV-Tools/issues).
 
-AMV Tools turns a folder of episodes into a fast, visual editing library. It
-indexes your footage locally with semantic search and anime-oriented tags, lets
-you derush whole seasons with an Adobe-style player, browse shots by prompt or
-tag, then gives you a focused mini editor for clip exports and experimental
-alpha-matte cutouts.
+## Why
 
-The interface is available in **English and French** — switchable live from
-`Settings > Interface`, auto-detected from your system on first launch.
+You know the shot you want — *Goku screaming, close-up, red sky* — but not which
+of your 40 episodes it lives in, or at what timestamp. AMV Tools watches the
+episodes for you: it finds every cut, tags every scene and builds a visual
+search index, all locally. Then you type what you see, keep what you like, and
+export a timeline that points at your original files. No re-encoding, no cloud,
+no account.
 
-![AMV Tools semantic search grid](assets/screenshots/search.png)
+## Features
 
-## Why It Exists
+- [Import whole seasons](#import-whole-seasons-any-format)
+- [Indexing with precise cuts](#indexing-with-precise-cuts)
+- [Search: text, image, filters, similar shots, characters, tags](#search-the-way-you-think)
+- [Derush like an editor](#derush-like-an-editor)
+- [Collections](#collections)
+- [Music sync](#music-sync--cut-on-the-beat)
+- [Timeline export to your editor](#send-it-to-your-editor)
+- [Finishing: upscale, slow-mo, depth](#finishing-upscale-slow-mo-depth)
+- [Cut-out editor (beta)](#cut-out-editor-beta)
+- [Share a database, relink in one click](#share-a-database-relink-in-one-click)
+- [Windows, macOS, Linux — tuned for your machine](#windows-macos-linux--tuned-for-your-machine)
 
-Editing anime clips should not mean scrubbing through hours of footage trying
-to remember where one two-second shot lives. AMV Tools is built for the moment
-when you know the vibe, character, color, action, or composition you want, but
-not the exact episode timestamp.
+### Import whole seasons, any format
 
-- Derush entire seasons with a J/K/L shuttle player and one-key scene keeping.
-- Search scenes with natural-language prompts like `Charizard`, `Gojo combat`,
-  or `red sky close-up`.
-- Browse anime tags generated locally with wd-tagger.
-- Trim clips frame-aware before export, alone or in batches.
-- Build multiple local SQLite libraries for different projects, and move them
-  between machines with one-click relinking.
-- Export normal clips or experiment with character cutouts using alpha video.
+Drag & drop your episode folders (subfolders included) or pick them, give them
+an optional group name (`One Piece`, `S23`…) and hit **Start indexing**. MKV,
+MP4, MOV, AVI, WebM, TS/M2TS, MPG, WMV, FLV, MXF and more. You can keep
+browsing, searching and derushing while it runs; indexed episodes are organised
+into drag-and-drop groups.
 
-## Product Tour
+![Library: import and indexing](assets/screenshots/library-tab.png)
 
-### 1. Guided First Launch
+### Indexing with precise cuts
 
-On first launch, AMV Tools asks three things: your **acceleration backend**
-(NVIDIA CUDA recommended, CPU as the safe fallback — the heavy PyTorch download
-only happens for the backend you pick), whether indexing should favor **speed
-or accuracy**, and your **language** (English/Français). Everything can be
-changed later in Settings.
+Indexing detects every hard cut, tags every scene (wd-tagger), computes its
+SigLIP 2 search embedding and analyses its camera motion, intensity and colour
+palette. Download the optional **TransNetV2** cut network in `Settings › Models`
+(30 MB) for frame-accurate cuts in fast fights, flashes and dark shots — about
+5 % more indexing time on an NVIDIA card or a Mac. Measured at the exact frame on
+hand-annotated extracts: [docs/reports/coupes.md](docs/reports/coupes.md).
 
-![One-time setup screen](assets/screenshots/onboarding.png)
+### Search the way you think
 
-### 2. The Library Tab — Everything Starts Here
+**Text search** across every anime of the library: type `Goku screaming`,
+`explosion`, `close-up face, rain`. Hover a card to preview the shot, click it to
+open the trim editor.
 
-Drop a folder of episodes, optionally give it a group name (`S23`), hit
-**Start indexing**. AMV Tools detects cuts, sub-segments long scenes, generates
-tags, creates embeddings, and stores everything locally. While it runs you can
-already browse what's done. Indexed episodes are organised into drag-and-drop
-folders that structure the Derush playlist.
+![Text search across several series](assets/screenshots/search.png)
 
-![Library tab](assets/screenshots/library-tab.png)
+**Search by image**: drop a screenshot or a reference picture and get the shots
+that look like it.
 
-Databases live behind the *advanced* disclosure at the bottom: one database per
-project, importable from another PC — when episode files are missing, a relink
-panel re-points them by folder, by season, or file by file.
+![Search by image](assets/screenshots/search-image.png)
 
-### 3. Derush Episodes Like An Editor
+**Filters** — no words needed: characters, camera motion (static, pan, tilt,
+zoom, shake), intensity, duration, dominant colour, series, favorites. Combine
+them with a query or use them alone ("every zoom-in with intensity > 70 %").
 
-The Derush player plays whole episodes with Adobe-style **J/K/L** shuttle
-(reverse to 10× forward), shows every detected cut as a strip under the player,
-and keeps the scene under the playhead with a single key. One press keeps,
-a second promotes to **favorite** (gold). Episodes chain automatically, arrows
-jump between scenes, `,`/`.` step frames, Ctrl+click + G merges over-split
-scenes.
+![Search filters](assets/screenshots/search-filters.png)
 
-![Derush player](assets/screenshots/derush-player.png)
+**Similar shots**: from any scene, list the nearest ones in the whole library
+(optionally from other episodes only, or the same series).
 
-### 4. A Library Of Keeps, Ready To Export
+![Similar shots](assets/screenshots/similar-shots.png)
 
-Everything you keep lands in the Derush library: hover previews, renaming,
-folders, favorites filter, and batch export of the whole selection (or one
-folder) in a single click.
+**Characters**: teach it a character from a few example scenes, dropped images
+or a crop, validate or reject the results to refine it. Characters become search
+filters, and naming one in a query (`gojo running`) boosts its scenes. No extra
+model download.
 
-![Derush library](assets/screenshots/derush-library.png)
+![Characters tab](assets/screenshots/characters.png)
 
-### 5. Browse By Tags
-
-The tag browser is made for scanning. Filter a video, raise or lower the
-confidence threshold, select the shots you want, and export them as a batch.
+**Tags**: every scene is auto-tagged; filter by tag and episode, raise or lower
+the confidence threshold, select shots and export them in a batch.
 
 ![Tag browser](assets/screenshots/tags.png)
 
-### 6. Search Like An Editor
+More about search: [docs/SEARCH.md](docs/SEARCH.md).
 
-Semantic search gives you a contact sheet of matching shots instead of forcing
-you to remember filenames. Sort by relevance, tune the threshold, and hover
-through results until the right movement, pose, or color lands. You can also
-drop an image to search by visual reference.
+### Derush like an editor
 
-![Semantic search results](assets/screenshots/search.png)
+Play whole episodes with **J/K/L** shuttle (reverse up to 10× forward), every
+detected cut shown as a strip under the player. **One key keeps the scene**
+under the playhead, a second press makes it a **favorite**. Arrows jump between
+scenes, `,` / `.` step frames, episodes chain automatically. Keys can be
+remapped in `Settings › Derush`.
 
-**Finer search (v0.4).** Every scene also gets a camera-motion label (static,
-pan left/right, tilt up/down, zoom in/out, shake) with a magnitude, an
-intensity score (motion, rapid sub-cuts, flashes, luminance swings) and a
-3-colour palette. They are computed on CPU during indexing from the frames the
-cut detector already decodes, and older libraries are analysed in the
-background shortly after launch (progress in the status bar; turn it off in
-`Settings > Search > Automatically analyse existing scenes` and run it on
-demand from `Filters > Analyse existing scenes`) — no re-index needed. The collapsible **Filters** panel combines
-characters, motion, intensity, duration, dominant colour, series and favorites
-with a text or image query — or on their own ("every zoom-in of Gojo with
-intensity > 70 %"). Cards show a motion icon, an intensity bar and the palette.
+![Derush player](assets/screenshots/derush-player.png)
 
-**Similar shots.** From any scene — Search, Tags, Derush, the mini editor —
-`Similar shots` lists the nearest scenes by their existing SigLIP 2 embedding
-(optionally excluding the same episode or staying in the same series).
+### Collections
 
-**Characters.** The Characters tab turns a few example scenes (or dropped
-reference images, or a crop of a scene around the character) into a SigLIP 2
-prototype, scores every scene of the chosen series, and lets you validate or
-reject results to refine it. Characters are saved in the library and work as
-search filters, and naming one in a query ("gojo running") boosts its scenes.
-No extra model is downloaded: crops and dropped images reuse SigLIP 2, plain
-scene examples reuse the stored embeddings.
+Everything you keep lands in the derush library: hover previews, renaming,
+folders (`SCREAMS`, `Power-ups`, `Sad`…), a favorites filter, and batch export of
+everything, one folder or the favorites — as clips or as a timeline.
 
-### 7. Trim Before Export
+![Derush library with folders](assets/screenshots/derush-library.png)
 
-Open a result in the mini editor, scrub the clip, adjust the trim handles, and
-export exactly the duration you need — designed for short, repeatable clip
-pulls, not full timeline editing.
+### Music sync — cut on the beat
 
-![Mini editor trim workflow](assets/screenshots/mini-editor.png)
+Drop your track (mp3, wav, flac, m4a, ogg or the audio of a video). AMV Tools
+finds the tempo, every beat and bar, the energy curve and the parts of the song
+— intro, verse, build-up, **drop**, chorus, calm part, outro — then **proposes an
+edit** with your own shots: calm shots on the calm parts, action cut on 1-2 beats
+on the drop. Swap, lock, regenerate, preview with the music, and export the edit
+as a timeline with beat and section markers (or just the markers). Every cut sits
+on the frame nearest to its beat. Runs on any CPU; the optional Beat This!
+model (8.5 MB) places the bar lines more accurately.
 
-### 8. Roto Editor (beta) — The AI Cuts Out, You Finish
+![Music sync](assets/screenshots/music.png)
 
-Open any shot in the editor and press **Cut out this shot** (*Détourer ce
-plan*). The AI makes the first pass over the whole shot (the Stable Auto
-pipeline below: BiRefNet's soft edge, SAM 3 picks the characters, SAM 2.1
-tracks them, the black ink line kept); you fix what it got wrong in a few
-gestures, the way Roto Brush (After Effects) or Magic Mask (Resolve) work:
+Details: [docs/MUSIC-SYNC.md](docs/MUSIC-SYNC.md).
 
-- **Brush**: green adds to the character, red removes; `[` `]` size, `E`
-  eraser (puts the AI back), Ctrl+Z / Ctrl+Shift+Z. The edge of a stroke
-  snaps to the drawn line next to it.
-- **Clicks**: click a missing part to add it, Alt-click / right-click a piece
-  of background to remove it (SAM 2.1). The corrected frame is on screen
-  0.1 to 0.2 s later on an RTX 3090 (the measured time is shown). `Delete`
-  empties a frame where the character is hidden or off screen.
-- **Propagate** (← ↔ →): SAM 2.1's video tracker starts again from your
-  corrected frames and carries the fixes along the shot; frames you corrected
-  or validated (`V`) are never overwritten.
-- **Frames to check**: the timeline marks in red the frames that probably need
-  a look (character lost, sudden jump, specks, object lost, hole, jagged
-  edge); `N` / `Shift+N` jump to the next / previous one.
-- **Edges** (optional): keep the black line, soften / harden, grow / shrink,
-  smoothing over time — applied live to the preview.
-- Views: red overlay, on black / white / checkerboard, original; zoom
-  (wheel), pan (space + drag), full screen (`F`). Several characters as
-  layers. Saved automatically: close it, come back later.
-- **Export**: ProRes 4444 with alpha (clean background, decontaminated edge
-  colours), PNG sequence with alpha and the black-and-white matte, for After
-  Effects, Premiere, Resolve or Vegas; the cut-out shot also goes into your
-  selection and the timeline export places the cut-out clip.
+### Send it to your editor
 
-Works on NVIDIA, Apple Silicon and CPU. Without access to SAM 3 (gated on
-Hugging Face) the editor says so and uses SAM 2.1 large; on a CPU, clicks and
-propagation are slower (the wait is shown) and propagation follows the
-corrections by optical flow. Measured results: `docs/reports/v06-roto-editeur.md`.
+Export a selection, a collection, search results or a music edit as a **timeline
+of cuts that points at your original files** — nothing is re-encoded, in/out
+points are frame-accurate, mixed frame rates are handled.
 
-### 8b. Alpha Cutouts (Mask Mode, beta, off by default)
+| Editor | Format |
+| --- | --- |
+| Premiere Pro | FCP 7 XML |
+| DaVinci Resolve | FCPXML / FCP 7 XML / OTIO |
+| After Effects | `.jsx` script (comp built for you) |
+| Vegas Pro | Vegas EDL text |
+| Final Cut Pro | FCPXML 1.9 |
+| Anything else | EDL CMX3600, OpenTimelineIO |
 
-Mask Mode cuts characters out of a clip and exports them with transparency
-(ProRes 4444 or VP9 alpha) for After Effects. **Still disabled
-by default** — enable it from `Settings > Models`.
+Options: frame rate and resolution, gaps, handles, markers and labels, source
+audio, and **Collect media** (copy the sources next to the timeline to hand the
+project to someone else). Formats, options and import steps per editor:
+[docs/TIMELINE-EXPORT.md](docs/TIMELINE-EXPORT.md) — 5-minute checklist (FR):
+[docs/import-timeline.md](docs/import-timeline.md).
 
-- **Auto** (no click): a detector finds the characters on every frame, the
-  *main character* or *all characters* are picked automatically, and SAM 2.1
-  tracks them through the clip — re-detecting them after a hard cut or when
-  the track drifts. Brush corrections become keyframes and are re-propagated.
-  On NVIDIA cards (8 GB and up), **SAM 3** (text concept "anime character")
-  first tells the characters from auras, props and scenery, then the final
-  matte is hugged to its outline, which removes the background left between
-  the arms, under the chin and between hair spikes. SAM 3's weights are gated
-  on Hugging Face: accept its license with your account and paste your token
-  in `Settings > Models`; without access, Auto runs as in 0.5.
-  In Stable and max quality SAM 3 also finds what the characters hold or wear (a staff,
-  a halo, a sword, a bowl...) and puts it back in the cutout instead of
-  cutting it off (`Keep held objects`, on by default).
-- **Manual**: click a character and it is the whole detected character that
-  is tracked (not just the colour patch under the click); a box prompt still
-  goes straight to SAM 2. Clicks on several frames are keyframes.
-- Long shots are tracked window by window, so a 10 s+ shot no longer runs out
-  of memory (11 s shot: 2.1 GB of VRAM instead of 9.0 GB).
-- **Stable** (default on NVIDIA 8 GB and up with SAM 3; the standard
-  pipeline is the automatic fallback elsewhere): nothing disappears. The
-  outline model's matte is kept wherever it touches a character — hair,
-  edges and held objects (a cigarette, a staff) are never cut; SAM 3 only
-  removes scenery detached from the characters and oversized pieces sticking
-  out of them (aura flares); a frame where the character would vanish
-  (camera shake, motion blur, flash) takes its neighbours' matte; loose
-  background specks are cleaned the same way on every frame; the
-  character's outer ink line is added, opaque; the outline itself is the
-  outline model's own soft edge (scaled up onto the full-resolution art,
-  as in 0.4), never redrawn. A little background can remain, to brush
-  away.
-- **Max quality** (*Settings > Models > Cutout mode*): SAM 3 runs a second, zoomed
-  pass on each character, the matte hugs SAM 3's outline tightly but gives
-  back the hair tips SAM 3 misses, loose fragments are dropped, and the
-  export re-solves the outline from the local colours (ink line protected)
-  — the least background in the hair, slower.
-- Clean edges at export: the matte is exported as computed and the colour of
-  every semi-transparent edge pixel is decontaminated (foreground
-  estimation), so no ring or tint of the old background is left around hair
-  (ProRes 4444, VP9 and PNG).
+![Timeline export dialog](assets/screenshots/timeline-export.png)
 
-Measured on 23 real episode shots (see [Rotoscope Notes](#rotoscope-notes)
-and [the report](docs/reports/chantier-roto.md)): calm shots, dialogue,
-crowds and most action shots come out usable; auras, smoke and
-characters glued to a background object still need the brush.
-Models download on demand and are chosen per memory tier: BiRefNet (MIT,
-pinned revision), SAM 2.1 (Apache-2.0) and SAM 3 (SAM License, gated, see
-below); ISNet anime (Apache-2.0) and
-ToonOut (MIT weights, CC-BY-4.0 dataset) are available as alternative
-detectors. **MatAnyone is not shipped**: its S-Lab 1.0 license is
-**non-commercial**, so if you install it yourself (see `pyproject.toml`),
-Mask Mode's MatAnyone engine uses it and your cutouts fall under that
-license.
+### Finishing: upscale, slow-mo, depth
 
-![Mask mode alpha export](assets/screenshots/mask-mode.png)
+From the trim editor or a collection, the **Finishing** menu runs local AI passes
+as background jobs (queue, progress, ETA, cancel) and writes new files next to
+your exports:
 
-### 9. Finishing Toolbox — Prepare The Material, Not Just Find It
+- **Upscale** ×2 / ×4 — AnimeJaNai HD V3, Real-ESRGAN anime;
+- **Slow-mo / 60 fps** — RIFE 4.26 (×2/×4/×8, or 48/50/60 fps at the same
+  duration), with an option not to morph across cuts;
+- **Depth map** — Video Depth Anything, for parallax / 3D layers in After Effects.
 
-From the mini editor (on the trimmed clip) or from the selects library (on every
-clip shown), the **Finishing** menu runs local AI passes and writes a new file
-to `<export folder>/finish/`:
+*Estimate time* benchmarks the model on 5 real frames of your clip first. Models
+download on demand. Some of them are **non-commercial** — see
+[models and licenses](#models-and-licenses).
 
-| Pass | Model | What you get |
-|---|---|---|
-| **Upscale** x2 / x4 | AnimeJaNai HD V3 UltraCompact (per model tier, non-commercial), Real-ESRGAN AnimeVideo v3 (fast, steady) or x4plus anime 6B (sharper) | Upscaled clip with the source audio, using your export codec. Tiled inference keeps VRAM bounded. |
-| **Slow-mo / 60 fps** | RIFE 4.26 (or 4.26 heavy, per model tier) | x2/x4/x8 slow motion (audio muted or time-stretched) or 48/50/60 fps at the same duration (audio kept). *Don't interpolate across cuts* duplicates frames at hard cuts instead of morphing two shots. |
-| **Depth map** | Video Depth Anything Small (Large in *Max quality* on NVIDIA; Depth Anything V2 Small on 8 GB Macs and the Mac *Fast* tier) | Grayscale depth (white = near), frame-synchronous with the clip, as a 16-bit PNG sequence, ProRes 422 HQ (10-bit) or H.264. Optional temporal smoothing. Made for parallax / 3D layers in After Effects. |
-| **Cutout** | Mask Mode's Auto engine | ProRes 4444 / VP9 alpha in one click (requires Mask Mode). |
+![Finishing dialog](assets/screenshots/finishing.png)
 
-Every pass is a background job: queue as many as you like, follow progress and
-ETA in the floating **Finishing** queue (bottom right), cancel, or reveal the
-file. *Estimate time* benchmarks the model on 5 real frames of your clip before
-you commit. Without a GPU everything still works on the CPU, just slowly — the
-dialog warns you.
+### Cut-out editor (beta)
 
-Models are **not** bundled: download them on demand from `Settings > Models >
-Finishing models` (or from the dialog). Downloads are throttled to 10 MB/s,
-checksum-verified, and can be deleted at any time.
+Press **Cut out this shot**: the AI makes the first pass over the whole shot,
+then you fix what it got wrong the way Roto Brush (After Effects) or Magic Mask
+(Resolve) work — brush to add/remove, click a missing part, propagate the fix
+along the shot, jump to the frames flagged *to check*. Export ProRes 4444 with
+alpha, a PNG sequence or the black-and-white matte. Works on NVIDIA, Apple
+Silicon and CPU (slower). It is a **beta**: big defects are fixed in a few
+strokes, edges are not pixel-perfect. The fully automatic **Mask Mode** is still
+off by default (`Settings › Models`). Details: [docs/ROTO.md](docs/ROTO.md).
 
-| Model | Size | License |
-|---|---|---|
-| Real-ESRGAN `realesr-animevideov3` | 2.5 MB | BSD-3-Clause |
-| Real-ESRGAN `RealESRGAN_x4plus_anime_6B` | 18 MB | BSD-3-Clause |
-| `2xHFA2kAVCCompact` by Philip Hofmann ([Phhofm/models](https://github.com/Phhofm/models)) | 4.8 MB | CC-BY-4.0 (attribution: Philip Hofmann) |
-| `2x_AnimeJaNai_HD_V3_UltraCompact` by the-database ([mpv-upscale-2x_animejanai](https://github.com/the-database/mpv-upscale-2x_animejanai), official `ModelsOnly` archive, only this file is kept) | 24.7 MB download, 2.5 MB on disk | **CC-BY-NC-SA-4.0 — non-commercial use only** (attribution: the-database) |
-| RIFE 4.25 / 4.25 lite / 4.26 / 4.26 heavy (Practical-RIFE, mirrored by vs-rife) | 25 MB each | MIT |
-| Depth Anything V2 **Small** | 99 MB | Apache-2.0 (Base/Large are CC-BY-NC and deliberately not offered) |
-| Video Depth Anything **Small** (temporally stable, code vendored in `backend/finish/archs/vda`) | 116 MB | Apache-2.0 |
-| Video Depth Anything **Large** (same code, *Max quality* tier on NVIDIA) | 1.5 GB | **CC-BY-NC-4.0 — non-commercial use only** |
-| Beat This! `small0` (CPJKU; Music tab bar lines — code vendored in `backend/music/beatthis` with rotary-embedding-torch, both MIT) | 8.5 MB | MIT |
+![Cut-out editor](assets/screenshots/roto-editor.png)
 
-**Non-commercial models.** AMV Tools is a free, non-commercial tool, so it
-also offers models whose license forbids commercial use (marked *non-commercial
-use* in `Settings > Models`). Their weights are never committed or bundled:
-they are downloaded on demand from the official source. If you use AMV Tools
-or its output commercially, pick a tier or model with a permissive license
-(`Custom` + the finishing menu let you choose 2xHFA2kAVCCompact or Video Depth
-Anything Small instead).
+### Share a database, relink in one click
 
-Which of them a job uses by default follows the **model tier** (below).
+One database = one library (e.g. one per project). Send your `.db` to a friend:
+they open it from `Library › Databases (advanced) › Open existing`, and if the
+episodes are somewhere else on their machine the **relink** panel re-points them by folder, season or file.
+Scenes, tags, embeddings and keeps survive — no re-indexing.
 
-RIFE runs as native PyTorch rather than ONNX: the 4.25 network has no custom
-ops, loads the official weights directly on CUDA, MPS and CPU, and avoids a
-per-resolution ONNX export.
+![Databases: share and relink](assets/screenshots/databases.png)
 
-On Apple Silicon the same weights are additionally compiled with Core ML
-(`coremltools`, BSD-3-Clause, part of the `mps` extra) the first time a model
-meets a new frame size: the upscale shares its frames between the GPU and the
-Neural Engine, RIFE, Depth Anything and the wd-tagger run on the GPU through
-Core ML (1.4–2x faster than PyTorch MPS). The compiled programs are cached
-next to the model files; set `AMV_COREML=0` / `AMV_ANE=0` to stay on MPS.
+### Windows, macOS, Linux — tuned for your machine
 
-### Model Tiers — The Best Models For Your GPU
+NVIDIA (CUDA), Apple Silicon (Metal + Core ML / Neural Engine) and CPU. The
+**model tier** picks the best models for your VRAM or unified memory, and the
+**automatic tuning** measures the decode and batch settings on *your* machine on
+first launch (and again after a GPU, driver or app update). `Settings ›
+Diagnostic` shows what was chosen and why, the active GPU, model states and
+recent errors, with a **Copy report** button for bug reports.
 
-`Settings > Models > Model tier` picks every model (search embeddings,
-tagger, upscale, interpolation, depth) for your memory size. **Auto** reads
-the VRAM (NVIDIA) or the unified memory (Mac); you can force a tier, *Fast*,
-*Max quality* or *Custom* (your own per-model choices). The choices come from
-measurements on three real episodes (hand-judged search and tag sets, x2
-upscale and frame-interpolation references, depth flicker) on an RTX 3090
-and an M1 Pro — see [docs/reports/chantier-4-modeles.md](docs/reports/chantier-4-modeles.md)
-and, for the non-commercial models, [docs/reports/chantier-4b-modeles-non-commerciaux.md](docs/reports/chantier-4b-modeles-non-commerciaux.md).
+![Settings › Diagnostic with the automatic tuning](assets/screenshots/diagnostic.png)
 
-| Tier | Search | Tagger | Upscale | Interpolation | Depth |
-|---|---|---|---|---|---|
-| Fast | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px (Mac: DA V2 Small, 364 px) |
-| NVIDIA 8 / 12 GB | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| NVIDIA 16 / 24 GB | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 518 px |
-| Mac 8 GB | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | DA V2 Small (Core ML) |
-| Mac 16 GB | SigLIP 2 base | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| Mac 24 / 32 GB+ | SigLIP 2 so400m | wd-vit v3 | AnimeJaNai V3 UltraCompact | RIFE 4.26 | Video Depth Anything Small, 364 px |
-| Max quality | SigLIP 2 so400m, 256 patches | wd-eva02-large v3 (Mac: wd-vit v3) | AnimeJaNai V3 UltraCompact | RIFE 4.26 heavy | Video Depth Anything Large, 364 px (Mac: Small, 364 px) |
-| CPU / DirectML / XPU | unchanged defaults | | | | |
+## Download and install
 
-Changing the search model asks for an **embeddings-only re-index** (cuts,
-tags and keeps are kept, progress shown, cancellable); until it is done the
-library keeps searching with the model it was indexed with, and every
-library remembers its own model. Models download on demand (10 MB/s,
-checksum-verified) and only after their license has been checked against an
-allow-list (Apache-2.0, MIT, BSD, CC-BY-4.0, CC0, and the non-commercial
-CC-BY-NC-4.0 / CC-BY-NC-SA-4.0, flagged in Settings).
+Get the files from the [**v0.5.0-beta.4 release**](https://github.com/leandro-dbb/AMV-Tools/releases/tag/v0.5.0-beta.4).
 
-| Model | Size | License |
-|---|---|---|
-| SigLIP 2 base / so400m NaFlex (google) | 1.5 / 4.5 GB | Apache-2.0 |
-| wd-vit / wd-eva02-large tagger v3 (SmilingWolf) | 0.4 / 1.3 GB | Apache-2.0 |
-| Mask Mode detector: BiRefNet general (ZhengPeng7) | 445 MB | MIT |
-| Mask Mode tracker: SAM 2.1 tiny / base+ / large (Meta) | 156 / 324 / 898 MB | Apache-2.0 |
-| Mask Mode character pick: SAM 3 (Meta, gated, your own Hugging Face token) | 3.4 GB | SAM License (use and redistribution allowed, military/ITAR uses forbidden) |
-| Mask Mode alternatives: ISNet anime-seg (SkyTNT) / ToonOut (joelseytre) | 176 / 885 MB | Apache-2.0 / MIT (dataset CC-BY-4.0) |
-| Cut detection network (optional, `Settings > Models`): TransNetV2 (Souček & Lokoč; PyTorch weights Sn4kehead/TransNetV2) | 30 MB | MIT architecture, Apache-2.0 weights |
-
-**Cut detection.** Every frame goes through the hand-made detector; once
-TransNetV2 is downloaded (`Settings > Models`, 30 MB) it is combined with
-it: on NVIDIA in half precision on its own low-priority CUDA stream (CUDA
-graph, frames made on the GPU), on Apple Silicon through Core ML on the
-Neural Engine (MPS while Core ML gets ready), on the CPU otherwise. It runs
-by itself only where the automatic tuning measured that it costs at most
-10 % of the decoding pass; elsewhere (typically CPU-only machines) it is
-`Settings > Indexing > Precise cuts (slower)`, off by default, with the
-measured extra time per episode. Same cut decisions on every engine,
-measured at the exact frame on hand-annotated extracts: see
-[docs/reports/coupes.md](docs/reports/coupes.md).
-
-SAM 3 is the one model outside the allow-list: it is not downloaded by AMV
-Tools' license-checked downloader but fetched by Hugging Face with *your*
-token once you have accepted Meta's SAM License on the model page (the
-license text is linked in `Settings > Models`; it allows use, including
-commercial, forbids military / nuclear / ITAR uses and reverse engineering).
-
-Mask Mode per tier: BiRefNet general + SAM 2.1 tiny (Fast, NVIDIA 8 GB, Mac
-8/16 GB), + base+ (NVIDIA 12/16 GB, Mac 24/32 GB), + large (NVIDIA 24 GB, Max);
-SAM 3 character pick on NVIDIA 8 GB and up (not on Fast, not on Mac: not
-measured there); ISNet anime without tracking on CPU. The Mac choices are not
-measured yet.
-
-## Music Sync — Cut On The Beat
-
-The **Music** tab turns a song into a first cut made of your own indexed
-shots:
-
-1. **Pick your song** (mp3, wav, flac, m4a, ogg, or the audio of a video).
-   AMV Tools finds the tempo, every beat and bar, the strong hits, an energy
-   curve and the parts of the song — intro, verse, build-up, drop, chorus,
-   calm part, outro — with the drops flagged on the waveform. About 1.5-4 s
-   for a 4-minute song on a modest CPU, cached by file content (renaming or moving the
-   file keeps the analysis).
-2. **Propose an edit.** Each passage gets shots whose intensity matches it
-   (calm shots on the intro and calm parts, faster cuts through the build-up,
-   action shots cut on 1-2 beats on the drop), using the motion / intensity
-   analysis of Search+, the tags and the text search. Choose the series and
-   characters, the cut rhythm (steady ↔ nervous), avoid reusing a shot, and
-   add keywords per passage ("Goku" on the drop).
-3. **Tweak it**: click a shot to swap it for one of its alternatives, lock
-   the ones you like, regenerate one passage or everything but the locked
-   shots, and watch a **low-resolution MP4 preview** with the music. The
-   preview also spots shots that hide a cut of the episode (it would fall
-   off the beat): they are marked in red and avoided by the next proposal.
-4. **Export** the edit as a timeline (FCP 7 XML for Premiere / Vegas /
-   Resolve / After Effects via Premiere, FCPXML, EDL, OTIO) with the song on
-   its own audio track and markers on the beats and passages — or only the
-   **markers** (beats + passages on the song, to cut by hand; also as a
-   DaVinci Resolve marker EDL and CSV).
-
-Every cut is placed on the frame nearest to its beat (at 23.976 fps that is
-at most ±21 ms, half a frame). Analysis uses librosa (ISC) and plain signal
-processing: no model to download, works on any CPU.
-Details and measurements: [v06 C report](docs/reports/v06-C-synchro-musique.md).
-
-## Send To Your Editor
-
-AMV Tools can hand a selection to a real NLE as a **timeline of cuts** that
-points at the original media. Nothing is re-encoded: every writer stores the
-source path plus frame-accurate in/out points, so the editor sees the exact
-frames you picked.
-
-Where the button lives:
-
-- **Derush → Library**: the current filter (all keeps, a folder, favorites or
-  unfiled) is exported.
-- **Tags**: the selected scenes.
-- **Search**: the current result set.
-
-The dialog asks which editor you use (Premiere Pro, DaVinci Resolve, After
-Effects, Vegas Pro, Final Cut Pro, Other), shows how to import there, previews
-the clip count and total duration, then asks where to save the timeline.
-Step-by-step import guide with a 5-minute checklist per editor (FR):
-[docs/import-timeline.md](docs/import-timeline.md). Formats:
-
-| Format | Best for | Notes |
+| System | File | How to open |
 | --- | --- | --- |
-| **FCP 7 XML** (xmeml v5) | Premiere Pro (also Resolve) | Exact integer-frame in/out, NTSC flag, labels, markers; `pathurl` spelled like Premiere's own exports (`file://localhost/C%3a/...`). |
-| **FCPXML 1.9** | Final Cut Pro 10.4+, Resolve | Rational times (`1001/24000s`), mixed source rates. |
-| **EDL CMX3600** | Any NLE, as a universal cut list | 8-char reel names; `* FROM CLIP NAME:` / `* FROM FILE:` comments on one line each (what NLEs relink from). |
-| **OpenTimelineIO** | Resolve, Kdenlive, OTIO tools | Native OTIO JSON (with markers), written by AMV Tools itself — no extra package needed. |
-| **Vegas EDL text** (`.txt`) | Vegas Pro | Vegas' own event list (semicolons, milliseconds) for `File → Import → EDL Text File`; full source paths. |
-| **After Effects script** (`.jsx`) | After Effects | ExtendScript that imports the sources, creates the comp and places every clip with exact in/out. |
+| **Windows 10/11 x64** | `AMV.Tools.Setup.0.5.0-beta.4.exe` | The installer is not signed yet: SmartScreen → **More info → Run anyway**. On first launch Windows may ask to install *Microsoft Visual C++*: accept. |
+| **macOS on Apple Silicon** (M1 and newer) | `AMV.Tools-0.5.0-beta.4-arm64.dmg` (or `.zip`) | Signed with a Developer ID and notarized by Apple: drag into Applications and open. |
+| **Linux x64** | `AMV.Tools-0.5.0-beta.4.AppImage` or `amv-tools_0.5.0-beta.4_amd64.deb` | AppImage: `chmod +x` it and run; it needs `libfuse2` (`libfuse2t64` on Ubuntu 24.04) **and** `fusermount` (`sudo apt install fuse3`). Or `sudo apt install ./amv-tools_0.5.0-beta.4_amd64.deb`, which needs neither. |
 
-Options in the dialog:
-
-- **Sequence frame rate / resolution**: first clip or an explicit choice
-  (23.976, 24, 25, 29.97, 30, 59.94, 60; 720p → 4K).
-- **Back-to-back or gaps**: insert a configurable gap of N frames between
-  clips.
-- **Handles**: extend each clip by N frames before/after (clamped to the
-  source).
-- **Drop-frame**: for 29.97/59.94 only. Non-drop is the default.
-- **Scene markers / labels / folders**: markers carry the scene name and tags
-  in every format; favorites get the Mango label in FCP XML.
-- **Include source audio**: omit it for a video-only assembly.
-- **Collect media**: copies the originals (byte-for-byte, no transcode) into
-  `<timeline>_media/` beside the timeline and points every clip at the
-  copies, so you can send the timeline + its `_media` folder to another
-  editor. How the paths are written depends on what each format can express:
-
-  | Format | Media path after “Collect media” |
-  | --- | --- |
-  | FCPXML, OpenTimelineIO | Relative to the timeline file: `timeline_media/clip.mp4`. Moving the timeline and its `_media` folder together keeps the media linked. |
-  | EDL | No media path in the format; the `* FROM FILE:` comment carries the same relative path. |
-  | FCP 7 XML | **Absolute** `file://` URL of the copy, e.g. `file://localhost/C%3a/Edits/timeline_media/clip.mp4`. |
-
-  Why FCP 7 XML stays absolute: xmeml's `<pathurl>` is a `file://` URL and
-  Premiere Pro, Final Cut Pro 7, Resolve and Vegas do not resolve relative
-  paths in it — a relative value imports as offline media everywhere. On the
-  machine that exported, the copies open directly. On another machine, the
-  importer asks to relink: point it at the `_media` folder once (Premiere:
-  *Locate* with “Relink others automatically”; Resolve: *Relink Selected
-  Clips* on the folder) — `<name>` holds the file name, so every clip is
-  found by name in that folder.
-
-VFR sources are approximated using their average frame rate; the preview
-shows a warning. Mixed frame-rate sources are converted to the sequence rate
-without retiming the media.
-
-### Importing step by step
-
-**Premiere Pro** — `File → Import…`, pick the exported `.xml` (FCP 7 XML).
-The sequence appears in the project panel with clips already cut and the
-media linked. For AE, import the same XML into Premiere, then use
-`File → Adobe Dynamic Link → Import Premiere Pro Sequence` in After Effects
-(or open the sequence in Premiere and `Edit → Edit in Adobe After Effects`).
-If Premiere asks to relink, point it at the collected `_media` folder.
-
-**DaVinci Resolve** — create/open a project, then
-`File → Import → Timeline…` and choose the `.fcpxml` (or `.xml` / `.otio`).
-Resolve maps reel names and clip labels; choose “Use source frame rate” if
-prompted for mixed-rate sources. For EDL use
-`File → Import → Pre-conformed EDL…` and select the sequence frame rate.
-
-**Final Cut Pro** — `File → Import → XML…`, select the `.fcpxml`. The event
-and project are created automatically. FCP 7 XML can also be imported by FCP
-10 through `File → Import → XML…` in most versions; FCPXML is the recommended
-path.
-
-**Vegas Pro** — `File → Import → EDL Text File (*.txt)`, select the exported
-`.txt` (choose *Vegas Pro* in the dialog). Video lands on track 1, audio on
-track 2. Vegas 14+ can also try the FCP 7 XML through
-`File → Import → Final Cut Pro 7 / DaVinci Resolve Timeline (*.xml)`.
-
-**After Effects** — choose *After Effects* in the dialog, then in AE
-`File → Scripts → Run Script File…` and pick the `.jsx`: it imports each
-source once, creates a composition at the timeline's rate and size and places
-every clip as a layer with its exact in/out (one undo step). Missing files
-are listed in an alert; files next to the script are found too.
-
-**EDL in any NLE** — import the `.edl` as a pre-conformed/CMX3600 EDL. The
-`* FROM CLIP NAME:` and `* FROM FILE:` comment lines identify the source;
-EDL itself does not carry media paths, so relink from those comments if your
-NLE asks.
-
-## What Is Inside
-
-- Electron + React desktop shell, bilingual EN/FR.
-- FastAPI sidecar for indexing, search, tagging, and exports.
-- SQLite scene databases that stay on your machine.
-- SigLIP 2 semantic embeddings for visual scene search, similar shots and
-  user-defined characters (base or so400m, picked by the model tier).
-- OpenCV (Apache-2.0) optical-flow camera-motion / intensity analysis, CPU only.
-- wd-tagger for anime-oriented tag discovery.
-- ffmpeg-based proxies, trim previews, and clip exports.
-- librosa (ISC) beat / section / drop analysis for the Music tab (CPU, no
-  model weights; pulls numba, scikit-learn, soundfile and soxr — the latter
-  LGPL-2.1+, used as an unmodified dynamic library).
-- BiRefNet / ISNet anime + SAM 2 alpha workflow for short character cutouts (beta).
-- Finishing toolbox: Real-ESRGAN anime upscaling, RIFE interpolation, Depth
-  Anything V2 depth maps, as queued background jobs.
-
-## Status
-
-**AMV Tools is beta software and still has problems.** Core flows (derush,
-search, tagging, preview, trim, export) mostly work, but they depend on source
-footage, drivers, and local GPU support, and can break in ways that need manual
-recovery. The roto / alpha-matte pipeline is far from ready and disabled by
-default. Expect bugs and inconsistent results; please report issues.
-
-The screenshots above use local test footage to demonstrate the interface. AMV
-Tools does not ship with media; it indexes files you provide.
-
-## Install On Windows
-
-The recommended path for end users is the Windows installer published on the
-project's GitHub Releases page.
-
-1. If you have an NVIDIA GPU, make sure your driver is at least `581.x` for
-   CUDA 13. Run `nvidia-smi` in PowerShell to confirm.
-2. Download `AMV Tools Setup <version>.exe` from the latest release.
-3. Run it. The installer is currently unsigned, so Windows SmartScreen may
-   warn you. Choose `More info -> Run anyway`.
-4. On first launch, pick the backend that matches your hardware, your indexing
-   preference (fast/accurate) and your language. The app downloads the chosen
-   PyTorch backend on demand: about 4.5-5 GB for NVIDIA CUDA 13 (measured), a
-   few hundred MB for CPU — a slow connection is fine, the
-   bootstrap waits for it.
+On first launch AMV Tools picks the engine for your hardware and downloads
+PyTorch (a few hundred MB for CPU, about 5 GB for NVIDIA CUDA 13), then the
+analysis models (~2 GB) at the first indexing. An interrupted install is
+repaired automatically at the next launch.
 
 > [!IMPORTANT]
-> **Smart App Control** (enabled by default on some Windows 11 machines) blocks
-> unsigned installers outright, with no "run anyway" option. If nothing happens
-> when you launch the installer, check `Windows Security > App & browser
-> control > Smart App Control`. Disabling it is permanent; the alternative is
-> building from source, which is unaffected.
-
-The installer bundles `uv.exe` and the FastAPI sidecar. Model weights and
-PyTorch wheels are downloaded into the user data directory when needed. If a
-first install is interrupted (network drop, closed app), the next launch
-detects the broken environment and repairs it automatically.
-
-### macOS and Linux
-
-Since 0.5.0-beta.1 the release also carries a macOS build (Apple Silicon,
-`.dmg` / `.zip`) and Linux builds (`.AppImage` / `.deb`, x64). They are not
-signed by a known developer:
-
-- **macOS**: the app is signed ad hoc only (not notarized). Checked on
-  macOS 26 (M1 Pro): the first double-click shows *“AMV Tools” Not Opened —
-  Apple could not verify “AMV Tools” is free of malware…* with two buttons.
-  Click **Done**: the highlighted default button, *Move to Trash* (also what
-  Return does), deletes the app. Then open System Settings → Privacy &
-  Security, scroll to *Security*, click **Open Anyway** next to *“AMV Tools”
-  was blocked to protect your Mac*, confirm with your password or Touch ID
-  and click **Open** in the next prompt. Since macOS 15, right-click → Open
-  no longer offers a way in. Alternative in Terminal, before the first
-  launch: `xattr -dr com.apple.quarantine "/Applications/AMV Tools.app"`
-  (adapt the path if you copied it to `~/Applications`).
-- **Linux**: `chmod +x` the AppImage and run it. It needs `libfuse2` (on
-  Ubuntu 24.04 `libfuse2t64`) and `fusermount` (package `fuse3`), present on
-  most desktops; without the latter it stops at once on *fuse: failed to exec
-  fusermount* (`sudo apt install fuse3`). Or install the `.deb`
-  (`sudo apt install ./amv-tools_<version>_amd64.deb`), which needs neither.
-
-On Apple Silicon (`--extra mps`) indexing, search, export,
-finishing and Mask Mode have been benchmarked and checked end-to-end on an
-M1 Pro 16 GB (a 24-min episode indexes in about 2 minutes with the default
-Accurate profile, ~43 s with Fast — see [docs/PERFORMANCE.md](docs/PERFORMANCE.md));
-the packaged app itself (signing, notarization) has not been QA'd. On Macs
-the wd-tagger runs on the GPU through PyTorch and downloads the same
-checkpoint as `model.safetensors` (Apache-2.0) instead of `model.onnx`.
-The Linux `AppImage` and `.deb` were checked end-to-end on Debian 12 with an
-RTX 3090 (install, CUDA 13 engine, indexing, search, exports, music sync,
-finishing, cut-out editor, uninstall — see
-[docs/reports/test-installeurs-linux-mac.md](docs/reports/test-installeurs-linux-mac.md));
-not yet on Ubuntu, Fedora or a Wayland session. You can also
-build from source (see below) — `.github/workflows/build.yml`
-produces macOS builds on a Mac runner and Linux packages on Ubuntu (macOS
-builds cannot be produced from Windows). See `docs/RELEASING.md` for the
-signing/notarization secrets and the draft-release flow.
-
-### Moving A Library To Another PC
-
-Copy your `.db` file, install AMV Tools on the new machine, then
-`Library > Databases (advanced) > Open existing`. If episode files are not at
-their old location, the relink panel opens automatically: point it at the
-folder that now contains your episodes (subfolders are scanned recursively),
-relink season by season, or fix leftovers file by file. Scenes, tags,
-embeddings and derush keeps all survive — no re-indexing.
-
-### Diagnostics And Logs
-
-If something misbehaves, open `Settings > Diagnostic`. It shows the app, Python,
-PyTorch and FFmpeg versions, the requested vs. actually active acceleration
-backend, the detected GPU (or the reason the app fell back to CPU), free disk
-space, the state of every model (present/absent, size, load error) and recent
-backend errors. **Copy report** puts a Markdown summary on the clipboard, ready
-to paste into a bug report; **Open logs folder** reveals the rotating backend
-log (`backend.log`) in the user data folder.
-
-When a GPU backend was selected but is unavailable, a non-blocking banner at the
-top of the app says so instead of silently running on CPU. Model downloads
-retry with backoff and verify size/hash when Hugging Face exposes them; a failed
-download shows the reason plus a **Retry download** button.
-
-### Clean Reinstall
-
-If the local environment gets stuck, use `Settings > Advanced > Reinstall from
-scratch` inside the app, or wipe manually:
-
-```powershell
-Get-Process | Where-Object { $_.ProcessName -like "AMV Tools*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-$uninstaller = "$env:LOCALAPPDATA\Programs\amv-tools\Uninstall AMV Tools.exe"
-if (Test-Path $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait }
-Remove-Item "$env:LOCALAPPDATA\Programs\amv-tools" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:APPDATA\amv-tools" -Recurse -Force -ErrorAction SilentlyContinue
-```
-
-The Hugging Face model cache under `%USERPROFILE%\.cache\huggingface` is
-preserved. Deleting it forces a multi-GB model re-download on next launch.
-
-macOS: quit the app, then delete `AMV Tools.app` (from Applications or
-`~/Applications`), `~/Library/Application Support/amv-tools` (Python,
-packages, database, finishing models, exports) and
-`~/Library/Preferences/com.amvtools.app.plist`. The search, tagging and
-masking models (SigLIP 2, wd-tagger, BiRefNet, SAM 2, TransNetV2: about
-2.5 GB after a full test) are in the shared Hugging Face cache,
-`~/.cache/huggingface/hub/models--*`; delete those folders too to free the
-space (other apps may use that cache).
-
-## Hardware Support
-
-AMV Tools is developed and tested primarily on NVIDIA GPUs (RTX-class, CUDA 12
-or 13). That is the recommended path for both indexing and the roto/alpha
-pipeline. For any other configuration, CPU mode is the safest fallback — it
-works everywhere but indexing is much slower.
-
-The batch size setting auto-recommends a value based on your detected VRAM
-(e.g. 12 GB on NVIDIA → 32); lower it if you hit out-of-memory errors.
-
-DirectML, ROCm, and XPU backends are wired into the installer, but they have
-not been validated end-to-end on real AMD or Intel hardware. If you are on AMD
-or Intel, expect CPU mode to be the reliable path. Apple Silicon (MPS) is
-measured in [docs/PERFORMANCE.md](docs/PERFORMANCE.md); run
-`tests/bench_platform.py` on your machine to compare.
-
-### NVIDIA Driver Notes
-
-The CUDA 13 backend (`cu130`, recommended for RTX 20xx and newer) needs a
-recent NVIDIA driver. If the driver is too old, PyTorch can silently fall back
-to CPU and indexing becomes much slower.
-
-| Backend | Minimum driver | Recommended |
-| --- | --- | --- |
-| `cu130` | 581.x | Latest Game Ready / Studio |
-| `cu130-trt` | 581.x | Latest Game Ready / Studio |
-| `cu126` | 555.x | 560+ |
-
-Check your driver with `nvidia-smi`. If you cannot update it, choose
-`NVIDIA CUDA 12.6` during onboarding instead of CUDA 13.
-
-### NVIDIA Performance
-
-On an RTX 3090 a 23-minute 1080p episode indexes in well under a minute:
-NVDEC decodes straight into CUDA tensors (optional `PyNvVideoCodec`, MIT,
-installed with the CUDA extras; ffmpeg is used without it), torch downsizes
-the frames bit-identically to ffmpeg's `scale_cuda`, and one pass feeds cut
-detection, Search+ motion analysis, the scene frames and the hover proxies;
-two episodes of a queue decode at once. The whole pipeline benchmark
-(3 episodes indexed with proxies, searches, 10 exports, upscale/RIFE/depth)
-takes 4 min 32 - 4 min 43. Measurements, method and recommended settings:
-[docs/PERFORMANCE-NVIDIA.md](docs/PERFORMANCE-NVIDIA.md).
-
-- **Linux**: the bundled ffmpeg has no NVDEC/NVENC. AMV Tools picks a system
-  ffmpeg that has them (`sudo apt install ffmpeg` on Debian/Ubuntu); point
-  `AMV_FFMPEG` at another build if needed. Diagnostics shows which one is used.
-- **Finishing and exports**: choose *H.264 Hardware (NVENC)* in Settings →
-  Export. It matches or beats x264 CRF 18 in quality (larger files) and makes
-  upscale / slow-motion jobs 2-3× faster, because x264 is the bottleneck there.
-- **Batch size**: the Settings recommendation is calibrated per VRAM
-  (6 / 8 / 12 / 24 GB → 8 / 16 / 32 / 64); the default models stay near 1 GB
-  of VRAM even at 64, so 8 GB cards are safe.
-
-### Automatic Tuning
-
-The decode and model settings above were measured on two machines (RTX 3090,
-M1 Pro). On first launch — and again when the GPU or chip, the driver, PyTorch,
-FFmpeg or the app version changes — AMV Tools measures them on yours, in the
-background while nothing is indexing (~40 s on the RTX 3090, on 10 s of a
-library video, or a synthetic clip when the library is empty):
-
-- parallel decodes: NVDEC single passes in flight (1 / 2 / 4) on NVIDIA,
-  VideoToolbox sessions (2 / 4 / 8 / 12) on Apple Silicon — the smallest value
-  within 5 % of the fastest is kept;
-- Apple Silicon: MPS vs Core ML for the tagger (Core ML only if its tags match
-  and it is ≥ 5 % faster); NVIDIA: TensorRT is reported but not used (no
-  compatible model path);
-- the tagger/SigLIP batch size, never above the memory tier's value.
-
-Settings → Diagnostic shows the choices with their measures and a **Run the
-automatic tuning again** button. The results live in `autotune.json` in the
-data folder; without them the previous constants apply. `AMV_PARALLEL_DECODES`,
-`AMV_CHUNK_WORKERS`, `AMV_COREML=0` and a batch size changed in Settings still
-win; `AMV_AUTOTUNE=0` turns the background run off.
-
-## Build From Source
-
-Requirements:
-
-- Python 3.12 or 3.13, managed by `uv`.
-- Node.js 20+.
-- A CUDA-capable NVIDIA GPU for the recommended path, or CPU otherwise.
-
-Install dependencies:
-
-```bash
-uv sync --extra cpu
-cd app
-npm install
-```
-
-Run the Electron app in development:
-
-```bash
-cd app
-npm run dev:electron
-```
-
-Build and test checks:
-
-```bash
-uv run pytest -m "not slow"
-cd app
-npx tsc --noEmit
-npx vitest run
-npm run build
-```
-
-Backend tests use synthetic clips generated with ffmpeg and mocked ML models,
-so a CPU-only machine is enough. `uv sync --extra cpu` installs the test group
-automatically. Tests marked `slow` run the real finishing models on CPU and are
-skipped unless their weights are present (`AMV_TEST_DOWNLOAD=1` fetches them).
-
-End-to-end UI journey (the built Electron app + the real sidecar and models on
-CPU, driven by Playwright under its own Xvfb, throwaway profile):
-
-```bash
-cd app
-npm run build
-npm run e2e                                   # synthetic clips, ~5 min
-AMV_E2E_MEDIA="/path/to/Séries test" AMV_E2E_CAPTURES=/tmp/caps npm run e2e
-```
-
-The first run needs the SigLIP 2 and wd-tagger weights (~2 GB, Hugging Face cache).
-
-Create a local unsigned Windows installer:
-
-```bash
-cd app
-npm run build
-npm run build:electron:unsigned
-```
-
-The installer is written to `app/release/`. Release artifacts are ignored by
-Git; publish them through GitHub Releases instead of committing them.
-
-### Building For macOS
-
-macOS builds must be produced on macOS (electron-builder limitation). On a Mac:
-
-```bash
-# Get the uv binary the app bundles
-curl -LsSf https://astral.sh/uv/install.sh | sh
-mkdir -p .uv && cp "$(command -v uv)" .uv/uv
-
-cd app
-npm install
-npm run build
-npx cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac
-```
-
-Alternatively, the repository ships `.github/workflows/build.yml`, which builds
-Windows, macOS (arm64) and Linux (`AppImage` + `.deb`) artifacts on GitHub-hosted
-runners (trigger it from the Actions tab, or push a `v*` tag). Pushing a tag also
-creates a draft GitHub Release with all installers attached. `.github/workflows/ci.yml`
-runs the backend/frontend test suites on every push and pull request.
-
-## Rotoscope Notes
-
-> The roto workflow is **beta and disabled by default.** Enable it under
-> `Settings > Models`.
-
-Trim the clip in the mini editor first: the mask session follows the trim
-range. Shots of any length work — beyond 4 s they are tracked window by
-window with bounded memory.
-
-How the engines work (0.5, with the 0.6 character pick):
-
-- **Auto**: the detector (BiRefNet; ISNet anime on CPU) runs on every frame,
-  the *main character* (biggest, most central) or *all characters* are picked
-  on the clearest frame of each shot, and SAM 2.1 tracks them. Where the
-  track drifts away from what the detector sees, or after a hard cut, it
-  re-seeds itself. Only the detector components belonging to the tracked
-  character are kept, so a second character or a house that the detector
-  also found does not leak in.
-- **Character pick (SAM 3, NVIDIA)**: before tracking, the detector's matte is
-  kept only near what SAM 3 calls an "anime character" (an aura, a tractor
-  or a pillar the detector found salient is cut); after tracking, the matte
-  is hugged to SAM 3's outline (0.8 % of the frame diagonal), which removes
-  the background between the arms, under the chin and between hair spikes
-  while the detector still draws the hair and the ink line. A frame where SAM
-  3 sees nobody keeps the detector's matte. Off switch: `Character pick with
-  SAM 3` in `Settings > Models`.
-- **Held objects (Stable and max quality)**: the same SAM 3 pass looks for weapon,
-  sword, staff, halo, bowl, hammer and cup; an instance that touches a
-  character, that the detector sees as foreground, that does not glow (energy
-  beams and ki flames are effects) and that persists over neighbouring frames
-  is given back with the detector's outline. Off switch: `Keep held objects`.
-- **Manual**: a click selects the detected character under it (then tracked
-  like Auto); a box goes to SAM 2 as before. Without a GPU tier (CPU) clicks
-  go to SAM 2 directly.
-
-Correcting a matte:
-
-- `Brush +` / `Brush −` paint the matte of the current frame. The corrected
-  frame is pinned and becomes a keyframe of the tracker: **Re-propagate**
-  repairs the neighbouring frames too.
-- Scrub to any frame and click there — every clicked frame is a keyframe.
-- `Checkerboard` / `Color` show the actual cutout (with the export cleanup)
-  instead of the darkened overlay, which is how edge halos are judged.
-
-Useful settings:
-
-- `Auto model` / `SAM 2 variant`: *Auto* picks per memory tier (see the tier
-  table in `Settings > Models`). `toonout` and `anime` are alternative
-  detectors; on real episodes BiRefNet general measured best.
-- `Cutout mode`: *Stable* (default where the tier supports it, see above),
-  *Max quality* (tight outline: the least background, but it can eat edges
-  and props and lose a blurred character) or *Standard* (the first 0.6
-  pipeline).
-- `Clean edge colours at export` (on): matte exported as computed + edge
-  colour decontamination. The 0.4/0.5 guided-filter export painted a ring of
-  the old background around hair (background along the outline 4.0 % ->
-  9.2 % on the benchmark's simple shots); switching this off brings it back,
-  together with `Edge refine at export` / `BG-aware edge cleanup`, which only
-  apply then.
-- `Roto resolution`, `Temporal smoothing`, `RGB decontaminate export`,
-  `Soft-alpha BG cleanup`: unchanged since 0.4.
-
-What to expect (23 real shots, see `docs/reports/chantier-roto.md`): calm
-shots, dialogue, several characters, long hair and most fast action are
-usable as is or with a few brush strokes. Still weak: auras and energy
-effects (the detector keeps the glow), characters coming out of smoke, and a
-character glued to a background object (a tractor) — fix those with the
-brush or a box in Manual.
-
-Measuring it: `uv run python -m tests.eval.roto_eval --help` (extract shots,
-build and review reference masks, run a method, score, render boards). The
-synthetic benchmark of 0.4 is still there: `uv run python -m
-backend.finish.bench_mask`.
-
-## Repository Layout
-
-```text
-app/        Electron main process and React renderer (i18n in app/src/i18n)
-backend/    FastAPI sidecar, indexing pipeline, model wrappers, export tools
-assets/     Icons and screenshots used by the app and README
-```
-
-Runtime data, model caches, generated proxies, exports, local databases, and
-virtual environments are intentionally ignored by Git.
+> **Windows Smart App Control** (on by default on some Windows 11 machines)
+> blocks unsigned installers with no "Run anyway" option. If nothing happens
+> when you launch the installer, check `Windows Security › App & browser
+> control › Smart App Control`.
+
+More (NVIDIA drivers, clean reinstall, moving a library, logs): [docs/INSTALL.md](docs/INSTALL.md).
+
+### Requirements
+
+- Windows 10/11 64-bit, macOS 12+ on Apple Silicon, or a recent Linux x64
+  (Ubuntu 22.04+, Debian 12).
+- 16 GB RAM recommended (8 GB minimum), ~15 GB free disk.
+- GPU: NVIDIA RTX 20 or newer (driver ≥ 581 on Windows / 580 on Linux for
+  CUDA 13 and RTX 50), or Apple Silicon. AMD / Intel on Windows (DirectML) are
+  wired in but not validated. **CPU-only works**, just much slower.
+
+### Measured speed
+
+One 24-min 1080p episode, from start of indexing to searchable:
+
+| Machine | Time per episode |
+| --- | --- |
+| MacBook Pro M1 Pro 16 GB (macOS) | **~2 min** ([PERFORMANCE.md](docs/PERFORMANCE.md)) |
+| Windows 11 + RTX 3090 | **~2 min 15** ([report](docs/reports/windows-rtx3090.md)) |
+| Debian 12 + RTX 3090, VM with 6 vCPU (AppImage) | **~3 min 20** (197–201 s, two runs, Accurate profile, installed AppImage) |
+
+Honest caveat: these runs used real episodes but not strictly identical
+profiles or settings (Accurate profile, with or without the optional TransNetV2
+cut network, warm or cold caches); read the linked reports for the exact
+conditions. NVIDIA details: [docs/PERFORMANCE-NVIDIA.md](docs/PERFORMANCE-NVIDIA.md).
+
+### Known issues
+
+- Windows installer not signed (SmartScreen warning, see above).
+- Automatic Mask Mode is off by default; the cut-out editor is a beta.
+- Not verified yet: real import of the timelines in every NLE, RTX 50 cards,
+  AMD / Intel (DirectML), Linux on a real desktop (KDE / GNOME, Wayland), the
+  cut-out editor on Windows. Please report!
+- AppImage on Ubuntu 24.04: if it does not start (Chromium sandbox /
+  AppArmor), use the `.deb` or run it with `--no-sandbox`.
+
+## Models and licenses
+
+AMV Tools itself is **MIT**. Model weights are **never bundled**: they are
+downloaded on demand from their official source (license-checked, throttled,
+checksum-verified) and can be deleted at any time.
+
+- Search, tags and cuts: SigLIP 2 (Apache-2.0), wd-tagger v3 (Apache-2.0),
+  TransNetV2 (MIT / Apache-2.0 weights). Music analysis: librosa (ISC) and Beat
+  This! (MIT).
+- Finishing: Real-ESRGAN (BSD-3-Clause), RIFE (MIT), Video Depth Anything Small
+  (Apache-2.0), 2xHFA2kAVCCompact (CC-BY-4.0).
+- Cut-outs: BiRefNet (MIT), SAM 2.1 (Apache-2.0), SAM 3 (SAM License, gated:
+  your own Hugging Face token).
+- **Non-commercial models**: AnimeJaNai HD V3 (**CC-BY-NC-SA-4.0**, used by the
+  default upscale tiers) and Video Depth Anything Large (**CC-BY-NC-4.0**, *Max
+  quality* tier on NVIDIA) forbid commercial use; they are marked *non-commercial
+  use* in `Settings › Models`. If you use AMV Tools or its output commercially,
+  pick a permissive model instead (`Custom` tier, 2xHFA2kAVCCompact, Video Depth
+  Anything Small). MatAnyone (S-Lab, non-commercial) is not shipped.
+
+Full tables (sizes, tiers per GPU, licenses): [docs/MODELS.md](docs/MODELS.md).
 
 ## Privacy
 
-AMV Tools runs locally. Video files, thumbnails, embeddings, tags, settings,
-and exports stay on the user's machine unless they are explicitly moved or
-shared. Model weights may be downloaded from Hugging Face, PyTorch, or upstream
-model repositories during setup.
+AMV Tools runs locally. Your videos, thumbnails, embeddings, tags, settings and
+exports stay on your machine unless you move or share them yourself. The only
+downloads are the app engine and the model weights (PyTorch, Hugging Face and
+the models' upstream repositories). AMV Tools ships no media: it indexes the
+files you give it. The screenshots above use local test footage.
+
+## Build from source and contribute
+
+```bash
+uv sync --extra cpu          # or cu126 / cu130 / mps
+cd app && npm install
+npm run dev:electron
+```
+
+Tests, end-to-end UI journey, installers, macOS builds and the repository
+layout: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Releasing:
+[docs/RELEASING.md](docs/RELEASING.md). Contributing:
+[CONTRIBUTING.md](CONTRIBUTING.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Model weights keep their own licenses (above).

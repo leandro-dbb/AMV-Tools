@@ -11,7 +11,7 @@ cd app
 npm ci
 ```
 
-Node 20+ and Python 3.12/3.13 (managed by `uv`) are required. See the README
+Node 20+ and Python 3.12/3.13 (managed by `uv`) are required. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 for GPU extras and packaging.
 
 ## Checks before opening a PR
