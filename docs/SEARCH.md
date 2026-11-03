@@ -11,6 +11,8 @@ drop an image to search by visual reference.
 
 ![Semantic search results](../assets/screenshots/search.png)
 
+![Search filters](../assets/screenshots/search-filters.png)
+
 **Finer search (v0.4).** Every scene also gets a camera-motion label (static,
 pan left/right, tilt up/down, zoom in/out, shake) with a magnitude, an
 intensity score (motion, rapid sub-cuts, flashes, luminance swings) and a

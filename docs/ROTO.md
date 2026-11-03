@@ -97,7 +97,7 @@ detectors. **MatAnyone is not shipped**: its S-Lab 1.0 license is
 Mask Mode's MatAnyone engine uses it and your cutouts fall under that
 license.
 
-![Mask mode alpha export](../assets/screenshots/mask-mode.png)
+![Cut-out editor](../assets/screenshots/roto-editor.png)
 
 ## Rotoscope Notes
 
